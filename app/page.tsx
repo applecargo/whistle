@@ -10,7 +10,6 @@ import {
   uid,
   type World,
   type Asset,
-  type Placed,
   type Player,
   type Event,
   type Simulation,
@@ -23,22 +22,18 @@ import { useGameAudio } from "@/components/whistle/useGameAudio";
 import { editSound } from "@/lib/audio/game-parameters";
 import { useWorldPersistence } from "@/components/whistle/useWorldPersistence";
 import { useLiveWorldPublisher } from "@/components/whistle/useLiveWorldPublisher";
-import { WeatherControls } from "@/components/whistle/WeatherControls";
 import { EditorToolbar } from "@/components/whistle/EditorToolbar";
 import { EditorPalette } from "@/components/whistle/EditorPalette";
 import { EditorBoard } from "@/components/whistle/EditorBoard";
 import { PlayControls } from "@/components/whistle/PlayControls";
 import {
-  generateTerrain,
   tileAt,
   type Surface,
 } from "@/lib/terrain";
-import { ObjectArt } from "@/components/whistle/Art";
 import {
   Dialog,
   AssetMaker,
   ShareDialog,
-  SizeOptions,
 } from "@/components/whistle/Dialogs";
 const LazyScene = lazy(() => import("@/components/whistle/Scene"));
 function Scene(props: ComponentProps<typeof LazyScene>) {
@@ -47,8 +42,9 @@ function Scene(props: ComponentProps<typeof LazyScene>) {
 export default function Home() {
   const { t } = useLanguage();
   const initialWorld = useMemo(starterWorld, []);
-  const [selectedAsset, setSelectedAsset] = useState("circle"),
-    [selected, setSelected] = useState<string | null>(null),
+  const [selected, setSelected] = useState<string | null>(null),
+    [placingAsset, setPlacingAsset] = useState<string | null>(null),
+    [contentType, setContentType] = useState<"image" | "text">("image"),
     [placingStart, setPlacingStart] = useState(false);
   const [simulation, setSimulation] = useState<Simulation>(() =>
       createSimulation(initialWorld),
@@ -77,8 +73,7 @@ export default function Home() {
     };
   }, [playing]);
   const [movementMode, setMovementMode] = useState<"walk" | "crouch">("walk");
-  const [layer, setLayer] = useState<"tiles" | "symbols">("tiles"),
-    [surface, setSurface] = useState<Surface>("plain"),
+  const [surface, setSurface] = useState<Surface>("soft"),
     [terrainTool, setTerrainTool] = useState<TerrainTool>("surface");
   const simulationRef = useRef(simulation),
     player = useRef<Player>({ ...initialWorld.start, yaw: 0 }),
@@ -110,23 +105,33 @@ export default function Home() {
     () => deriveWorld(world, simulation.actors),
     [deriveWorld, world, simulation.actors],
   );
-  useEffect(() => {
-    if (!world.assets.some((a) => a.id === selectedAsset)) {
-      setSelectedAsset(world.assets[0]?.id ?? "");
-      setPlacingStart(false);
-    }
-  }, [world.assets, selectedAsset]);
+  const symbols = world.assets.filter(asset => asset.image || asset.text?.trim());
+  const activeAsset = symbols.find(asset => asset.id === placingAsset)?.id ?? null;
+  const createSymbol = (type: "image" | "text") => {
+    setPlacingStart(false); setSelected(null); setEditingAsset(undefined);
+    setContentType(type); setShowMaker(true);
+  };
+  const editSymbol = (asset: Asset, objectId: string | null = null) => {
+    setPlacingStart(false); setSelected(objectId);
+    const shared = objectId && world.objects.some(object => object.id !== objectId && object.asset === asset.id);
+    setEditingAsset({ ...asset, id: shared ? uid() : asset.id });
+    setContentType(asset.text !== undefined ? "text" : "image");
+    setShowMaker(true);
+  };
+  const openSymbolAt = (i: number) => {
+    const object = world.objects.find(object => object.x === i % world.size && object.z === Math.floor(i / world.size));
+    const asset = world.assets.find(asset => asset.id === object?.asset);
+    if (object && asset && (asset.image || asset.text?.trim())) editSymbol(asset, object.id);
+  };
   const handleLoad = useCallback((incoming: World, beforeUpgrade: World) => {
     audio.stop();
     loadDocument(incoming, beforeUpgrade);
-    setSelectedAsset(incoming.assets[0].id);
-    setSelected(null);
+    setSelected(null); setPlacingAsset(null); setShowMaker(false);
     setPlaying(false);
   }, [audio, loadDocument]);
   const handleImport = useCallback((imported: World) => {
     updateWorld(imported);
-    setSelectedAsset(imported.assets[0].id);
-    setSelected(null);
+    setSelected(null); setPlacingAsset(null); setShowMaker(false);
   }, [updateWorld]);
   const { ready, saveStatus, resumeAutosave, importFile: loadFile } = useWorldPersistence({
     world, onLoad: handleLoad, onImport: handleImport, notify,
@@ -209,33 +214,6 @@ export default function Home() {
       setPlacingStart(false);
       return;
     }
-    if (existing) {
-      change((w) => {
-        w.objects = w.objects.filter((o) => o.id !== existing.id);
-      });
-      setSelected(null);
-      return;
-    }
-    const asset = world.assets.find((a) => a.id === selectedAsset);
-    if (!asset) return;
-    if (world.objects.length >= 250) {
-      notify("최대 250개");
-      return;
-    }
-    if (asset.solid && x === world.start.x && z === world.start.z) {
-      notify("시작점이 막혀 있습니다.");
-      return;
-    }
-    change((w) => {
-      w.objects.push({
-        id: uid(),
-        asset: asset.id,
-        x,
-        z,
-        rotation: 0,
-        scale: asset.defaultScale ?? 1,
-      });
-    });
   };
   const paint = (cells: number[], erase: boolean) => {
     if (placingStart) {
@@ -244,54 +222,26 @@ export default function Home() {
       return;
     }
     const before = getWorld();
-    paintDocument(cells, erase, { layer, surface, terrainTool, selectedAsset });
+    paintDocument(cells, erase, { layer: activeAsset ? "symbols" : "tiles", assetId: activeAsset ?? undefined, surface, terrainTool });
     const after = getWorld();
     if (before !== after) {
       const sound = editSound(before, after, cells, deriveWorld(after));
       if (sound) audio.edit(sound);
     }
   };
-  const reroll = () =>
-    change((w) => {
-      w.terrain = generateTerrain(
-        w.size,
-        crypto.getRandomValues(new Uint32Array(1))[0],
-      );
-      w.terrain.tiles[w.start.z * w.size + w.start.x] = {
-        height: 0,
-        surface: "plain",
-      };
-    });
-  const selectedObject = world.objects.find((o) => o.id === selected),
-    chosenAsset = world.assets.find((a) => a.id === selectedObject?.asset);
-  const patchObject = (patch: Partial<Placed>) =>
-    change((w) => {
-      const o = w.objects.find((o) => o.id === selected);
-      if (o) Object.assign(o, patch);
-    });
   const saveAsset = (asset: Asset) => {
-    if (!editingAsset && world.assets.length >= 40) {
-      notify("첫 버전에서는 사물을 40종류까지 만들 수 있어요.");
-      return;
-    }
-    change((w) => {
-      const index = w.assets.findIndex((a) => a.id === asset.id);
-      if (
-        index >= 0 &&
-        (w.assets[index].defaultScale ?? 1) !== (asset.defaultScale ?? 1)
-      ) {
-        for (const object of w.objects) {
-          if (object.asset === asset.id) object.scale = asset.defaultScale ?? 1;
-        }
-      }
+    if (!asset.image || (contentType === "text" && !asset.text?.trim())) return;
+    change(w => {
+      const index = w.assets.findIndex(a => a.id === asset.id);
       if (index >= 0) w.assets[index] = asset;
       else w.assets.push(asset);
+      const object = w.objects.find(o => o.id === selected);
+      if (object) { object.asset = asset.id; object.scale = asset.defaultScale ?? 1; }
+      else if (editingAsset) {
+        for (const placed of w.objects) if (placed.asset === asset.id) placed.scale = asset.defaultScale ?? 1;
+      }
     });
-    setSelectedAsset(asset.id);
-    setLayer("symbols");
-    setPlacingStart(false);
-    setShowMaker(false);
-    setEditingAsset(undefined);
+    setShowMaker(false); setEditingAsset(undefined); setSelected(null); setPlacingAsset(asset.id);
   };
   const importFile = async (f?: File) => {
     if (!f) return;
@@ -305,8 +255,7 @@ export default function Home() {
     const next = createTerrainWorld();
     updateWorld(next);
     resumeAutosave();
-    setSelected(null);
-    setSelectedAsset(next.assets[0].id);
+    setSelected(null); setPlacingAsset(null); setPlacingStart(false);
     setNewDialog(false);
   };
   return (
@@ -352,60 +301,34 @@ export default function Home() {
       )}
         <div className="workspace" hidden={playing}>
           <EditorPalette
-            assets={world.assets}
-            weather={world.weather}
-            layer={layer}
-            surface={surface}
-            terrainTool={terrainTool}
-            selectedAsset={selectedAsset}
-            placingStart={placingStart}
-            onSelectLayer={(next) => {
-              setLayer(next);
-              setPlacingStart(false);
-            }}
-            onSelectSurface={(next) => {
-              setLayer("tiles");
-              setPlacingStart(false);
-              setSurface(next);
-              setTerrainTool("surface");
-            }}
-            onSelectTerrainTool={(next) => {
-              setLayer("tiles");
-              setPlacingStart(false);
-              setTerrainTool(next);
-            }}
-            onReroll={reroll}
-            onWeatherChange={(weather) => change((w) => { w.weather = weather; })}
-            onEditAsset={(asset) => {
-              setLayer("symbols");
-              setSelectedAsset(asset.id);
-              setSelected(null);
-              setPlacingStart(false);
-              setEditingAsset(asset);
-              setShowMaker(true);
-            }}
-            onToggleStart={() => {
-              setLayer("symbols");
-              setPlacingStart(!placingStart);
-            }}
+            weather={world.weather} timeOfDay={world.timeOfDay} surface={surface} terrainTool={terrainTool} placingStart={placingStart}
+            symbols={symbols} selectedSymbol={activeAsset ?? undefined}
+            onSelectSurface={next => { setPlacingStart(false); setPlacingAsset(null); setSurface(next); setTerrainTool("surface"); }}
+            onSelectTerrainTool={next => { setPlacingStart(false); setPlacingAsset(null); setTerrainTool(next); }}
+            onTimeOfDayChange={timeOfDay => change(w => { w.timeOfDay = timeOfDay; })}
+            onWeatherChange={weather => change(w => { w.weather = weather; })}
+            onCreateSymbol={createSymbol}
+            onSelectSymbol={id => { setPlacingStart(false); setPlacingAsset(activeAsset === id ? null : id); }}
+            onEditSymbol={id => { const asset = world.assets.find(asset => asset.id === id); if (asset) editSymbol(asset); }}
+            onToggleStart={() => { setPlacingAsset(null); setPlacingStart(!placingStart); }}
           />
           <EditorBoard
             world={world}
             actors={simulation.actors}
             derivation={derivation}
             feedback={feedback}
-            canHold={layer === "symbols" && !placingStart}
+            placingAsset={activeAsset}
+            onOpenSymbol={openSymbolAt}
+            placingStart={placingStart}
+            canHold={!placingStart}
             canUndo={canUndo}
             canRedo={canRedo}
             onPaint={paint}
             onEnd={endStroke}
-            onSelectObject={setSelected}
             onUndo={undo}
             onRedo={redo}
           />
           <aside className="preview-panel" aria-label={t("배치 결과")}>
-            <WeatherControls className="weather-mobile" value={world.weather}
-              onChange={(weather) => change((w) => { w.weather = weather; })} />
             <div className="live-preview">
               {!playing && <Scene
                 world={world}
@@ -427,45 +350,14 @@ export default function Home() {
         hidden
         onChange={(e) => void importFile(e.target.files?.[0])}
       />
-      {selectedObject && chosenAsset && !showMaker && (
-        <Dialog title={chosenAsset.name} onClose={() => setSelected(null)}>
-          <div className="placement-settings">
-            <button
-              className="asset-link"
-              onClick={() => {
-                setEditingAsset(chosenAsset);
-                setShowMaker(true);
-              }}
-            >
-              {chosenAsset.image ? (
-                <img src={chosenAsset.image} alt="" />
-              ) : (
-                <ObjectArt asset={chosenAsset} />
-              )}
-              {t("이미지")}
-            </button>
-            <button
-              aria-label={t("회전")}
-              onClick={() =>
-                patchObject({ rotation: (selectedObject.rotation + 90) % 360 })
-              }
-            >
-              ↻ {selectedObject.rotation}°
-            </button>
-            <SizeOptions
-              value={selectedObject.scale}
-              onChange={(scale) => patchObject({ scale })}
-            />
-          </div>
-        </Dialog>
-      )}
       {showMaker && (
         <AssetMaker
           asset={editingAsset}
+          contentType={contentType}
           onSave={saveAsset}
           onClose={() => {
             setShowMaker(false);
-            setEditingAsset(undefined);
+            setEditingAsset(undefined); setSelected(null);
           }}
         />
       )}

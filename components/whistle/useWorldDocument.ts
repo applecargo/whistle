@@ -8,9 +8,9 @@ import { placementChanges, type PlacementFeedback } from "@/lib/placement-feedba
 
 type PaintOptions = {
   layer: "tiles" | "symbols";
+  assetId?: string;
   surface: Surface;
   terrainTool: TerrainTool;
-  selectedAsset: string;
 };
 
 export function useWorldDocument(initialWorld: World, onChange: (world: World) => void) {
@@ -83,7 +83,8 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
   }, [applyWorld, revealChanges]);
 
   const paint = useCallback((cells: number[], erase: boolean, options: PaintOptions) => {
-    const { layer, surface, terrainTool, selectedAsset } = options;
+    const { layer, assetId, surface, terrainTool } = options;
+    if (layer === "symbols" && !worldRef.current.assets.some(asset => asset.id === assetId)) return;
     const first = !strokeBase.current;
     if (first) strokeBase.current = clone(worldRef.current);
     const next = clone(strokeBase.current!);
@@ -94,23 +95,13 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
           continue;
         next.terrain.tiles[i] = editTile(next.terrain.tiles[i], terrainTool, surface);
       }
-    } else {
-      const asset = next.assets.find((a) => a.id === selectedAsset);
-      if (!asset) return;
+    }
+    if (layer === "symbols") {
+      const asset = next.assets.find(asset => asset.id === assetId)!;
       for (const i of cells) {
-        const x = i % next.size,
-          z = Math.floor(i / next.size);
-        if (erase)
-          next.objects = next.objects.filter((o) => o.x !== x || o.z !== z);
-        else if (
-          next.objects.length < 250 &&
-          !next.objects.some((o) => o.x === x && o.z === z) &&
-          !(asset.solid && x === next.start.x && z === next.start.z)
-        )
-          next.objects.push({
-            id: uid(), asset: asset.id, x, z,
-            rotation: 0, scale: asset.defaultScale ?? 1,
-          });
+        const x = i % next.size, z = Math.floor(i / next.size);
+        next.objects = next.objects.filter(object => object.x !== x || object.z !== z || (erase && object.asset !== asset.id));
+        if (!erase) next.objects.push({ id: uid(), asset: asset.id, x, z, rotation: 0, scale: asset.defaultScale ?? 1 });
       }
     }
     if (samePlacement(worldRef.current, next)) {

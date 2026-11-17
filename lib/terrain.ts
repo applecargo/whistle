@@ -24,10 +24,10 @@ export const SURFACES: {
   color: string;
   speed: number;
 }[] = [
-  { id: "plain", name: "단단한 바닥", color: "#ffffff", speed: 1 },
-  { id: "rough", name: "거친 바닥", color: "#ffffff", speed: 0.72 },
-  { id: "slick", name: "미끄러운 바닥", color: "#ffffff", speed: 1.2 },
-  { id: "soft", name: "부드러운 바닥", color: "#ffffff", speed: 0.62 },
+  { id: "plain", name: "빈 타일", color: "#ffffff", speed: 1 },
+  { id: "rough", name: "거침", color: "#ffffff", speed: 0.72 },
+  { id: "slick", name: "흐름", color: "#ffffff", speed: 1.2 },
+  { id: "soft", name: "번짐", color: "#ffffff", speed: 0.62 },
 ];
 export const LEVEL = 1.05;
 export function randomSequence(seed: number) {
@@ -226,6 +226,7 @@ export function terrainSample(
   world: Pick<World, "size" | "terrain">,
   x: number,
   z: number,
+  carve = true,
 ) {
   const smooth = (t: number) => t * t * (3 - 2 * t);
   const fx = Math.floor(x),
@@ -276,19 +277,22 @@ export function terrainSample(
   const variation =
     Math.sin(x * 2.31 + z * 1.17) * Math.sin(z * 3.13 - x * 0.73);
   elevation += variation * 0.045 * (weights.soft + weights.rough);
-  elevation = carveWaterBed(world, x, z, elevation, LEVEL);
+  let naturalHeight = elevation;
+  if (carve) elevation = carveWaterBed(world, x, z, elevation, LEVEL);
 
 
   const outside = Math.max(0, -0.5 - x, -0.5 - z, x - (world.size - 0.5), z - (world.size - 0.5));
   if (outside > 0) {
     const reach = 5.5 + 1.2 * Math.sin(x * .43 + z * .31);
     const fade = smooth(Math.min(1, outside / reach));
-    elevation = elevation * (1 - fade)
-      + Math.sin(x * .61 + z * .27) * Math.cos(z * .49 - x * .19) * .45 * fade * (1 - fade);
+    const relief = Math.sin(x * .61 + z * .27) * Math.cos(z * .49 - x * .19) * .45 * fade * (1 - fade);
+    elevation = elevation * (1 - fade) + relief;
+    naturalHeight = naturalHeight * (1 - fade) + relief;
     voidAmount *= 1 - smooth(Math.min(1, outside / 1.5));
   }
   return {
     height: elevation,
+    naturalHeight,
     coverage: Math.max(0, Math.min(1, 1 - voidAmount)),
     weights,
   };

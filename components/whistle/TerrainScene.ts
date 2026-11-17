@@ -1,11 +1,13 @@
+import { waterWeights, waterSupport, WATER_INSET } from "../../lib/water.ts";
 import { isHole } from "../../lib/tile.ts";
 import * as THREE from "three";
-import { deriveEnvironment, environmentAt, type Environment } from "../../lib/environment.ts";
+import { deriveEnvironment, type Environment } from "../../lib/environment.ts";
 import { makeEnvironment } from "./EnvironmentScene.ts";
-import { makeGrass } from "./Grass.ts";
+import { makeWindField } from "./WindField.ts";
+import { makeStoneSurfaces } from "./StoneSurfaces.ts";
+import { stoneGeometry, STONE_SHAPES } from "./StoneGeometry.ts";
 import { stoneAppearance } from "../../lib/stones.ts";
-import { wetGround } from "../../lib/environment-effects.ts";
-import type { World } from "@/lib/world";
+import type { Actor, Asset, World, Weather } from "@/lib/world";
 import {
   LEVEL,
   randomSequence,
@@ -34,7 +36,8 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
   const positions: number[] = [],
     colors: number[] = [],
     indices: number[] = [],
-    coverage: number[] = [];
+    coverage: number[] = [],
+    wetness: number[] = [], natural: number[] = [];
   const sampleColor = new THREE.Color();
   for (let z = 0; z <= resolution; z++)
     for (let x = 0; x <= resolution; x++) {
@@ -43,22 +46,12 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
         sample = terrainSample(world, gx, gz);
       positions.push(toScene(gx), sample.height, toScene(gz));
       coverage.push(sample.coverage);
-      sampleColor.setRGB(0, 0, 0);
-      for (const name of ["plain", "rough", "slick", "soft"] as const) {
-        sampleColor.r += palette[name].r * sample.weights[name];
-        sampleColor.g += palette[name].g * sample.weights[name];
-        sampleColor.b += palette[name].b * sample.weights[name];
-      }
-      const grain =
-        1 +
-        Math.sin(gx * 7.3 + gz * 2.1) *
-          Math.sin(gz * 6.2 - gx) *
-          0.018 *
-          (sample.weights.rough + sample.weights.soft);
-      sampleColor.multiplyScalar(
-        grain * (0.55 + 0.45 * environmentAt(environment, gx, gz).light)
-          * (1 - wetGround(environment, gx, gz, sample.height) * .32),
-      );
+      natural.push(sample.naturalHeight);
+      let wet = 0;
+      if (environment.ponds.length) for (const [level, weight] of waterWeights(world.size, gx, gz, i => environment.cells[i].water, i => environment.cells[i].hole))
+        wet = Math.max(wet, weight * waterSupport(sample.naturalHeight, level + WATER_INSET));
+      wetness.push(wet);
+      sampleColor.setRGB(1, 1, 1);
       colors.push(sampleColor.r, sampleColor.g, sampleColor.b);
     }
 
@@ -144,15 +137,47 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
       edge(z, x);
     }
   };
-  for (let z = 0; z < resolution; z++)
-    for (let x = 0; x < resolution; x++) {
-      const a = z * stride + x,
-        b = a + 1,
-        c = a + stride,
-        d = c + 1;
-      triangle(a, c, b);
-      triangle(b, c, d);
+  // Resolve narrow banks only where a water boundary crosses an elevation slope.
+  const detailed = new Set<number>();
+  for (let z = 0; z < resolution; z++) for (let x = 0; x < resolution; x++) {
+    const a = z * stride + x, corners = [a, a + 1, a + stride, a + stride + 1];
+    const wet = corners.map(i => wetness[i]), heights = corners.map(i => natural[i]);
+    if (Math.max(...wet) > .05 && Math.min(...wet) < .98 && Math.max(...heights) - Math.min(...heights) > .025)
+      detailed.add(z * resolution + x);
+  }
+  const refined = new Map<string, number>();
+  const vertex = (x: number, z: number) => {
+    if (Number.isInteger(x) && Number.isInteger(z)) return z * stride + x;
+    const key = `${x}:${z}`, found = refined.get(key);
+    if (found !== undefined) return found;
+    const gx = x / 12 - 2, gz = z / 12 - 2, sample = terrainSample(world, gx, gz), i = coverage.length;
+    positions.push(toScene(gx), sample.height, toScene(gz)); colors.push(1, 1, 1); coverage.push(sample.coverage);
+    refined.set(key, i); return i;
+  };
+  const fine = (x: number, z: number) => x >= 0 && z >= 0 && x < resolution && z < resolution && detailed.has(z * resolution + x);
+  const subdivisions = 4;
+  for (let z = 0; z < resolution; z++) for (let x = 0; x < resolution; x++) {
+    if (fine(x, z)) {
+      for (let iz = 0; iz < subdivisions; iz++) for (let ix = 0; ix < subdivisions; ix++) {
+        const xx = x + ix / subdivisions, zz = z + iz / subdivisions, step = 1 / subdivisions;
+        const a = vertex(xx, zz), b = vertex(xx + step, zz), c = vertex(xx, zz + step), d = vertex(xx + step, zz + step);
+        triangle(a, c, b); triangle(b, c, d);
+      }
+    } else if (fine(x - 1, z) || fine(x + 1, z) || fine(x, z - 1) || fine(x, z + 1)) {
+      // Share boundary vertices with finer neighbours instead of leaving cracks.
+      const ring: number[] = [];
+      for (const [ax, az, bx, bz, split] of [[x,z,x,z+1,fine(x-1,z)], [x,z+1,x+1,z+1,fine(x,z+1)],
+        [x+1,z+1,x+1,z,fine(x+1,z)], [x+1,z,x,z,fine(x,z-1)]] as [number,number,number,number,boolean][]) {
+        const steps = split ? subdivisions : 1;
+        for (let k = 0; k < steps; k++) ring.push(vertex(ax + (bx-ax)*k/steps, az + (bz-az)*k/steps));
+      }
+      const center = vertex(x + .5, z + .5);
+      for (let k = 0; k < ring.length; k++) triangle(center, ring[k], ring[(k+1)%ring.length]);
+    } else {
+      const a = z * stride + x;
+      triangle(a, a + stride, a + 1); triangle(a + 1, a + stride, a + stride + 1);
     }
+  }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
     "position",
@@ -420,7 +445,7 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
         Math.abs(z - (s.z + s.dz * 0.5)) < 0.55,
     );
     if (onStairs) continue;
-    if (sample.weights.rough > 0.5 && random() < 0.0125 && pebbles.length < 300)
+    if (sample.weights.rough > 0.5 && random() < 0.035 && pebbles.length < 900)
       pebbles.push({
         x: toScene(x),
         y: sample.height,
@@ -429,16 +454,6 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
       });
   }
   if (pebbles.length) {
-    const rockGeometry = new THREE.SphereGeometry(1, 24, 16),
-      rockPositions = rockGeometry.getAttribute("position");
-    for (let i = 0; i < rockPositions.count; i++) {
-      const x = rockPositions.getX(i),
-        y = rockPositions.getY(i),
-        z = rockPositions.getZ(i);
-      const f = 1 + Math.sin(x * 5 + z * 3) * 0.14;
-      rockPositions.setXYZ(i, x * f, y * 0.65, z * f);
-    }
-    rockGeometry.computeVertexNormals();
     const grainData = new Uint8Array(64 * 64 * 4);
     for (let i = 0; i < 64 * 64; i++) {
       const value = 150 + Math.floor(random() * 105);
@@ -454,8 +469,6 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
     stoneGrain.magFilter = THREE.LinearFilter;
     stoneGrain.minFilter = THREE.LinearFilter;
     stoneGrain.needsUpdate = true;
-    const stoneVariants = new Float32Array(pebbles.length * 3);
-    rockGeometry.setAttribute("stoneVariant", new THREE.InstancedBufferAttribute(stoneVariants, 3));
     const stoneMaterial = new THREE.MeshStandardMaterial({
       color: "#ffffff", roughness: 0.92, bumpMap: stoneGrain, bumpScale: 0.018,
     });
@@ -485,32 +498,60 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
         diffuseColor.rgb *= tone;
       `);
     };
-    const rocks = new THREE.InstancedMesh(rockGeometry, stoneMaterial, pebbles.length);
-    pebbles.forEach((r, i) => {
-      const a = r.appearance;
-      stoneVariants.set([a.texture, a.grain, a.offset], i * 3);
-      rocks.setColorAt(i, new THREE.Color(a.color));
-      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), a.angle);
-      matrix.compose(
-        p.set(r.x, r.y + a.size * a.height * 0.25, r.z),
-        q,
-        scale.set(a.size, a.size * a.height, a.size * a.depth),
-      );
-      rocks.setMatrixAt(i, matrix);
-    });
-    rocks.name = "scattered-stones";
-    rocks.castShadow = rocks.receiveShadow = true;
-    group.add(rocks);
+    const stoneCompile = stoneMaterial.onBeforeCompile;
+    stoneMaterial.onBeforeCompile = (shader, renderer) => {
+      stoneCompile.call(stoneMaterial, shader, renderer);
+      shader.fragmentShader = shader.fragmentShader.replace("#include <roughnessmap_fragment>", `#include <roughnessmap_fragment>
+        roughnessFactor = clamp(.86 + vStoneVariant.x*.035 + (grain-.5)*.04, .8, 1.);
+      `);
+    };
+    for (let shape = 0; shape < STONE_SHAPES.length; shape++) {
+      const batch = pebbles.filter(r => r.appearance.shape === shape);
+      if (!batch.length) continue;
+      const rockGeometry = stoneGeometry(shape);
+      const stoneVariants = new Float32Array(batch.length * 3);
+      rockGeometry.setAttribute("stoneVariant", new THREE.InstancedBufferAttribute(stoneVariants, 3));
+      const rocks = new THREE.InstancedMesh(rockGeometry, stoneMaterial, batch.length);
+      batch.forEach((r, i) => {
+        const a = r.appearance;
+        stoneVariants.set([a.texture, a.grain, a.offset], i * 3);
+        const stoneColor = new THREE.Color(a.color);
+        stoneColor.setScalar(stoneColor.r * .2126 + stoneColor.g * .7152 + stoneColor.b * .0722);
+        rocks.setColorAt(i, stoneColor);
+        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), a.angle);
+        matrix.compose(
+          p.set(r.x, r.y + a.size * a.height * .25, r.z),
+          q,
+          scale.set(a.size, a.size * a.height, a.size * a.depth),
+        );
+        rocks.setMatrixAt(i, matrix);
+      });
+      rocks.name = "scattered-stones";
+      rocks.castShadow = rocks.receiveShadow = true;
+      group.add(rocks);
+    }
   }
-  group.add(makeGrass(world, structures, geometry, wind, environment));
-  const generated = makeEnvironment(world, environment, wind);
+  const stoneSurfaces = makeStoneSurfaces(world, group.children.filter(child => child.name === "scattered-stones") as THREE.InstancedMesh[]);
+  group.add(stoneSurfaces.group);
+  const paperField = makeWindField(world, structures, environment, geometry);
+  group.add(paperField.group);
+  const generated = makeEnvironment(world, environment, wind, geometry);
   group.add(generated.group);
   return {
     group,
     environment,
-    update: (time: number, camera?: THREE.Camera, mistColor?: THREE.Color) => {
+    setSurfaceImages: (actors: Actor[], assets: Asset[]) => {
+      const treeImages = generated.setSurfaceImages(actors, assets);
+      const rest = actors.filter(actor => !treeImages.has(actor.id));
+      stoneSurfaces.setSurfaceImages(rest, assets);
+      paperField.setSurfaceImages(rest, assets);
+      return treeImages;
+    },
+    update: (time: number, camera?: THREE.Camera, mistColor?: THREE.Color, reducedMotion = false, weather: Weather = "clear", daylight = 1) => {
       wind.value = time / 1000;
-      generated.update(time, camera, mistColor);
+      paperField.wind.time.value = time / 1000;
+      paperField.wind.strength.value = reducedMotion ? 0 : 1;
+      generated.update(time, camera, mistColor, reducedMotion, weather, daylight);
     },
   };
 }

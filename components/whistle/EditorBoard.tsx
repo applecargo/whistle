@@ -6,7 +6,7 @@ import { tileAt, SURFACES } from "@/lib/terrain";
 import { isHole } from "@/lib/tile";
 import { PaintGrid } from "./PaintGrid";
 import { EnvironmentTile, environmentTileKind } from "./EnvironmentTile";
-import { ObjectArt } from "./Art";
+import { SiteGlyph } from "./SiteGlyph";
 import { useLanguage } from "./Language";
 
 type Props = {
@@ -19,14 +19,16 @@ type Props = {
   canRedo: boolean;
   onPaint: (cells: number[], erase: boolean) => void;
   onEnd: () => void;
-  onSelectObject: (id: string | null) => void;
+  placingAsset: string | null;
+  placingStart: boolean;
+  onOpenSymbol: (index: number) => void;
   onUndo: () => void;
   onRedo: () => void;
 };
 
 export function EditorBoard({
   world, actors, derivation, feedback, canHold, canUndo, canRedo,
-  onPaint, onEnd, onSelectObject, onUndo, onRedo,
+  onPaint, onEnd, placingAsset, placingStart, onOpenSymbol, onUndo, onRedo,
 }: Props) {
   const { t } = useLanguage();
   const { structures, environment } = derivation;
@@ -39,6 +41,9 @@ export function EditorBoard({
       c.fog > 0.05 ? t("안개") : "",
       Math.hypot(c.windX, c.windZ) > 0.1 ? t("바람") : "",
       c.light < 0.7 ? t("그늘") : "",
+      c.rain ? t("비") : "", c.dust ? t("먼지") : "",
+      c.bounce ? t("튕기기") : "", c.focus ? t("집중광") : "",
+      c.lift ? t("부유") : "", c.glide ? t("활공") : "",
     ]
       .filter(Boolean)
       .join(" · ");
@@ -52,21 +57,13 @@ export function EditorBoard({
             world.objects.some(
               (o) =>
                 o.x === i % world.size &&
-                o.z === Math.floor(i / world.size),
+                o.z === Math.floor(i / world.size) && (!placingAsset || o.asset === placingAsset),
             )
           }
           canHold={canHold}
           onPaint={onPaint}
           onEnd={onEnd}
-          onHold={(i) =>
-            onSelectObject(
-              world.objects.find(
-                (o) =>
-                  o.x === i % world.size &&
-                  o.z === Math.floor(i / world.size),
-              )?.id ?? null,
-            )
-          }
+          onHold={onOpenSymbol}
           cellClass={(i) => {
             const tile = tileAt(
               world,
@@ -83,16 +80,17 @@ export function EditorBoard({
             const object = world.objects.find(
               (o) => o.x === x && o.z === z,
             );
-            return `${String.fromCharCode(65 + x)}${z + 1} ${isHole(tile) ? t("빈틈") : `${t("높이")} ${tile.height} ${t(SURFACES.find((s) => s.id === tile.surface)!.name)}`}${object ? " " + world.assets.find((a) => a.id === object.asset)?.name : ""}${x === world.start.x && z === world.start.z ? " " + t("시작점") : ""} ${environmentLabels(i)}`;
+            return `${String.fromCharCode(65 + x)}${z + 1} ${isHole(tile) ? t("꺼짐") : `${t("높이")} ${tile.height} ${t(SURFACES.find((s) => s.id === tile.surface)!.name)}`}${object ? " " + world.assets.find((a) => a.id === object.asset)?.name : ""}${x === world.start.x && z === world.start.z ? " " + t("시작점") : ""} ${environmentLabels(i)}`;
           }}
           renderCell={(i) => {
             const x = i % world.size,
               z = Math.floor(i / world.size),
               tile = tileAt(world, x, z)!;
             const actor = actors.find(
-              (a) => a.x === x && a.z === z && !a.removed,
+              (a) => a.x === x && a.z === z && !a.removed && world.assets.some(asset => asset.id === a.asset && (asset.image || asset.text?.trim())),
             );
             const asset = world.assets.find((a) => a.id === actor?.asset);
+            const kind = asset?.text !== undefined ? "peak" : "cluster";
             const generated = structures.filter(
               (t) => t.x === x && t.z === z,
             );
@@ -124,14 +122,11 @@ export function EditorBoard({
                     }
                   />
                 ))}
-                {asset && actor && (
-                  <span
-                    className="placed-art"
-                    style={{
-                      transform: `rotate(${actor.rotation}deg) scale(${actor.scale})`,
-                    }}
-                  >
-                    <ObjectArt asset={asset} />
+                {(asset && actor) && (
+                  <span className="generated-site" data-symbol-site={actor?.id}
+                    onPointerDown={e => { if (!placingStart && !placingAsset) e.stopPropagation(); }}
+                    onClick={e => { if (!placingStart && !placingAsset) { e.stopPropagation(); onOpenSymbol(i); } }}>
+                    <SiteGlyph kind={kind} filled={!!asset?.image || !!asset?.text?.trim()} seed={`${kind}:${x}:${z}`} />
                   </span>
                 )}
                 {!!actor?.marks.length && (

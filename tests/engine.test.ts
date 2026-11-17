@@ -661,12 +661,13 @@ test("run and crouch change speed without changing turning sensitivity", () => {
 
 test("text objects retain editable content and size across world sharing", () => {
   const world = starterWorld();
-  world.assets[0].text = "안녕\nWhistle";
+  const content = "  안녕\nWhistle 😀\n".repeat(700).slice(0, 10_000);
+  world.assets[0].text = content;
   world.assets[0].defaultScale = 3;
   const restored = validateWorld(JSON.parse(JSON.stringify(world)));
-  assert.equal(restored.assets[0].text, "안녕\nWhistle");
+  assert.equal(restored.assets[0].text, content);
   assert.equal(restored.assets[0].defaultScale, 3);
-  for (const invalid of [" ", "a".repeat(501), 42]) {
+  for (const invalid of [" ", "a".repeat(10_001), 42]) {
     const malformed = JSON.parse(JSON.stringify(world));
     malformed.assets[0].text = invalid;
     assert.throws(() => validateWorld(malformed));
@@ -760,4 +761,25 @@ test("terrain permits one-level routes but blocks steep edges in either directio
   const bridge = {kind: "bridge" as const, x:2,z:3,height:1,dx:1,dz:0,key:"bridge:2:3"};
   w.terrain.tiles[3*w.size+2].hole = true;
   assert.equal(blocksTerrainStep(w, {x:1.49,z:3}, {x:1.51,z:3}, [bridge]), false);
+});
+
+test("environment flights prioritize lift, release gliding and land without chaining states", async () => {
+  const { environmentalFlight, stepEnvironmentalFlight } = await import("../lib/environment-motion.ts");
+  const normal = { lift: 0, liftCeiling: 0, glideHeld: false, crouching: false };
+  const bounce = environmentalFlight("bounce", 0);
+  let state = bounce, landed = false;
+  for (let i = 0; i < 180; i++) {
+    const result = stepEnvironmentalFlight(state, 1 / 60, 0, normal);
+    state = result.flight;
+    if (result.landed) { landed = true; break; }
+  }
+  assert.equal(landed, true); assert.equal(state.y, 0);
+  const glide = environmentalFlight("glide", 3, 0, 2, -2);
+  assert.ok(stepEnvironmentalFlight(glide, .1, null, { ...normal, glideHeld: true }).flight.vy >= -.7);
+  assert.ok(stepEnvironmentalFlight(glide, .1, null, normal).flight.vy < -2);
+  state = environmentalFlight("glide", 1, 0, 0, -1);
+  for (let i = 0; i < 300; i++) state = stepEnvironmentalFlight(state, 1 / 60, null, { ...normal, lift: .65, liftCeiling: 2 }).flight;
+  assert.equal(state.mode, "float"); assert.ok(Math.abs(state.y - 2) < .03);
+  const released = stepEnvironmentalFlight(state, .1, null, { ...normal, lift: .65, liftCeiling: 2, crouching: true });
+  assert.ok(released.flight.y < state.y);
 });

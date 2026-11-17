@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { cropBounds, eraseBackground } from "@/lib/image-edit";
+import { optimizedImage } from "@/lib/image-export";
 
 const SIZE = 256;
 type Point = { x: number; y: number };
@@ -76,6 +77,7 @@ export const ImageEditor = forwardRef<
       ratio = Math.min(SIZE / width, SIZE / height);
     ctx.globalCompositeOperation = "source-over";
     ctx.clearRect(0, 0, SIZE, SIZE);
+    ctx.imageSmoothingQuality = "high";
     ctx.drawImage(
       im,
       (SIZE - width * ratio) / 2,
@@ -145,7 +147,7 @@ export const ImageEditor = forwardRef<
       const pixels = context().getImageData(0, 0, SIZE, SIZE).data;
       if (!pixels.some((value, i) => i % 4 === 3 && value > 0))
         throw Error("사진이나 그림을 추가하세요.");
-      const image = canvas.current!.toDataURL("image/png");
+      const image = optimizedImage(canvas.current!);
       return {
         image,
         originalImage:
@@ -176,7 +178,7 @@ export const ImageEditor = forwardRef<
       if (!alive.current) return;
       remember();
       fit(im, im.width, im.height);
-      original.current = canvas.current!.toDataURL("image/png");
+      original.current = optimizedImage(canvas.current!);
       ready.current = true;
       setCrop(null);
       setTool("crop");

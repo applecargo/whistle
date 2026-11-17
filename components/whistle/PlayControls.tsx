@@ -84,8 +84,12 @@ export function PlayControls({
         <button aria-label={t("점프")}
           onPointerDown={(e) => {
             e.preventDefault();
-            if (!player.current.falling) controls.current.add("jump");
+            e.currentTarget.setPointerCapture(e.pointerId);
+            if (!player.current.falling) { controls.current.add("jump"); controls.current.add("jump-held"); }
           }}
+          onPointerUp={() => controls.current.delete("jump-held")}
+          onPointerCancel={() => controls.current.delete("jump-held")}
+          onLostPointerCapture={() => controls.current.delete("jump-held")}
           onClick={(e) => {
             if (e.detail === 0 && !player.current.falling) controls.current.add("jump");
           }}>

@@ -13,17 +13,9 @@ export function isWaterTile(world: Ground, x: number, z: number) {
       : world.terrain?.tiles[b * world.size + a];
   const wet = (a: number, b: number) => {
     const t = tile(a, b);
-    return !!t && !isHole(t) && t.height >= -1 && t.height <= 0 && t.surface === "slick";
+    return !!t && !isHole(t) && t.surface === "slick";
   };
-  return (
-    wet(x, z) &&
-    [
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
-    ].some(([dx, dz]) => wet(x + dx, z + dz))
-  );
+  return wet(x, z);
 }
 export function waterWeights(
   size: number,
@@ -32,8 +24,6 @@ export function waterWeights(
   level: (i: number) => number | null,
   hole?: (i: number) => boolean,
 ) {
-
-
   const px = x + .18 * Math.sin(z * 1.37 + x * .43) + .09 * Math.sin(z * 3.1 - x * .71);
   const pz = z + .18 * Math.sin(x * 1.19 - z * .37) + .09 * Math.cos(x * 2.7 + z * .83);
   const radius = 1.18;
@@ -42,22 +32,16 @@ export function waterWeights(
     for (let xx = Math.max(0, Math.ceil(px - radius)); xx <= Math.min(size - 1, Math.floor(px + radius)); xx++) {
       const q = 1 - ((px - xx) ** 2 + (pz - zz) ** 2) / (radius * radius);
       if (q <= 0) continue;
+      if (hole?.(zz * size + xx)) continue;
       const h = level(zz * size + xx);
       if (h !== null) {
         weights.set(h, Math.min(1, (weights.get(h) ?? 0) + q * q * q));
-
-
-        if (hole) for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-          const hx = xx + dx, hz = zz + dz;
-          if (hx < 0 || hz < 0 || hx >= size || hz >= size || !hole(hz * size + hx)) continue;
-          const along = (x - xx) * dx + (z - zz) * dz;
-          const across = (x - xx) * dz - (z - zz) * dx;
-          const channel = smooth(1 - ((along - .4) / .7) ** 2 - (across / .3) ** 2);
-          weights.set(h, Math.max(weights.get(h) ?? 0, channel));
-        }
       }
     }
   return weights;
+}
+export function waterSupport(ground: number, bankHeight: number) {
+  return smooth(1 - Math.abs(ground - bankHeight) / .45);
 }
 export function waterLevelAt(
   size: number,
@@ -65,8 +49,9 @@ export function waterLevelAt(
   z: number,
   level: (i: number) => number | null,
   hole?: (i: number) => boolean,
+  ground?: number,
 ) {
-  for (const [h, w] of waterWeights(size, x, z, level, hole)) if (w > 0.8) return h;
+  for (const [h, w] of waterWeights(size, x, z, level, hole)) if (w * (ground === undefined ? 1 : waterSupport(ground, h + WATER_INSET)) > 0.8) return h;
   return null;
 }
 
@@ -83,11 +68,12 @@ export function carveWaterBed(
       : null,
     (i) => isHole(world.terrain?.tiles[i]),
   );
-  for (const [h, w] of weights) {
-    if (w <= 0.25) continue;
+  for (const [h, weight] of weights) {
+    const w = weight * waterSupport(ground, h * unit);
+    if (w <= 0.05) continue;
 
-
-    const bankBlend = smooth((w - 0.25) / 0.35);
+    // Leave a broad, dry rim before the bed drops below the surface.
+    const bankBlend = smooth((w - 0.05) / 0.2);
 
     const bed = h * unit - 0.32 * smooth((w - 0.72) / 0.28)
       - 0.48 * smooth((w - 0.84) / 0.16);

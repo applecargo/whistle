@@ -1,11 +1,13 @@
+import type { TimeOfDay } from "./world.ts";
+
 const smooth = (low: number, high: number, value: number) => {
   const t = Math.max(0, Math.min(1, (value - low) / (high - low)));
   return t * t * (3 - 2 * t);
 };
 
 
-export function daylightAt(date: Date) {
-  const hour =
+export function daylightAt(date: Date, mode: TimeOfDay = "auto") {
+  const hour = mode === "noon" ? 12 : mode === "midnight" ? 0 :
     date.getHours() + date.getMinutes() / 60 + date.getSeconds() / 3600;
   const angle = ((hour - 6) / 24) * Math.PI * 2;
   const elevation = Math.sin(angle);

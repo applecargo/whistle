@@ -5,6 +5,7 @@ import {
   type Terrain,
   type Structure,
 } from "./terrain.ts";
+export const MAX_TEXT_LENGTH = 10_000;
 export type Shape =
   | "cone"
   | "ring"
@@ -28,10 +29,16 @@ export type Asset = {
   originalImage?: string;
 
   text?: string;
+  textColor?: string;
+  display?: "steady" | "nearby" | "pulse";
   defaultScale?: number;
+  placement?: "upright" | "floating" | "surface" | "field";
+  motion?: "still" | "wind";
   solid: boolean;
 };
+export type SymbolSiteKind = "cluster" | "peak" | "boundary";
 export type Placed = {
+  site?: { kind: SymbolSiteKind; cells: number[]; height: number };
   id: string;
   asset: string;
   x: number;
@@ -54,6 +61,7 @@ export type Rule = {
   enabled: boolean;
 };
 export type Weather = "clear" | "cloud" | "rain" | "snow";
+export type TimeOfDay = "auto" | "noon" | "midnight";
 export type World = {
   version: 1;
   title: string;
@@ -65,6 +73,7 @@ export type World = {
   start: { x: number; z: number };
   sky: string;
   weather?: Weather;
+  timeOfDay?: TimeOfDay;
   terrain?: Terrain;
 };
 export type Actor = Placed & { marks: string[]; removed: boolean };
@@ -448,6 +457,7 @@ export function validateWorld(input: unknown): World {
     typeof v === "string" && v.length <= max;
   if (
     w.version !== 1 ||
+    (w.timeOfDay !== undefined && !["auto", "noon", "midnight"].includes(w.timeOfDay)) ||
     (w.weather !== undefined && !["clear", "cloud", "rain", "snow"].includes(w.weather)) ||
     !text(w.title, 60) ||
     !text(w.description, 300) ||
@@ -455,7 +465,7 @@ export function validateWorld(input: unknown): World {
     !number(w.size, 6, 24) ||
     !Array.isArray(w.assets) ||
     w.assets.length < 1 ||
-    w.assets.length > 40 ||
+    w.assets.length > 250 ||
     !Array.isArray(w.objects) ||
     w.objects.length > 250 ||
     !Array.isArray(w.rules) ||
@@ -471,9 +481,13 @@ export function validateWorld(input: unknown): World {
       !shapes.includes(a.shape) ||
       !/^#[0-9a-f]{6}$/i.test(a.color) ||
       typeof a.solid !== "boolean" ||
+      (a.placement !== undefined && !["upright", "floating", "surface", "field"].includes(a.placement)) ||
+      (a.textColor !== undefined && !/^#[0-9a-f]{6}$/i.test(a.textColor)) ||
+      (a.display !== undefined && !["steady", "nearby", "pulse"].includes(a.display)) ||
+      (a.motion !== undefined && !["still", "wind"].includes(a.motion)) ||
       (a.defaultScale !== undefined &&
         ![0.5, 1, 2, 3].includes(a.defaultScale)) ||
-      (a.text !== undefined && (!text(a.text, 500) || !a.text.trim())) ||
+      (a.text !== undefined && (!text(a.text, MAX_TEXT_LENGTH) || !a.text.trim())) ||
       [a.image, a.originalImage].some(
         (image) =>
           image !== undefined &&
@@ -500,6 +514,10 @@ export function validateWorld(input: unknown): World {
       !number(o.rotation, 0, 359)
     )
       throw Error("사물 위치가 올바르지 않아요.");
+    if (o.site !== undefined && (!o.site || !["cluster", "peak", "boundary"].includes(o.site.kind) ||
+        !Array.isArray(o.site.cells) || !o.site.cells.length || o.site.cells.length > w.size * w.size ||
+        o.site.cells.some(i => !Number.isInteger(i) || !number(i, 0, w.size * w.size - 1)) ||
+        !number(o.site.height, -20, 20))) throw Error("기호 자리 데이터가 올바르지 않아요.");
     placed.add(o.id);
   }
   const ruleIds = new Set<string>();

@@ -1,8 +1,10 @@
 "use client";
+import { PresentationControls } from "./PresentationControls";
 import { useLanguage } from "./Language";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   uid,
+  MAX_TEXT_LENGTH,
   type Asset,
   type Shape,
   type Rule,
@@ -78,10 +80,12 @@ const shapeNames: Partial<Record<Shape, string>> = {
 };
 export function AssetMaker({
   asset: existing,
+  contentType,
   onSave,
   onClose,
 }: {
   asset?: Asset;
+  contentType?: "image" | "text";
   onSave: (a: Asset) => void;
   onClose: () => void;
 }) {
@@ -90,9 +94,11 @@ export function AssetMaker({
     existing?.shape === "image" ? "sphere" : (existing?.shape ?? "sphere"),
   );
   const [name, setName] = useState(existing?.name ?? "");
-  const [mediaType, setMediaType] = useState<"image" | "text">(existing?.text !== undefined ? "text" : "image");
+  const [mediaType, setMediaType] = useState<"image" | "text">(contentType ?? (existing?.text !== undefined ? "text" : "image"));
   const [text, setText] = useState(existing?.text ?? "");
+  const [textColor, setTextColor] = useState(existing?.textColor ?? "#111111");
   const [scale, setScale] = useState(existing?.defaultScale ?? 1);
+  const [placement, setPlacement] = useState<"upright" | "floating" | "surface">(existing?.placement === "field" ? "surface" : existing?.placement ?? "upright");
   const [loading, setLoading] = useState(false),
     [error, setError] = useState("");
   const editor = useRef<ImageEditorHandle>(null);
@@ -101,13 +107,14 @@ export function AssetMaker({
     name: name || shapeNames[shape] || "무제",
     shape,
     color: existing?.color ?? "#111111",
-    solid: existing?.solid ?? false,
+    solid: false,
     defaultScale: scale,
+    placement,
   };
   const save = () => {
     try {
       const media = mediaType === "text"
-        ? { text: text.trim(), image: textImage(text) }
+        ? { text, textColor, image: textImage(text, textColor) }
         : editor.current?.export();
       if (!media) return;
       onSave({
@@ -122,7 +129,7 @@ export function AssetMaker({
   };
   return (
     <Dialog title={t(mediaType === "image" ? "이미지" : "텍스트")} onClose={onClose}
-      heading={<div className="media-tabs" role="group" aria-label={t("이미지 또는 텍스트")}>
+      heading={contentType ? undefined : <div className="media-tabs" role="group" aria-label={t("이미지 또는 텍스트")}>
         {(["image", "text"] as const).map((kind) => <button key={kind}
           aria-pressed={mediaType === kind}
           onClick={() => { setMediaType(kind); setError(""); }}>
@@ -130,7 +137,7 @@ export function AssetMaker({
         </button>)}
       </div>}>
 
-      <div className="shape-options" role="group" aria-label={t("기호")}>
+      {!contentType && <div className="shape-options" role="group" aria-label={t("기호")}>
         {(["sphere", "box", "cone", "diamond", "ring", "bar"] as Shape[]).map(
           (s) => (
             <button
@@ -144,7 +151,7 @@ export function AssetMaker({
             </button>
           ),
         )}
-      </div>
+      </div>}
       <div hidden={mediaType !== "image"}>
       <ImageEditor
         ref={editor}
@@ -154,18 +161,32 @@ export function AssetMaker({
         onBusy={setLoading}
       />
       </div>
-      {mediaType === "text" && <textarea className="text-object-input"
-        aria-label={t("텍스트 입력")} placeholder={t("텍스트 입력")}
-        value={text} maxLength={500}
-        onChange={(e) => setText(e.target.value)} />}
-      <SizeOptions compact value={scale} onChange={setScale} />
+      {mediaType === "text" && <div className="text-object-editor">
+        <div className="text-object-actions">
+          <label className="text-color-control">
+            <input type="color" aria-label={t("글자 색")} value={textColor} onChange={e => setTextColor(e.target.value)} />
+          </label>
+          <span id="text-length">{text.length.toLocaleString()} / {MAX_TEXT_LENGTH.toLocaleString()}</span>
+        </div>
+        <textarea className="text-object-input" style={{ color: textColor }}
+          aria-label={t("텍스트 입력")} placeholder={t("텍스트 입력")}
+          aria-describedby="text-length"
+          aria-invalid={text.length > MAX_TEXT_LENGTH}
+          value={text}
+          onChange={(e) => { setText(e.target.value); setError(""); }} />
+        {text.length > MAX_TEXT_LENGTH && <p className="error" role="alert">{t("텍스트는 10,000자까지 입력할 수 있어요.")}</p>}
+      </div>}
+      <div className="asset-options-row">
+        <SizeOptions compact value={scale} onChange={setScale} />
+        <PresentationControls placement={placement} onPlacement={setPlacement} />
+      </div>
       {error && (
         <p className="error" role="alert">
           {t(error)}
         </p>
       )}
       <div className="dialog-footer">
-        <button className="primary" disabled={mediaType === "image" ? loading : !text.trim()} onClick={save}>
+        <button className="primary" disabled={mediaType === "image" ? loading : !text.trim() || text.length > MAX_TEXT_LENGTH} onClick={save}>
           {t("저장")}
         </button>
       </div>
@@ -198,6 +219,7 @@ export function SizeOptions({
             key={scale}
             type="button"
             aria-pressed={value === scale}
+            aria-label={t(label)}
             onClick={() => onChange(scale)}
           >
             {t(label)}

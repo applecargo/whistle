@@ -1,0 +1,22 @@
+{
+  "flat": {
+    "hash": "0525b66cc93d4f9dcd4026080964b448819d14e8b7847b91f6f5e30677b6780b",
+    "meshes": 3,
+    "vertices": 45069
+  },
+  "mixed": {
+    "hash": "7fb9e507f3f3a898176bd6bc2b4400600ae11b1db697b6946e6f606f77110db8",
+    "meshes": 15,
+    "vertices": 109014
+  },
+  "structures": {
+    "hash": "c9fbdc76f60138d6f159c17ad7c686093e1145d917dceed25c1cb1bc7a15a002",
+    "meshes": 16,
+    "vertices": 110382
+  },
+  "large": {
+    "hash": "6305e61e492c01c8975240a6f9d7c6e49faed489360d50ed0a509ed9734676d1",
+    "meshes": 16,
+    "vertices": 242583
+  }
+}

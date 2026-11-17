@@ -46,14 +46,14 @@ test("live grid edits and undo reach the displayed world and Pd without relying 
   await expect.poll(async () => (await messages(page))["whistle-player"]?.[3]).toBe(0);
   const initialPosition = (await data(page)).grid;
   await editor.bringToFront();
-  await editor.getByRole("button", { name: "부드러운 바닥", exact: true }).click();
+  await editor.getByRole("button", { name: "번짐", exact: true }).click();
   for (const i of [61, 62, 73, 74]) await editor.locator(`[data-cell="${i}"]`).click();
   await expect.poll(async () => (await messages(page))["whistle-player"]?.[3]).toBe(1);
   await expect(page.locator("#audio-status")).toHaveText("오디오 실행 중");
   await expect(page.locator(".map rect").nth(61)).toHaveAttribute("fill", "#b5cc9c");
   expect((await data(page)).grid).toEqual(initialPosition);
   expect(await page.evaluate(() => localStorage.getItem("whistle.world.v2"))).toBe(stored);
-  await editor.getByRole("button", { name: "거친 바닥", exact: true }).click();
+  await editor.getByRole("button", { name: "거침", exact: true }).click();
   for (const i of [61, 62, 73, 74]) await editor.locator(`[data-cell="${i}"]`).click();
   await expect.poll(async () => (await messages(page))["whistle-player"]?.[4]).toBe(1);
   await editor.getByRole("button", { name: "되돌리기", exact: true }).click();

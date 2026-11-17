@@ -4,14 +4,55 @@ import { readFileSync } from "node:fs";
 import { createWorldDeriver, samePlacement } from "../lib/world-derivation.ts";
 import { deriveStructures, floorHeight } from "../lib/terrain.ts";
 import { deriveEnvironment } from "../lib/environment.ts";
-import { createSimulation } from "../lib/world.ts";
+import { createSimulation, validateWorld } from "../lib/world.ts";
+import * as THREE from "three";
+import { surfaceImageGeometry } from "../components/whistle/SurfaceImage.ts";
 import { terrainFixtures, terrainDigest, disposeTerrain } from "./terrain-fixtures.ts";
 import { makeTerrain } from "../components/whistle/TerrainScene.ts";
 import { placementChanges } from "../lib/placement-feedback.ts";
 
-const baseline = JSON.parse(readFileSync(new URL("./fixtures/terrain-before.json", import.meta.url), "utf8"));
+const baseline = JSON.parse(readFileSync(new URL("./fixtures/terrain-abstract.json", import.meta.url), "utf8"));
+test("surface images clip to real terrain, rotate UVs and resize without filling holes", () => {
+  const world = terrainFixtures().flat;
+  world.terrain!.tiles[5 * world.size + 5].hole = true;
+  const terrain = makeTerrain(world, []);
+  const ground = terrain.group.getObjectByName("continuous-ground") as THREE.Mesh;
+  const placed = { id: "skin", asset: "circle", x: 5, z: 5, rotation: 0, scale: 3 };
+  const geometry = surfaceImageGeometry(ground, world, placed);
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+  const ray = new THREE.Raycaster(new THREE.Vector3(-1, 20, -1), new THREE.Vector3(0, -1, 0));
+  assert.equal(ray.intersectObject(mesh).length, 0);
+  assert.ok(geometry.getAttribute("position").count > 0);
+  const rotated = surfaceImageGeometry(ground, world, { ...placed, rotation: 90 });
+  const smaller = surfaceImageGeometry(ground, world, { ...placed, scale: 1 });
+  assert.ok(smaller.getAttribute("position").count < geometry.getAttribute("position").count);
+  ray.set(new THREE.Vector3(.8, 20, -1), new THREE.Vector3(0, -1, 0));
+  const before = ray.intersectObject(mesh)[0].uv!;
+  mesh.geometry = rotated;
+  const after = ray.intersectObject(mesh)[0].uv!;
+  assert.ok(Math.abs(before.x - after.y) < .0001);
+  assert.ok(Math.abs(before.y - (1 - after.x)) < .0001);
+  for (const item of [geometry, rotated, smaller]) item.dispose();
+  (mesh.material as THREE.Material).dispose();
+  disposeTerrain(terrain.group);
+});
+
+test("placement and motion survive world validation and reject unknown modes", () => {
+  const world = terrainFixtures().flat;
+  world.assets[0].placement = "surface";
+  world.assets[0].motion = "still";
+  assert.deepEqual(validateWorld(JSON.parse(JSON.stringify(world))), world);
+  world.assets[0].placement = "field";
+  assert.deepEqual(validateWorld(JSON.parse(JSON.stringify(world))), world);
+  for (const key of ["placement", "motion"] as const) {
+    const invalid = JSON.parse(JSON.stringify(world));
+    invalid.assets[0][key] = "unknown";
+    assert.throws(() => validateWorld(invalid));
+  }
+});
+
 for (const name of Object.keys(terrainFixtures())) {
-  test(`rendered terrain matches the pre-optimization geometry and materials: ${name}`, () => {
+  test(`rendered terrain matches the abstract geometry and materials: ${name}`, () => {
     const world = terrainFixtures()[name];
     const derivation = createWorldDeriver()(world);
     const terrain = makeTerrain(world, derivation.structures, derivation.environment);

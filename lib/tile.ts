@@ -12,7 +12,7 @@ export function editTile(tile: Tile, tool: TerrainTool, surface: Surface): Tile 
   const hole = isHole(tile);
   const height = hole && tile.hole === undefined ? 0 : tile.height;
   if (tool === "hole") return { ...tile, height, hole: !hole };
-  if (tool === "surface") return { height, surface, hole: false };
+  if (tool === "surface") return { height, surface: !hole && tile.surface === surface ? "plain" : surface, hole: false };
   if (hole) return tile;
   return {
     ...tile,

@@ -1256,6 +1256,10 @@ p {
   color: #fff;
   border-color: #111;
 }
+.image-placement-options > div {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 
 
 .workspace {
@@ -1905,6 +1909,7 @@ p {
 }
 .clear-tile span {
   display: block;
+  margin: auto;
   width: 22px;
   height: 22px;
   border: 1px dashed currentColor;
@@ -2020,17 +2025,29 @@ p {
 .asset-size-options legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .asset-size-options button { border: 0; min-height: 32px; padding: 4px 6px; font-size: 10px; }
 .asset-size-options button[aria-pressed="true"] { background: transparent; color: #111; text-decoration: underline; text-underline-offset: 4px; }
+.text-object-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 10px 0 6px;
+}
+.text-object-actions span { margin-left: auto; color: #777; font-size: 11px; }
 .text-object-input {
   display: block;
   width: 100%;
   height: 256px;
-  padding: 24px;
-  resize: none;
+  min-height: 180px;
+  max-height: 50dvh;
+  padding: 16px;
+  resize: vertical;
   border: 1px solid #ddd;
   background: #fff;
   color: #111;
-  font: 24px/1.5 sans-serif;
-  text-align: center;
+  font: 16px/1.6 sans-serif;
+  text-align: left;
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
 }
 
 .weather-controls { display: flex; justify-content: center; gap: 4px; }
@@ -2043,4 +2060,76 @@ p {
   .weather-desktop { display: none; }
   .weather-mobile { display: flex; margin: 16px 0 12px; gap: 18px; }
   .weather-mobile button { width: 44px; height: 44px; padding: 10px; }
+}
+
+.generated-palette { min-height: 100%; }
+.generated-symbols { border-top: 1px solid #e5e5e5; padding-top: 14px; width: 100%; }
+.site-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+.site-list button { width: 40px; height: 40px; padding: 4px; border: 1px solid transparent; }
+.site-list button:hover, .site-list button.active { border-color: #111; }
+.site-glyph { width: 100%; height: 100%; display: block; }
+.site-start { width: 40px; height: 32px; font-size: 20px; align-self: flex-start; }
+.generated-site { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 74%; height: 74%; max-width: 32px; max-height: 32px; background: #ffffffed; border-radius: 3px; z-index: 5; cursor: pointer; pointer-events: auto; }
+.generated-site:hover { outline: 1px solid #777; }
+.generated-palette .palette-climate { margin-top: auto; padding-top: 24px; display: flex; align-items: center; gap: 6px; }
+.generated-palette .palette-weather { display: flex; gap: 1px; flex-wrap: nowrap; }
+.daylight-control { position: relative; flex: 0 0 18px; }
+.daylight-indicator { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 32px; padding: 0; border: 0; background: transparent; color: #000; cursor: pointer; }
+.daylight-indicator:not([data-time-mode="auto"]) { box-shadow: inset 0 -1px currentColor; }
+.daylight-options { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 20; display: flex; gap: 2px; padding: 4px; border: 1px solid #ddd; background: #fff; box-shadow: 0 3px 12px #0000000d; }
+.daylight-options[hidden] { display: none; }
+.daylight-options button { display: flex; align-items: center; justify-content: center; width: 32px; height: 36px; padding: 6px; }
+.daylight-options svg { width: 20px; height: 20px; }
+.daylight-options button[aria-pressed="true"] { background: #111; color: #fff; }
+.daylight-indicator svg { width: 18px; height: 18px; }
+.generated-palette .palette-weather button { width: 22px; height: 32px; padding: 2px; }
+.generated-palette .palette-weather svg { width: 18px; height: 18px; }
+@media (max-width: 720px) {
+  .generated-palette { min-height: 0; }
+  .generated-palette .tile-palette { align-items: center; }
+  .generated-symbols { padding-top: 10px; }
+  .site-list { display: flex; flex-wrap: wrap; }
+  .site-list button { width: 40px; height: 40px; }
+  .generated-palette .palette-climate { padding-top: 0; margin-top: 2px; justify-content: flex-end; }
+  .generated-site { width: 78%; height: 78%; }
+}
+
+.text-color-control { display: flex; align-items: center; gap: 8px; }
+.text-color-control input { width: 32px; height: 28px; padding: 2px; border: 1px solid #ddd; background: white; cursor: pointer; }
+
+.live-preview canvas { cursor: grab; touch-action: none; }
+.live-preview canvas[data-dragging="true"] { cursor: grabbing; }
+
+.asset-options-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.asset-options-row > .asset-size-options { flex: 1; width: auto; margin: 0; }
+.asset-presentation-controls { display: flex; gap: 4px; }
+.asset-presentation-controls button { display: flex; align-items: center; justify-content: center; min-width: 48px; height: 34px; padding: 6px; border: 1px solid #ddd; font-size: 11px; white-space: nowrap; }
+
+.asset-size-options button { display: flex; align-items: center; justify-content: center; }
+
+.asset-presentation-controls button { gap: 5px; }
+.cycle-mark { flex: 0 0 12px; width: 12px; height: 12px; opacity: .55; }
+@media (max-width: 480px) {
+  .asset-options-row { flex-wrap: wrap; gap: 8px; }
+  .asset-options-row > .asset-size-options { flex-basis: 100%; }
+  .asset-presentation-controls { margin-left: auto; }
+}
+
+@media (max-width: 720px) { .daylight-options { left: -18px; } }
+
+.symbol-create { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.symbol-create button { display: flex; justify-content: space-between; align-items: center; padding: 6px 3px; font-size: 12px; min-height: 32px; }
+.symbol-create button span { font-size: 16px; }
+.symbol-library { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.symbol-library-item { position: relative; min-width: 0; }
+.symbol-library-item > button:first-child { width: 100%; height: 40px; padding: 4px; border: 1px solid transparent; overflow: hidden; font-size: 12px; }
+.symbol-library-item > button:first-child.active { border-color: #111; background: #fff; color: #111; }
+.symbol-library img { width: 100%; height: 100%; object-fit: contain; }
+.symbol-edit { position: absolute; right: -5px; top: -7px; width: 20px; height: 20px; padding: 3px; border: 1px solid #ddd; background: #fff; }
+.symbol-edit svg { display: block; width: 100%; height: 100%; }
+@media (max-width: 720px) {
+  .symbol-create { flex-direction: row; gap: 16px; margin-bottom: 8px; }
+  .symbol-create button { gap: 12px; }
+  .symbol-library { display: flex; flex-wrap: wrap; }
+  .symbol-library-item { width: 40px; }
 }

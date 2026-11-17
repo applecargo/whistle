@@ -134,22 +134,22 @@ export function makeTrees(
       wind = new THREE.Vector2(c.windX, c.windZ);
     const bark = new THREE.Color(
       species === "pine"
-        ? "#76523b"
+        ? "#606060"
         : species === "ginkgo"
-          ? "#686352"
-          : "#625d50",
+          ? "#676767"
+          : "#626262",
     );
     const base = new THREE.Color(
       species === "pine"
-        ? "#426344"
+        ? "#5c5c5c"
         : species === "ginkgo"
-          ? "#78963e"
+          ? "#8a8a8a"
           : species === "maple"
-            ? "#4f7e3d"
-            : "#527947",
+            ? "#707070"
+            : "#6c6c6c",
     );
     base.lerp(
-      new THREE.Color(species === "pine" ? "#63815a" : "#92a65a"),
+      new THREE.Color(species === "pine" ? "#777777" : "#9c9c9c"),
       profile.tint * 0.3,
     );
     const trunkAt = (t: number) =>
