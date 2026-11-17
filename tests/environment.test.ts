@@ -34,6 +34,10 @@ test("vegetation keeps its seeded appearance after reloads and unrelated placeme
       w.terrain!.tiles[z * w.size + x] = { height: 1, surface: "soft" };
   const env = deriveEnvironment(w);
   const profiles = env.trees.map((t) => treeAppearance(0, t.x, t.z));
+  assert.ok(new Set(profiles.map(t => t.bark.color)).size > 1);
+  const barkTones = profiles.map(t => parseInt(t.bark.color.slice(1, 3), 16) / 255);
+  assert.ok(Math.min(...barkTones) <= .25 && Math.max(...barkTones) >= .95);
+  assert.equal(new Set(profiles.map(t => t.bark.texture)).size, 3);
   assert.equal(
     new Set(profiles.map((t) => t.species)).size,
     TREE_SPECIES.length,
@@ -674,7 +678,7 @@ test("grass, bark and stones use neutral tones with stable varied grain", async 
   const { terrainFixtures, disposeTerrain } = await import("./terrain-fixtures.ts");
   const { stoneAppearance } = await import("../lib/stones.ts");
   const terrain = makeTerrain(terrainFixtures().mixed, []);
-  const barkSeeds = new Set<number>();
+  const barkSeeds = new Set<number>(), barkColors = new Set<number>();
   let grasses = 0, stones = 0;
   terrain.group.traverse(object => {
     if (!["grass-tufts", "generated-trunks", "scattered-stones"].includes(object.name)) return;
@@ -685,11 +689,15 @@ test("grass, bark and stones use neutral tones with stable varied grain", async 
     if (colors) for (let i = 0; i < mesh.count; i++) {
       assert.equal(colors.getX(i), colors.getY(i)); assert.equal(colors.getY(i), colors.getZ(i));
     }
-    if (object.name === "generated-trunks") barkSeeds.add(mesh.material.userData.neutralGrain.seed);
+    if (object.name === "generated-trunks") {
+      barkSeeds.add(mesh.material.userData.neutralGrain.seed);
+      barkColors.add(mesh.material.color.getHex());
+      assert.ok(mesh.material.userData.surfaceProjection.baseColor.equals(mesh.material.color));
+    }
     if (object.name === "grass-tufts") { grasses++; assert.equal(mesh.material.userData.neutralGrain.kind, "grass"); }
     if (object.name === "scattered-stones") stones += mesh.count;
   });
-  assert.ok(grasses > 0 && stones > 0 && barkSeeds.size > 1);
+  assert.ok(grasses > 0 && stones > 0 && barkSeeds.size > 1 && barkColors.size > 1);
   const rocks = Array.from({ length: 30 }, (_, i) => stoneAppearance(89, i, 1));
   assert.equal(new Set(rocks.map(rock => rock.texture)).size, 3);
   assert.ok(rocks.every(rock => /^#([0-9a-f]{2})\1\1$/i.test(rock.color)));

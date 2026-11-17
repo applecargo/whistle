@@ -48,7 +48,7 @@ export function flatTerrain(size: number): Terrain {
     patterns: { stairs: true, bridge: true, canopy: true },
   };
 }
-export function generateTerrain(size: number, seed: number): Terrain {
+function generateTerrainBase(size: number, seed: number): Terrain {
   const random = randomSequence(seed),
     terrain = flatTerrain(size);
   terrain.seed = seed;
@@ -80,13 +80,28 @@ export function generateTerrain(size: number, seed: number): Terrain {
   return terrain;
 }
 
+export function generateTerrain(size: number, seed: number): Terrain {
+  const terrain = generateTerrainBase(size, seed);
+  for (let i = 0; i < terrain.tiles.length; i++) {
+    if (terrain.tiles[i].surface !== "slick") continue;
+    const x = i % size, z = Math.floor(i / size);
+    for (let dz = -1; dz <= 1; dz++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const xx = x + dx, zz = z + dz;
+        if (xx >= 0 && zz >= 0 && xx < size && zz < size)
+          terrain.tiles[zz * size + xx].height = 0;
+      }
+  }
+  return terrain;
+}
+
 export function upgradeTerrain(world: World): World {
   const terrain = world.terrain;
   if (!terrain || terrain.generatorVersion === 2) return world;
   const next = structuredClone(world),
     t = next.terrain!;
   t.generatorVersion = 2;
-  const baseline = generateTerrain(world.size, terrain.seed);
+  const baseline = generateTerrainBase(world.size, terrain.seed);
   const x = Math.floor(world.size / 2),
     crossing = Math.floor(world.size / 2) - 1;
   const strip = Array.from(

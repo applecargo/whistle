@@ -2,6 +2,7 @@ import { randomSequence } from "./terrain.ts";
 
 export const TREE_SPECIES = ["pine", "zelkova", "ginkgo", "maple"] as const;
 export type TreeSpecies = (typeof TREE_SPECIES)[number];
+const BARK_COLORS = ["#333333", "#626262", "#969696", "#c4c4c4", "#e4e4e4", "#fafafa"];
 function hash(seed: number, x: number, z: number) {
   let h = seed ^ Math.imul(x, 73856093) ^ Math.imul(z, 19349663);
   h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
@@ -23,6 +24,14 @@ export function treeAppearance(seed: number, x: number, z: number) {
     lean: (random() - 0.5) * (species === "pine" ? 1.4 : 0.5),
     rotation: random() * Math.PI * 2,
     tint: random(),
+    bark: {
+      color: BARK_COLORS[Math.floor(random() * BARK_COLORS.length)],
+      texture: Math.floor(random() * 3),
+      grain: .75 + random() * 1.5,
+      contrast: .08 + random() * .16,
+      relief: .001 + random() * .004,
+      roughness: .82 + random() * .17,
+    },
   };
 }
 

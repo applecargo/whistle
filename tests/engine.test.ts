@@ -416,6 +416,36 @@ test("seeded terrain repeats exactly and preserves a grounded entrance", async (
   assert.ok(a.tiles.every((t) => t.height >= 0));
   assert.ok(a.tiles.slice(108).every((t) => t.height === 0));
 });
+test("generated ponds stay at ground level with flat banks while authored raised water survives loading", async () => {
+  const { generateTerrain, terrainSample, upgradeTerrain, randomSequence } = await import("../lib/terrain.ts");
+  const { deriveEnvironment } = await import("../lib/environment.ts");
+  const { WATER_INSET } = await import("../lib/water.ts");
+  const random = randomSequence(1731);
+  let waterTiles = 0;
+  for (const size of [12, 24]) for (let n = 0; n < 64; n++) {
+    const world = starterWorld();
+    world.size = size;
+    world.objects = [];
+    world.terrain = generateTerrain(size, Math.floor(random() * 4294967296));
+    world.terrain.tiles.forEach((tile, i) => {
+      if (tile.surface !== "slick") return;
+      waterTiles++;
+      assert.equal(tile.height, 0);
+      const x = i % size, z = Math.floor(i / size);
+      for (const [dx, dz] of [[-.8, -.8], [.8, -.8], [-.8, .8], [.8, .8]])
+        assert.ok(Math.abs(terrainSample(world, x + dx, z + dz, false).height) < .05);
+    });
+    assert.ok(deriveEnvironment(world, []).ponds.every(pond => pond.level === -WATER_INSET));
+    assert.ok(world.terrain.tiles.slice(size * (size - 3)).every(tile => tile.height === 0 && tile.surface === "plain"));
+  }
+  assert.ok(waterTiles > 0);
+  const authored = starterWorld();
+  authored.terrain = generateTerrain(authored.size, 1234);
+  authored.terrain.tiles[25] = { height: 3, surface: "slick", hole: false };
+  const loaded = validateWorld(JSON.parse(JSON.stringify(authored)));
+  assert.equal(upgradeTerrain(loaded), loaded);
+  assert.deepEqual(loaded.terrain!.tiles, authored.terrain.tiles);
+});
 test("matching symbols bridge only aligned equal-height gaps and removal reverses it", async () => {
   const { flatTerrain, deriveStructures, floorHeight, LEVEL } = await import(
     "../lib/terrain.ts"

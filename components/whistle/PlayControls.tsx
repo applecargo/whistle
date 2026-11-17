@@ -93,7 +93,7 @@ export function PlayControls({
           onClick={(e) => {
             if (e.detail === 0 && !player.current.falling) controls.current.add("jump");
           }}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 14l4-4 4 4" /></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path className="control-outline" d="M8 14l4-4 4 4" /><path d="M8 14l4-4 4 4" /></svg>
         </button>
         <button aria-label={t("기어가기")}
           aria-pressed={movementMode === "crouch"}
@@ -105,7 +105,7 @@ export function PlayControls({
             if (next === "crouch") controls.current.add("crouch");
             onMovementModeChange(next);
           }}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 10l4 4 4-4" /></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path className="control-outline" d="M8 10l4 4 4-4" /><path d="M8 10l4 4 4-4" /></svg>
         </button>
       </div>
     </div>

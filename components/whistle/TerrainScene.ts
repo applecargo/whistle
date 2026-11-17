@@ -343,6 +343,7 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
     group.add(bottom);
   }
 
+  const foundationDepth = 0.35;
   const architecture: {
     x: number;
     y: number;
@@ -362,7 +363,7 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
           gx = s.x + s.dx * t,
           gz = s.z + s.dz * t;
         const elevation = terrainSample(world, gx, gz).height;
-        const bottom = y - 0.35;
+        const bottom = y - foundationDepth;
         architecture.push({
           x: toScene(gx),
           z: toScene(gz),
@@ -374,16 +375,7 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
       }
     }
     if (s.kind === "bridge") {
-      architecture.push({ x, z, y: y - 0.09, w: 2, d: 2, h: 0.18 });
-      for (const side of [-1, 1])
-        architecture.push({
-          x: x + s.dz * side * 0.94,
-          z: z + s.dx * side * 0.94,
-          y: y + 0.38,
-          w: s.dx ? 2 : 0.06,
-          d: s.dz ? 2 : 0.06,
-          h: 0.06,
-        });
+      architecture.push({ x, z, y: y - foundationDepth / 2, w: 2, d: 2, h: foundationDepth });
     }
     if (s.kind === "canopy") {
       architecture.push({ x, z, y: y + 3.25, w: 4.8, d: 4.8, h: 0.16 });

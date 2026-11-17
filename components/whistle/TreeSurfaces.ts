@@ -15,10 +15,11 @@ export function makeTreeSurfaces(world: World, environment: Environment, clock: 
   const trees = environment.trees.map(tree => {
     const profile = treeAppearance(world.terrain?.seed ?? 0, tree.x, tree.z);
     const geometry = trunkTreeGeometry(profile);
-    const material = new THREE.MeshStandardMaterial({ color: "#676767", roughness: .95, vertexColors: true });
-    addNeutralGrain(material, "bark", profile.seed);
+    const material = new THREE.MeshStandardMaterial({ color: profile.bark.color, roughness: profile.bark.roughness, vertexColors: true });
+    addNeutralGrain(material, "bark", profile.seed, profile.bark);
     projectSurfaceImage(material, new THREE.Vector3(0, geometry.boundingBox!.min.y, 0),
       geometry.boundingBox!.max.y - geometry.boundingBox!.min.y, 0, true);
+    material.userData.surfaceProjection.baseColor.copy(material.color);
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = "generated-trunks";
     mesh.position.set(tree.x * 2 - world.size + 1, tree.height, tree.z * 2 - world.size + 1);
@@ -26,7 +27,7 @@ export function makeTreeSurfaces(world: World, environment: Environment, clock: 
     mesh.userData.interactionOccluder = true;
     mesh.castShadow = mesh.receiveShadow = true;
     group.add(mesh);
-    return { mesh, tree, key: "", wind: environmentAt(environment, tree.x, tree.z) };
+    return { mesh, tree, bark: profile.bark, key: "", wind: environmentAt(environment, tree.x, tree.z) };
   });
   return {
     group,
@@ -46,7 +47,7 @@ export function makeTreeSurfaces(world: World, environment: Environment, clock: 
         const material = entry.mesh.material;
         material.map?.dispose();
         material.map = null;
-        material.color.set(asset?.image ? "#ffffff" : "#676767");
+        material.color.set(asset?.image ? "#ffffff" : entry.bark.color);
         if (asset?.image) {
           material.map = new THREE.TextureLoader().load(asset.image);
           material.map.colorSpace = THREE.SRGBColorSpace;

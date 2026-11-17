@@ -128,7 +128,7 @@ export function trunkTreeGeometry(profile: ReturnType<typeof treeAppearance>) {
       const groove = Math.sin(angle * 5 + Math.sin(t * 17 + phase) * .45 + phase);
       const grain = Math.sin(t * 183 + angle * 7 + phase) * Math.sin(t * 67 - angle * 11);
       const heightRatio = THREE.MathUtils.clamp(capPositions[i * 3 + 1] / height, 0, 1);
-      const tone = .46 + .45 * Math.pow(heightRatio, .7) + .065 * groove + .025 * grain;
+      const tone = .80 + .16 * Math.pow(heightRatio, .7) + .025 * groove + .01 * grain;
       colors.push(tone, tone, tone);
     }
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
