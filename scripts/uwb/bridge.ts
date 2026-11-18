@@ -1,9 +1,10 @@
 import { createSocket } from "node:dgram";
 import { WebSocketServer, WebSocket } from "ws";
 import { MAX_PACKET_BYTES, TRACKING_TIMEOUT_MS, parseRanges, type BridgeMessage, type PositionMessage, type RangePacket } from "../../lib/uwb/protocol.ts";
+import { parseMakerfabs } from "./input.ts";
 import { solvePosition, type BridgeConfig } from "../../lib/uwb/solver.ts";
 
-export function createProcessor(config: BridgeConfig, publish: (message: BridgeMessage) => void) {
+export function createProcessor(config: BridgeConfig, publish: (message: BridgeMessage) => void, rangesOnly = false) {
   const states = new Map<string, { inputSeq: number; lastInput: number; point: PositionMessage | null }>();
   let seq = 0;
   return (packet: RangePacket, orderedSerial = false, now = Date.now()) => {
@@ -17,6 +18,10 @@ export function createProcessor(config: BridgeConfig, publish: (message: BridgeM
     const state = { inputSeq: packet.seq, lastInput: now,
       point: previous?.point && now - previous.point.receivedAt < TRACKING_TIMEOUT_MS ? previous.point : null };
     states.set(packet.tagId, state);
+    if (rangesOnly) {
+      publish({ type: "ranges", tagId: packet.tagId, seq: ++seq, receivedAt: now, ranges: packet.ranges });
+      return;
+    }
     try {
       const point = solvePosition(packet.ranges, config);
       const alpha = state.point && config.smoothingMs ? 1 - Math.exp(-(now - state.point.receivedAt) / config.smoothingMs) : 1;
@@ -33,7 +38,7 @@ export function createProcessor(config: BridgeConfig, publish: (message: BridgeM
 }
 
 export async function startBridge(config: BridgeConfig, options: {
-  wsPort?: number; udpPort?: number; udpHost?: string; log?: (message: string) => void;
+  wsPort?: number; udpPort?: number; udpHost?: string; log?: (message: string) => void; rangesOnly?: boolean;
 } = {}) {
   const log = options.log ?? console.log;
   const server = new WebSocketServer({ host: "127.0.0.1", port: options.wsPort ?? 5194, maxPayload: MAX_PACKET_BYTES,
@@ -68,12 +73,29 @@ export async function startBridge(config: BridgeConfig, options: {
       if (client.bufferedAmount > MAX_PACKET_BYTES * 4) { client.terminate(); continue; }
       if (client.readyState === WebSocket.OPEN) client.send(json);
     }
-  });
+  }, options.rangesOnly);
+  const lastRaw = new Map<string, { seq: number; time: number }>();
   let lastWarning = -Infinity;
   udp.on("message", (buffer) => {
     try {
       if (buffer.length > MAX_PACKET_BYTES) throw new Error("UDP 패킷이 너무 큽니다.");
-      receive(parseRanges(buffer.toString()));
+      const text = buffer.toString().trimEnd();
+      if (!text.startsWith("AT+RANGE=")) {
+        receive(parseRanges(text));
+        return;
+      }
+      if (/[\r\n]/.test(text)) throw new Error("한 UDP 패킷에는 거리 보고 한 줄만 허용합니다.");
+      const packet = parseMakerfabs(text);
+      if (!packet || !config.tags.includes(packet.tagId)) return;
+      if (packet.seq > 255) throw new Error("Makerfabs seq 범위 오류");
+      const now = Date.now();
+      const last = lastRaw.get(packet.tagId);
+      if (last && now - last.time < TRACKING_TIMEOUT_MS) {
+        const delta = (packet.seq - last.seq + 256) % 256;
+        if (delta === 0 || delta >= 128) return;
+      }
+      lastRaw.set(packet.tagId, { seq: packet.seq, time: now });
+      receive(packet, true, now);
     } catch (error) {
       if (Date.now() - lastWarning > 1000) { log(`입력 무시: ${(error as Error).message}`); lastWarning = Date.now(); }
     }

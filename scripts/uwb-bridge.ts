@@ -13,10 +13,10 @@ async function main() {
     serial: { type: "string" }, baud: { type: "string", default: "115200" }, format: { type: "string", default: "makerfabs" },
     "list-ports": { type: "boolean" }, "ws-port": { type: "string", default: "5194" },
     "udp-port": { type: "string", default: "5195" }, "udp-host": { type: "string", default: "127.0.0.1" },
-    help: { type: "boolean" },
+    help: { type: "boolean" }, "ranges-only": { type: "boolean" },
   } });
   if (values.help) {
-    console.log("npm run uwb:bridge -- [--simulate | --serial PATH] [--format makerfabs|json] [--config FILE] [--udp-host IP] [--udp-port 5195] [--ws-port 5194] [--baud 115200] [--list-ports]");
+    console.log("npm run uwb:bridge -- [--simulate | --serial PATH] [--format makerfabs|json] [--config FILE] [--udp-host IP] [--udp-port 5195] [--ws-port 5194] [--baud 115200] [--list-ports] [--ranges-only]");
     return;
   }
   if (values["list-ports"]) { console.table(await SerialPort.list()); return; }
@@ -30,7 +30,7 @@ async function main() {
   const baudRate = Number(values.baud);
   if (!Number.isInteger(baudRate) || baudRate <= 0 || baudRate > 4_000_000) throw new Error("baud 값 오류");
   const config = parseConfig(JSON.parse(await readFile(values.config, "utf8")));
-  const bridge = await startBridge(config, { wsPort: portNumber(values["ws-port"]), udpPort: portNumber(values["udp-port"]), udpHost: values["udp-host"] });
+  const bridge = await startBridge(config, { wsPort: portNumber(values["ws-port"]), udpPort: portNumber(values["udp-port"]), udpHost: values["udp-host"], rangesOnly: values["ranges-only"] });
   let port: SerialPort | undefined;
   let detach: (() => void) | undefined;
   let stopSimulator: (() => void) | undefined;
@@ -60,7 +60,7 @@ async function main() {
     if (values.simulate) stopSimulator = startSimulator(config, bridge.udpPort,
       values["udp-host"] === "0.0.0.0" ? "127.0.0.1" : values["udp-host"]);
     console.log(`UWB → ws://127.0.0.1:${bridge.wsPort} | UDP ${values["udp-host"]}:${bridge.udpPort}`);
-    console.log(`${values.simulate ? "가상 거리 장비 10Hz" : values.serial ? `USB ${values.serial}` : "UDP 거리 수신 대기"} | 태그 ${config.tags.join(", ")} | ${config.mode === "2d" ? `높이 고정 ${config.fixedHeight}m` : "높이 UWB 계산"}`);
+    console.log(`${values.simulate ? "가상 거리 장비 10Hz" : values.serial ? `USB ${values.serial}` : "UDP 거리 수신 대기"} | 태그 ${config.tags.join(", ")} | ${values["ranges-only"] ? "거리 수신만 확인 · 좌표 계산 안 함" : config.mode === "2d" ? `높이 고정 ${config.fixedHeight}m` : "높이 UWB 계산"}`);
   } catch (error) { await stop(); throw error; }
 }
 

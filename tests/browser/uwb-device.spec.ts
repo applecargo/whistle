@@ -4,14 +4,15 @@ import { readFileSync } from "node:fs";
 import { startBridge } from "../../scripts/uwb/bridge";
 import { parseConfig, distanceTo } from "../../lib/uwb/solver";
 import { createLabWorld } from "../../uwb-lab/world";
+import { rectangleConfig } from "../../lib/uwb/rectangle";
 
 test.setTimeout(60_000);
 const config = parseConfig({ ...JSON.parse(readFileSync("config/uwb.example.json", "utf8")), mode: "3d", smoothingMs: 0 });
 const data = async (page: Page) => JSON.parse((await page.locator("#position-data").textContent())!);
 const messages = async (page: Page) => JSON.parse((await page.locator("#pd-messages").textContent())!);
 
-async function setup(page: Page) {
-  const bridge = await startBridge(config, { wsPort: 0, udpPort: 0, log: () => {} });
+async function setup(page: Page, sourceConfig = config, rangesOnly = false, biases: number[] = []) {
+  const bridge = await startBridge(sourceConfig, { wsPort: 0, udpPort: 0, rangesOnly, log: () => {} });
   const udp = createSocket("udp4");
   let seq = 0;
   let active = true;
@@ -21,7 +22,7 @@ async function setup(page: Page) {
   const timer = setInterval(() => {
     if (!active) return;
     udp.send(JSON.stringify({ type: "ranges", tagId, seq: ++seq,
-      ranges: valid ? config.anchors.map((a) => ({ anchorId: a.id, distance: distanceTo(point, a) })) : [],
+      ranges: valid ? sourceConfig.anchors.map((a, i) => ({ anchorId: a.id, distance: distanceTo(point, a) + (biases[i] ?? 0) })) : [],
     }), bridge.udpPort, "127.0.0.1");
   }, 100);
   await page.addInitScript(() => Object.defineProperty(window, "devicePixelRatio", { value: 0.5 }));
@@ -79,6 +80,65 @@ test("UDP ranges reach the existing scene and Pd; height, invalid frames and tim
   } finally { await device.close(); }
 });
 
+test("page rectangle settings turn raw ranges into terrain audio and clear stale positions on recalibration", async ({ page }) => {
+  const rectangle = rectangleConfig({ width: 6, depth: 4, anchorHeight: 1.5, tagHeight: 1.2 });
+  const device = await setup(page, rectangle, true);
+  try {
+    device.move({ x: 1, z: 2, boardHeight: 1.2 });
+    await page.getByRole("button", { name: "연결 / 다시 연결", exact: true }).click();
+    await expect(page.locator("#range-data")).toContainText("태그 → 앵커 실측 거리");
+    await expect(page.getByRole("button", { name: "오디오 시작", exact: true })).toBeDisabled();
+    const apply = page.getByRole("button", { name: "배치 적용 · 위치 연결", exact: true });
+    await apply.click();
+    await expect(page.locator("#anchor-status")).toContainText("모두 입력");
+    for (const [label, value] of [["앵커 배치 가로 (m)", "6"], ["앵커 배치 세로 (m)", "4"],
+      ["앵커 공통 높이 (m)", "1.5"], ["태그 높이 (m)", "1.2"]]) {
+      await page.getByLabel(label, { exact: true }).fill(value);
+    }
+    await apply.click();
+    await expect.poll(async () => (await data(page)).metres?.x).toBeCloseTo(1, 4);
+    await expect.poll(async () => (await data(page)).metres?.z).toBeCloseTo(2, 4);
+    await expect(page.getByLabel("세로 (m)", { exact: true })).toHaveValue("4");
+    await expect(page.getByTestId("position-marker")).toHaveCount(1);
+    await expect(page.locator("#anchor-status")).toContainText("설정 적용됨");
+    device.move({ x: 1, z: 5, boardHeight: 1.2 });
+    await expect(page.locator("#audio-block-reason")).toContainText("공간 범위 밖");
+    await expect(page.locator("#audio-block-reason")).toContainText("계산된 위치 X");
+    await expect(page.getByRole("button", { name: "오디오 시작", exact: true })).toBeDisabled();
+    device.move({ x: 1, z: 2, boardHeight: 1.2 });
+    await expect(page.locator("#audio-block-reason")).toHaveCount(0);
+    await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
+    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+    await expect.poll(async () => (await messages(page))["whistle-board-height"]).toEqual([1.2]);
+    await expect.poll(async () => (await messages(page))["whistle-player"]?.[4]).toBeCloseTo(0);
+    device.move({ x: 3, z: 2, boardHeight: 1.2 });
+    await expect(page.locator("#rough")).toHaveText("1.000");
+    await expect.poll(async () => (await messages(page))["whistle-player"]?.[4]).toBeCloseTo(1);
+    device.invalid();
+    await expect(page.locator("#device-status")).toContainText("앵커가 3개 이상");
+    await expect(page.locator("#range-data")).toContainText("미수신");
+    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    device.valid();
+    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+    device.pause();
+    await page.getByLabel("태그 높이 (m)", { exact: true }).fill("1");
+    await apply.click();
+    await expect(page.getByTestId("position-marker")).toHaveCount(0);
+    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    device.move({ x: 1, z: 2, boardHeight: 1 }); device.resume();
+    await expect.poll(async () => (await messages(page))["whistle-board-height"]).toEqual([1]);
+    device.pause();
+    await expect(page.locator("#device-status")).toContainText("1초 동안 거리 수신 없음");
+    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    device.resume();
+    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+    await page.getByRole("button", { name: "거리만 확인", exact: true }).click();
+    await expect(page.locator("#device-status")).toContainText("좌표 계산 안 함");
+    await expect(page.getByTestId("position-marker")).toHaveCount(0);
+    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+  } finally { await device.close(); }
+});
+
 test("tag selection, saved Whistle world and connection loss do not use another or stale position", async ({ page }) => {
   const device = await setup(page);
   try {
@@ -107,5 +167,36 @@ test("tag selection, saved Whistle world and connection loss do not use another 
     await expect(page.locator("#device-status")).toContainText("PC 수신기 연결 끊김");
     await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
     expect(await page.evaluate(() => localStorage.getItem("whistle.world.v2"))).toBe(stored);
+  } finally { await device.close(); }
+});
+
+test("centre calibration corrects biased distances, follows movement and resets with geometry", async ({ page }) => {
+  const source = rectangleConfig({ width: 1, depth: .37, anchorHeight: .66, tagHeight: .66 });
+  const device = await setup(page, source, true, [.45, .55, .8, .5]);
+  try {
+    device.move({ x: .5, z: .185, boardHeight: .66 });
+    await page.getByRole("button", { name: "연결 / 다시 연결", exact: true }).click();
+    for (const [label, value] of [["앵커 배치 가로 (m)", "1"], ["앵커 배치 세로 (m)", ".37"],
+      ["앵커 공통 높이 (m)", ".66"], ["태그 높이 (m)", ".66"]]) await page.getByLabel(label, { exact: true }).fill(value);
+    await page.getByRole("button", { name: "배치 적용 · 위치 연결", exact: true }).click();
+    await expect(page.locator("#device-status")).toContainText("위치 수신 중");
+    await expect(page.getByRole("button", { name: "오디오 시작", exact: true })).toBeDisabled();
+    await page.getByRole("button", { name: "중앙 거리 보정 · 5초", exact: true }).click();
+    await expect(page.locator("#correction-status")).toContainText("임시 보정 적용됨", { timeout: 10000 });
+    await expect.poll(async () => (await data(page)).metres?.x).toBeCloseTo(.5, 3);
+    await expect.poll(async () => (await data(page)).metres?.z).toBeCloseTo(.185, 3);
+    await expect(page.getByRole("button", { name: "오디오 시작", exact: true })).toBeEnabled();
+    await expect(page.locator("#range-data")).toContainText("원본 거리");
+    await expect(page.locator("#range-data")).toContainText("보정 거리");
+    device.move({ x: .25, z: .185, boardHeight: .66 });
+    await expect.poll(async () => (await data(page)).metres?.x).toBeCloseTo(.25, 2);
+    device.pause();
+    await expect(page.locator("#device-status")).toContainText("1초 동안 거리 수신 없음");
+    device.resume();
+    await expect.poll(async () => (await data(page)).metres?.x).toBeCloseTo(.25, 2);
+    await page.getByLabel("앵커 배치 세로 (m)", { exact: true }).fill(".4");
+    await page.getByRole("button", { name: "배치 적용 · 위치 연결", exact: true }).click();
+    await expect(page.locator("#correction-status")).toHaveText("거리 보정 없음");
+    await expect(page.locator("#range-data")).not.toContainText("보정 거리");
   } finally { await device.close(); }
 });

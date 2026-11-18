@@ -8,6 +8,8 @@ import { createLabWorld } from "./world";
 import { useLiveWorld } from "./useLiveWorld";
 import { useDevicePosition } from "./useDevicePosition";
 import DeviceControls from "./DeviceControls";
+import AnchorControls from "./AnchorControls";
+import { rectangleConfig, type RectangleSetup } from "../lib/uwb/rectangle";
 
 const initialMapping: RoomMapping = { originX: 0, originZ: 0, width: 6, depth: 6, rotation: 0 };
 const labels: Record<keyof RoomMapping, string> = {
@@ -22,7 +24,9 @@ export default function Lab() {
   const [manualHeight, setBoardHeight] = useState(0);
   const [inputMode, setInputMode] = useState<"manual" | "device">("manual");
   const deviceMode = inputMode === "device";
-  const device = useDevicePosition(deviceMode);
+  const [anchorSetup, setAnchorSetup] = useState<RectangleSetup | null>(null);
+  const calibration = useMemo(() => anchorSetup ? rectangleConfig(anchorSetup) : null, [anchorSetup]);
+  const device = useDevicePosition(deviceMode, calibration);
   const position = deviceMode ? device.position ?? manualPosition : manualPosition;
   const boardHeight = deviceMode ? device.position?.boardHeight ?? 0 : manualHeight;
   const [packet, setPacket] = useState('{"x":1,"z":3,"boardHeight":0}');
@@ -126,6 +130,9 @@ export default function Lab() {
   }
   const frame = sample.value?.frame;
   const grid = sample.value?.grid;
+  const audioBlockReason = heightError || (!frame
+    ? (deviceMode && !device.position ? device.status : sample.error || (sample.value && statusLabels[sample.value.status]))
+    : "");
   const mappingValid = Object.values(mapping).every(Number.isFinite) && mapping.width > 0 && mapping.depth > 0;
   const readout = sample.value ? { status: sample.value.status, metres: { x: position.x, z: position.z },
     boardHeight: heightError ? null : boardHeight,
@@ -179,6 +186,10 @@ export default function Lab() {
         <button onClick={() => void startAudio()} disabled={audioState !== "off" || !frame || !!heightError}>오디오 시작</button>
         <button onClick={stopAudio} disabled={audioState === "off"}>오디오 종료</button>
         <p id="audio-status" role="status">{audioError || ({ off: "오디오 꺼짐", loading: "패치 준비 중", on: "오디오 실행 중" })[audioState]}</p>
+        {audioBlockReason ? <p id="audio-block-reason" role="status">오디오 연결 불가: {audioBlockReason}
+          {sample.value?.status === "outside" ? <><br />계산된 위치 X {position.x.toFixed(2)}m · Z {position.z.toFixed(2)}m.
+            태그가 전시장 매핑 영역 안에 있는지, 앵커 배치·높이가 실측값과 맞는지 확인하세요.</> : null}
+        </p> : null}
         </section>
         <fieldset><legend>전시장 매핑</legend>
           {(Object.keys(labels) as (keyof RoomMapping)[]).map((key) => <label key={key}>{labels[key]}
@@ -193,6 +204,10 @@ export default function Lab() {
           <label><input type="radio" name="input-mode" checked={deviceMode} onChange={() => setInputMode("device")} />실제 데이터 · PC 수신기</label>
         </fieldset>
         {deviceMode ? <DeviceControls device={device} /> : null}
+        {deviceMode ? <AnchorControls applied={anchorSetup} onApply={(setup) => {
+          setAnchorSetup(setup);
+          setMapping({ originX: 0, originZ: 0, width: setup.width, depth: setup.depth, rotation: 0 });
+        }} onClear={() => setAnchorSetup(null)} /> : null}
         <fieldset disabled={deviceMode}><legend>가상 UWB 입력 · 미터</legend>
           {(["x", "z"] as const).map((axis) => <label key={axis}>관객 {axis.toUpperCase()} (m)
             <input type="number" step="0.1" value={Number.isFinite(manualPosition[axis]) ? manualPosition[axis] : ""}

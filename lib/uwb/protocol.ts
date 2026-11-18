@@ -1,12 +1,13 @@
 export type Point = { x: number; z: number; boardHeight: number };
 export type Range = { anchorId: string; distance: number };
 export type RangePacket = { type: "ranges"; tagId: string; seq: number; ranges: Range[] };
+export type RangeMessage = RangePacket & { receivedAt: number };
 export type PositionMessage = Point & {
   type: "position"; tagId: string; seq: number; receivedAt: number;
   heightSource: "fixed" | "uwb"; residual: number; anchors: number;
 };
 export type InvalidMessage = { type: "invalid"; tagId: string; seq: number; error: string };
-export type BridgeMessage = PositionMessage | InvalidMessage;
+export type BridgeMessage = PositionMessage | InvalidMessage | RangeMessage;
 export const TRACKING_TIMEOUT_MS = 1000;
 export const MAX_PACKET_BYTES = 4096;
 
@@ -41,6 +42,10 @@ export function parseBridgeMessage(text: string): BridgeMessage {
   if (text.length > MAX_PACKET_BYTES) throw new Error("좌표 패킷이 너무 큽니다.");
   const v: unknown = JSON.parse(text);
   if (!record(v) || !identifier(v.tagId) || !sequence(v.seq)) throw new Error("좌표 패킷 형식 오류");
+  if (v.type === "ranges") {
+    if (!finite(v.receivedAt) || v.receivedAt < 0) throw new Error("거리 수신 시각 오류");
+    return { ...parseRanges(text), receivedAt: v.receivedAt };
+  }
   if (v.type === "invalid" && typeof v.error === "string" && v.error.length <= 200) return v as InvalidMessage;
   if (v.type !== "position" || !finite(v.x) || !finite(v.z) || !finite(v.boardHeight)
     || v.boardHeight < 0 || v.boardHeight > 10 || !finite(v.receivedAt)

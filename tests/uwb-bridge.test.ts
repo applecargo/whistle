@@ -10,6 +10,8 @@ import { parseConfig, solvePosition, distanceTo } from "../lib/uwb/solver.ts";
 import { createProcessor, startBridge } from "../scripts/uwb/bridge.ts";
 import { parseMakerfabs, attachLines } from "../scripts/uwb/input.ts";
 import { startSimulator } from "../scripts/uwb/simulator.ts";
+import { rectangleConfig } from "../lib/uwb/rectangle.ts";
+import { calibrateAtCentre, correctRanges } from "../lib/uwb/range-calibration.ts";
 
 const config = parseConfig(JSON.parse(await readFile(new URL("../config/uwb.example.json", import.meta.url), "utf8")));
 const point = { x: 1, z: 3, boardHeight: 1.2 };
@@ -17,6 +19,43 @@ const packet = (p: Point = point, seq = 1, tagId = "0"): RangePacket => ({ type:
   ranges: config.anchors.map((a) => ({ anchorId: a.id, distance: distanceTo(p, a) })),
 });
 const near = (actual: number, expected: number, tolerance = 1e-5) => assert.ok(Math.abs(actual - expected) < tolerance, `${actual} ≠ ${expected}`);
+
+test("centre correction removes per-anchor offsets without pinning other positions", () => {
+  const config = rectangleConfig({ width: 1, depth: .37, anchorHeight: .66, tagHeight: .66 });
+  const centre = { x: .5, z: .185, boardHeight: .66 }, biases = [.45, .55, .8, .5];
+  const rangesAt = (p: Point) => config.anchors.map((a, i) => ({ anchorId: a.id, distance: distanceTo(p, a) + biases[i] }));
+  const frames = Array.from({ length: 50 }, (_, seq) => ({ type: "ranges" as const, tagId: "0", seq, receivedAt: seq * 100, ranges: rangesAt(centre) }));
+  const corrections = calibrateAtCentre(frames, config);
+  corrections.forEach((c, i) => near(c.offset, biases[i]));
+  for (const p of [centre, { ...centre, x: .25 }, { ...centre, z: .3 }, { ...centre, x: 1.2 }]) {
+    const raw = rangesAt(p), saved = structuredClone(raw);
+    const result = solvePosition(correctRanges(raw, corrections), config);
+    near(result.x, p.x); near(result.z, p.z); assert.deepEqual(raw, saved);
+  }
+  assert.throws(() => calibrateAtCentre(frames.slice(0, 10), config));
+  assert.throws(() => calibrateAtCentre([...frames, { ...frames[0], tagId: "1" }], config));
+  assert.throws(() => calibrateAtCentre(frames.map((f, i) => ({ ...f, ranges: f.ranges.map((r) => ({ ...r, distance: r.distance + i * .02 })) })), config));
+  assert.throws(() => correctRanges([{ anchorId: "0", distance: .1 }], corrections));
+  assert.throws(() => correctRanges([{ anchorId: "7", distance: 1 }], corrections));
+});
+
+test("equal-height rectangle uses clockwise IDs from the top left and accounts for tag height", () => {
+  const setup = { width: 6, depth: 4, anchorHeight: 1.5, tagHeight: 0.8 };
+  const rectangle = rectangleConfig(setup);
+  assert.deepEqual(rectangle.anchors.map(({ id, x, z }) => ({ id, x, z })), [
+    { id: "0", x: 0, z: 0 }, { id: "1", x: 6, z: 0 },
+    { id: "2", x: 6, z: 4 }, { id: "3", x: 0, z: 4 },
+  ]);
+  for (const [x, z] of [[0, 0], [6, 0], [6, 4], [0, 4], [1, 3], [5, 1]]) {
+    const point = { x, z, boardHeight: setup.tagHeight };
+    const ranges = rectangle.anchors.map((a) => ({ anchorId: a.id, distance: distanceTo(point, a) }));
+    const solved = solvePosition(ranges, rectangle);
+    near(solved.x, x); near(solved.z, z); near(solved.boardHeight, setup.tagHeight);
+  }
+  for (const override of [{ width: 0 }, { depth: NaN }, { width: 1001 }, { anchorHeight: -1 }, { tagHeight: 11 }]) {
+    assert.throws(() => rectangleConfig({ ...setup, ...override }));
+  }
+});
 
 test("2D solver accounts for anchor elevation with only three ranges", () => {
   const result = solvePosition(packet().ranges.slice(0, 3), config);
@@ -114,6 +153,48 @@ test("bridge output parser rejects bad height and malformed coordinates", () => 
   assert.throws(() => parseBridgeMessage(JSON.stringify({ ...messages[0], x: "1" })));
 });
 
+test("range-only tracking preserves measured ranges without solving and handles serial wrap", () => {
+  const output: BridgeMessage[] = [];
+  const receive = createProcessor(config, (message) => output.push(message), true);
+  const raw = "AT+RANGE=tid:0,mask:05,seq:255,range:(150,999,350,0,0,0,0,0),ancid:(3,1,2,-1,-1,-1,-1,-1)";
+  const first = parseMakerfabs(raw)!;
+  receive(first, true, 1000);
+  receive(first, true, 1100);
+  receive({ ...first, seq: 0, ranges: [] }, true, 1200);
+  assert.deepEqual(output, [
+    { type: "ranges", tagId: "0", seq: 1, receivedAt: 1000, ranges: first.ranges },
+    { type: "ranges", tagId: "0", seq: 2, receivedAt: 1200, ranges: [] },
+  ]);
+  assert.deepEqual(parseBridgeMessage(JSON.stringify(output[0])), output[0]);
+  for (const overrides of [{ receivedAt: -1 }, { receivedAt: "now" },
+    { ranges: [{ anchorId: "0", distance: 0 }] },
+    { ranges: [first.ranges[0], first.ranges[0]] }]) {
+    assert.throws(() => parseBridgeMessage(JSON.stringify({ ...output[0], ...overrides })));
+  }
+});
+
+test("USB raw reports reach WebSocket in range-only mode without configured anchor geometry", async (t) => {
+  const bridge = await startBridge(config, { wsPort: 0, udpPort: 0, rangesOnly: true });
+  t.after(() => bridge.close());
+  const path = "/dev/whistle-range-mock";
+  SerialPortMock.binding.createPort(path);
+  const serial = new SerialPortMock({ path, baudRate: 115200 });
+  await once(serial, "open");
+  t.after(() => serial.close());
+  t.after(attachLines(serial, (line) => {
+    const packet = parseMakerfabs(line);
+    if (packet) bridge.receive(packet, true);
+  }, assert.fail));
+  const client = new WebSocket(`ws://127.0.0.1:${bridge.wsPort}`);
+  t.after(() => client.terminate());
+  await once(client, "open");
+  const response = once(client, "message", { signal: AbortSignal.timeout(3000) });
+  serial.port!.emitData("AT+RANGE=tid:0,mask:01,seq:0,range:(378,0,0,0,0,0,0,0),ancid:(7,-1,-1,-1,-1,-1,-1,-1)\r\n");
+  const message = parseBridgeMessage((await response)[0].toString());
+  assert.equal(message.type, "ranges");
+  if (message.type === "ranges") assert.deepEqual(message.ranges, [{ anchorId: "7", distance: 3.78 }]);
+});
+
 test("USB stream framing handles split reports, CRLF, startup logs and oversized lines", async (t) => {
   const path = "/dev/whistle-uwb-mock";
   SerialPortMock.binding.createPort(path);
@@ -177,4 +258,31 @@ test("hardware-free simulator sends distances through UDP for all four tags and 
   });
   t.after(startSimulator(spatial, bridge.udpPort));
   await complete;
+});
+
+test("Makerfabs UDP forwards one raw line per datagram across sequence wrap and ignores old or duplicate reports", async (t) => {
+  const bridge = await startBridge(config, { wsPort: 0, udpPort: 0, rangesOnly: true, log: () => {} });
+  t.after(() => bridge.close());
+  const socket = createSocket("udp4");
+  t.after(() => socket.close());
+  const client = new WebSocket(`ws://127.0.0.1:${bridge.wsPort}`);
+  t.after(() => client.terminate());
+  await once(client, "open");
+  const distances: number[] = [];
+  const done = new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("missing raw UDP report")), 3000);
+    t.after(() => clearTimeout(timer));
+    client.on("message", data => {
+      const msg = parseBridgeMessage(data.toString());
+      if (msg.type === "ranges") {
+        distances.push(msg.ranges[0].distance);
+        if (msg.ranges[0].distance === 4) resolve();
+      }
+    });
+  });
+  for (const [seq, cm] of [[255,100],[0,200],[255,300],[0,300],[1,400]]) {
+    socket.send(`AT+RANGE=tid:0,mask:01,seq:${seq},range:(${cm},0,0,0,0,0,0,0),ancid:(0,-1,-1,-1,-1,-1,-1,-1)\r\n`, bridge.udpPort, "127.0.0.1");
+  }
+  await done;
+  assert.deepEqual(distances, [1, 2, 4]);
 });

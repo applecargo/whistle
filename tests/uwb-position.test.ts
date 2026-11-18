@@ -1,3 +1,5 @@
+import { createTrackingFilter } from "../uwb-lab/tracking-filter.ts";
+import type { PositionMessage } from "../lib/uwb/protocol.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mapRoomPosition, roomPositionAt, sampleTrackedPosition, type RoomMapping } from "../lib/uwb-position.ts";
@@ -79,4 +81,20 @@ test("holes and positions outside the room have no audio input", () => {
   const outside = sampleTrackedPosition(world, derivation, { x: 7, z: 3 }, mapping);
   assert.equal(outside.status, "outside");
   assert.equal(outside.frame, null);
+});
+
+test("device tracking suppresses small planar jitter, follows cumulative motion and keeps height independent", () => {
+  const filter = createTrackingFilter();
+  const point = (x: number, boardHeight = 0.65): PositionMessage => ({
+    type: "position", tagId: "0", seq: 1, receivedAt: 0, heightSource: "fixed",
+    anchors: 3, residual: 0.08, x, z: 1, boardHeight,
+  });
+  assert.equal(filter.update(point(1), 0)?.x, 1);
+  assert.equal(filter.update(point(1.05), 100), null);
+  assert.equal(filter.update(point(1.06, 0.8), 160)?.x, 1);
+  assert.equal(filter.update(point(1.11, 0.8), 220), null);
+  assert.equal(filter.update(point(1.16, 0.8), 280)?.x, 1.16);
+  assert.equal(filter.update(point(1.66), 340)?.x, 1.66);
+  filter.reset();
+  assert.equal(filter.update(point(1.67), 341)?.x, 1.67);
 });

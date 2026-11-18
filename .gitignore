@@ -6,3 +6,11 @@ dist/
 output/playwright/
 output/performance/
 public/audio-test/
+output/uwb/
+firmware/uwb-anchor/network.local.h
+config/uwb-survey.local.json
+config/uwb-router.local.json
+
+firmware/uwb-tag/network.local.h
+firmware/*/build/
+.playwright-cli/
