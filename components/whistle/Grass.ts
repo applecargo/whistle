@@ -53,6 +53,46 @@ export function makeGrass(
   const toScene = (n: number) => n * 2 - world.size + 1;
 
   const patchColor = new THREE.Color();
+  const cover = ground.clone();
+  const positions = cover.getAttribute("position");
+  const coverage: number[] = [], coverColors: number[] = [];
+  for (let i = 0; i < positions.count; i++) {
+    const x = (positions.getX(i) + world.size - 1) / 2;
+    const z = (positions.getZ(i) + world.size - 1) / 2;
+    coverage.push(grassCoverAt(world, x, z, structures, environment));
+    const tone = grassAppearance(world.terrain?.seed ?? 0, x, z);
+    patchColor.setRGB(tone.r, tone.g, tone.b, THREE.SRGBColorSpace);
+    const shade = (patchColor.r * .2126 + patchColor.g * .7152 + patchColor.b * .0722) * .5;
+    coverColors.push(shade, shade, shade);
+    positions.setY(i, positions.getY(i) + .025);
+  }
+  cover.setAttribute("grassCover", new THREE.Float32BufferAttribute(coverage, 1));
+  cover.setAttribute("color", new THREE.Float32BufferAttribute(coverColors, 3));
+  const coverMaterial = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 1,
+    transparent: true,
+    depthWrite: false,
+  });
+  coverMaterial.onBeforeCompile = (shader) => {
+    shader.vertexShader = "attribute float grassCover; varying float vGrassCover; varying vec3 vGrassPosition;\n" + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace("#include <begin_vertex>", `#include <begin_vertex>
+      vGrassCover = grassCover;
+      vGrassPosition = position;
+    `);
+    shader.fragmentShader = "varying float vGrassCover; varying vec3 vGrassPosition;\n" + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace("#include <color_fragment>", `#include <color_fragment>
+      float leafGrain = sin(vGrassPosition.x * 91.0 + sin(vGrassPosition.z * 43.0)) * sin(vGrassPosition.z * 117.0 + vGrassPosition.x * 37.0);
+      diffuseColor.rgb *= .9 + .12 * leafGrain;
+      diffuseColor.a *= vGrassCover;
+      if (diffuseColor.a < .015) discard;
+    `);
+  };
+  const understory = new THREE.Mesh(cover, coverMaterial);
+  understory.name = "grass-understory";
+  understory.receiveShadow = true;
+  group.add(understory);
+
   const bladeGeometry = makeGrassGeometry(random);
   const roots: { x: number; z: number; height: number }[] = [],
     budget = 2600,
