@@ -43,22 +43,16 @@ const LazyScene = lazy(() => import("@/components/whistle/Scene"));
 function Scene(props: ComponentProps<typeof LazyScene>) {
   return <Suspense fallback={<SceneLoading />}><LazyScene {...props} /></Suspense>;
 }
-type FolioSession = {
-  world: World;
-  onEdit?: (world: World) => void;
-  onFootstep?: (frame: import("@/lib/audio/game-parameters").PlayerAudioFrame) => void;
-  finishWalk?: () => void;
-};
-export default function Home({ folio }: { folio?: FolioSession }) {
+export default function Home() {
   const { t } = useLanguage();
-  const [initialWorld] = useState(() => folio?.world ?? starterWorld());
+  const initialWorld = useMemo(starterWorld, []);
   const [selectedAsset, setSelectedAsset] = useState("circle"),
     [selected, setSelected] = useState<string | null>(null),
     [placingStart, setPlacingStart] = useState(false);
   const [simulation, setSimulation] = useState<Simulation>(() =>
       createSimulation(initialWorld),
     ),
-    [playing, setPlaying] = useState(!!folio?.finishWalk),
+    [playing, setPlaying] = useState(false),
     [log, setLog] = useState<Event[]>([]),
     [toast, setToast] = useState(""),
     [showMaker, setShowMaker] = useState(false),
@@ -111,10 +105,6 @@ export default function Home({ folio }: { folio?: FolioSession }) {
     commit: updateWorld, edit: change, load: loadDocument,
     undo: undoDocument, redo: redoDocument, paint: paintDocument, endStroke,
   } = useWorldDocument(initialWorld, resetSimulation);
-  const onEdit = folio?.onEdit;
-  useEffect(() => { onEdit?.(world); }, [world, onEdit]);
-  const performing = !!folio?.finishWalk;
-  useEffect(() => { if (performing) audio.play(); }, [performing, audio]);
   const derivation = useMemo(
     () => deriveWorld(world, simulation.actors),
     [deriveWorld, world, simulation.actors],
@@ -138,7 +128,7 @@ export default function Home({ folio }: { folio?: FolioSession }) {
     setSelected(null);
   }, [updateWorld]);
   const { saveStatus, resumeAutosave, importFile: loadFile } = useWorldPersistence({
-    world, onLoad: handleLoad, onImport: handleImport, notify, enabled: !folio,
+    world, onLoad: handleLoad, onImport: handleImport, notify,
   });
   const reset = useCallback((w: World = getWorld()) => {
     resetSimulation(w);
@@ -178,7 +168,6 @@ export default function Home({ folio }: { folio?: FolioSession }) {
   };
   const exit = () => {
     audio.stop();
-    if (folio?.finishWalk) { folio.finishWalk(); return; }
     setPlaying(false);
     controls.current.clear();
     setMovementMode("walk");
@@ -320,7 +309,7 @@ export default function Home({ folio }: { folio?: FolioSession }) {
   };
   return (
     <main className={`studio ${playing ? "playing" : ""}`}>
-      {!folio && <EditorToolbar
+      <EditorToolbar
         playing={playing}
         saveStatus={saveStatus}
         makeButton={makeButton}
@@ -329,7 +318,7 @@ export default function Home({ folio }: { folio?: FolioSession }) {
         onNew={() => setNewDialog(true)}
         onImport={() => file.current?.click()}
         onShare={() => setShare(true)}
-      />}
+      />
       {playing && (
         <section className="play-shell">
           <Scene
@@ -339,13 +328,12 @@ export default function Home({ folio }: { folio?: FolioSession }) {
             derivation={derivation}
             mode="play"
             onPlayer={(p) => (player.current = p)}
-            onAudioFrame={frame => { audio.movement(frame); folio?.onFootstep?.(frame); }}
+            onAudioFrame={audio.movement}
             controls={controls}
             onControlsReset={() => setMovementMode("walk")}
           />
-          <button className={performing ? "z-finish" : "play-return"} aria-label={performing ? "연주 마치기" : t("만들기로 돌아가기")} onClick={exit}>
-            {performing && "연주 마치기"}
-            {!performing && <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /></svg>}
+          <button className="play-return" aria-label={t("만들기로 돌아가기")} onClick={exit}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /></svg>
           </button>
           <div className="crosshair" />
           <PlayControls
