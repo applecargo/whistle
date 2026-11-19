@@ -30,6 +30,7 @@ test("automatic daylight follows local time and its menu opens without changing 
   const indicator = page.locator(".daylight-indicator");
   await expect(indicator).toHaveAttribute("data-time-of-day", "day");
   await expect(indicator).toHaveAccessibleName(/현재 낮/);
+  await expect.poll(() => page.evaluate(() => (globalThis as any).__testScene.background.r)).toBeGreaterThan(.3);
   expect(await indicator.evaluate(el => el.tagName)).toBe("BUTTON");
   expect(await indicator.evaluate(el => (el as HTMLElement).tabIndex)).toBe(0);
   await expect(page.locator('.palette-weather button')).toHaveCount(3);
@@ -43,6 +44,8 @@ test("automatic daylight follows local time and its menu opens without changing 
   await page.clock.fastForward(30_000);
   await expect(indicator).toHaveAttribute("data-time-of-day", "night");
   await expect(indicator).toHaveAccessibleName(/현재 밤/);
+  await page.clock.runFor(2000);
+  await expect.poll(() => page.evaluate(() => (globalThis as any).__testScene.background.r)).toBeLessThan(.01);
   await page.screenshot({ path: testInfo.outputPath("night-indicator.png") });
   expect(errors).toEqual([]);
 });
@@ -94,6 +97,20 @@ test("branch silhouettes retain tapered limbs, bark and closed ends", async ({ p
     camera.zoom = 4; camera.updateProjectionMatrix(); orbit.update();
   });
   await page.locator(".live-preview canvas").screenshot({ path: testInfo.outputPath("tree-closeup.png") });
+  await page.locator(".daylight-indicator").click();
+  await page.getByRole("button",{name:"한밤중",exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>(globalThis as any).__testScene.getObjectByName("whistle-sun").intensity)).toBeLessThan(.02);
+  await expect.poll(()=>page.locator(".live-preview canvas").evaluate(canvas=>new Promise<number>(resolve=>{
+    requestAnimationFrame(()=>{
+      const source=canvas as HTMLCanvasElement,copy=document.createElement("canvas");
+      copy.width=source.width;copy.height=source.height;
+      const context=copy.getContext("2d")!;context.drawImage(source,0,0);
+      const pixels=context.getImageData(0,0,copy.width,copy.height).data;
+      let visible=0;for(let i=0;i<pixels.length;i+=4)if(pixels[i]>35)visible++;
+      resolve(visible);
+    });
+  }))).toBeGreaterThan(50);
+  await page.locator(".live-preview canvas").screenshot({path:testInfo.outputPath("tree-night.png")});
   expect(errors).toEqual([]);
 });
 
@@ -111,7 +128,7 @@ test("time overrides update lighting and water, survive reload and play, and ret
   await expect(indicator).toHaveAttribute("data-time-mode", "midnight");
   await expect(page.getByRole("button", { name: "비", exact: true })).toHaveAttribute("aria-pressed", "true");
   expect(await page.evaluate(() => (globalThis as any).__terrainBefore === (globalThis as any).__testScene.getObjectByName("continuous-ground"))).toBe(true);
-  await expect.poll(() => page.evaluate(() => (globalThis as any).__testScene.getObjectByName("generated-water").material.uniforms.lightPower.value)).toBeCloseTo(.22, 2);
+  await expect.poll(() => page.evaluate(() => (globalThis as any).__testScene.getObjectByName("generated-water").material.uniforms.lightPower.value)).toBeCloseTo(.66, 2);
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("whistle.world.v2")!).timeOfDay)).toBe("midnight");
   await page.reload();
   await expect(indicator).toHaveAttribute("data-time-mode", "midnight");

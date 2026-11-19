@@ -33,6 +33,44 @@ const presentations = (page: Page) => page.evaluate(() => {
   return world.objects.map((object: any) => scene.children.find((model: any) => model.userData.placementId === object.id)?.userData.presentation);
 });
 
+test("symbols overlap without backgrounds, keep shared colors and erase independently", async ({ page }, testInfo) => {
+  const errors = await setup(page);
+  const create = async (text: string) => {
+    await page.getByRole("button", { name: "텍스트 만들기", exact: true }).click();
+    await page.getByRole("textbox", { name: "텍스트 입력" }).fill(text);
+    await page.getByRole("button", { name: "저장", exact: true }).click();
+  };
+  await create("첫 번째");
+  await page.locator('[data-cell="78"]').click();
+  await page.locator('[data-cell="79"]').click();
+  const firstColor = await page.locator('[data-cell="78"] .site-glyph').evaluate(el => getComputedStyle(el).color);
+  await expect(page.locator('[data-cell="79"] .site-glyph')).toHaveCSS("color", firstColor);
+  await create("두 번째");
+  await page.locator('[data-cell="78"]').click();
+  await expect(page.locator('[data-cell="78"] [data-symbol-site]')).toHaveCount(2);
+  const colors = await page.locator('[data-cell="78"] .site-glyph').evaluateAll(els => els.map(el => getComputedStyle(el).color));
+  expect(new Set(colors).size).toBe(2);
+  await expect.poll(async () => (await saved(page)).objects.length).toBe(3);
+  for (const glyph of await page.locator('[data-cell="78"] .generated-site').all()) {
+    await expect(glyph).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(glyph.locator("svg")).toHaveCSS("opacity", "0.8");
+  }
+  await page.getByRole("button", { name: "되돌리기", exact: true }).click();
+  await expect(page.locator('[data-cell="78"] [data-symbol-site]')).toHaveCount(1);
+  await page.getByRole("button", { name: "다시 실행", exact: true }).click();
+  await page.reload();
+  await expect(page.locator('[data-cell="78"] [data-symbol-site]')).toHaveCount(2);
+  expect(await page.locator('[data-cell="78"] .site-glyph').evaluateAll(els => els.map(el => getComputedStyle(el).color))).toEqual(colors);
+  const second = (await saved(page)).assets.find((asset: any) => asset.text === "두 번째");
+  await page.locator(`[data-symbol-asset="${second.id}"]`).click();
+  await page.locator('[data-cell="78"]').click();
+  await expect(page.locator('[data-cell="78"] [data-symbol-site]')).toHaveCount(1);
+  await expect(page.locator('[data-cell="78"] .site-glyph')).toHaveCSS("color", firstColor);
+  await page.getByRole("button", { name: "되돌리기", exact: true }).click();
+  await page.screenshot({ path: testInfo.outputPath("overlapping-symbols.png") });
+  expect(errors).toEqual([]);
+});
+
 test("text is created freely, placed repeatedly, erased, undone and edited without generated slots", async ({ page }, testInfo) => {
   const errors = await setup(page);
   await page.getByRole("button", { name: "텍스트 만들기", exact: true }).click();

@@ -118,8 +118,8 @@ export default function Home() {
     setContentType(asset.text !== undefined ? "text" : "image");
     setShowMaker(true);
   };
-  const openSymbolAt = (i: number) => {
-    const object = world.objects.find(object => object.x === i % world.size && object.z === Math.floor(i / world.size));
+  const openSymbolAt = (i: number, objectId?: string) => {
+    const object = world.objects.filter(object => object.x === i % world.size && object.z === Math.floor(i / world.size) && (!objectId || object.id === objectId)).at(-1);
     const asset = world.assets.find(asset => asset.id === object?.asset);
     if (object && asset && (asset.image || asset.text?.trim())) editSymbol(asset, object.id);
   };
@@ -233,8 +233,8 @@ export default function Home() {
     if (!asset.image || (contentType === "text" && !asset.text?.trim())) return;
     change(w => {
       const index = w.assets.findIndex(a => a.id === asset.id);
-      if (index >= 0) w.assets[index] = asset;
-      else w.assets.push(asset);
+      if (index >= 0) w.assets[index] = { ...asset, glyphColor: w.assets[index].glyphColor };
+      else w.assets.push({ ...asset, glyphColor: undefined });
       const object = w.objects.find(o => o.id === selected);
       if (object) { object.asset = asset.id; object.scale = asset.defaultScale ?? 1; }
       else if (editingAsset) {
@@ -284,7 +284,7 @@ export default function Home() {
             onControlsReset={() => setMovementMode("walk")}
           />
           <button className="play-return" aria-label={t("만들기로 돌아가기")} onClick={exit}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle className="return-outline" cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="8" /></svg>
           </button>
           <div className="crosshair" />
           <PlayControls

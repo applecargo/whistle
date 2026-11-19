@@ -5,6 +5,7 @@ import { editTile, type TerrainTool } from "@/lib/tile";
 import { flatTerrain, type Surface } from "@/lib/terrain";
 import { createWorldDeriver, samePlacement } from "@/lib/world-derivation";
 import { placementChanges, type PlacementFeedback } from "@/lib/placement-feedback";
+import { withSymbolColors } from "@/lib/symbol-color";
 
 type PaintOptions = {
   layer: "tiles" | "symbols";
@@ -14,7 +15,7 @@ type PaintOptions = {
 };
 
 export function useWorldDocument(initialWorld: World, onChange: (world: World) => void) {
-  const [world, setWorld] = useState(initialWorld);
+  const [world, setWorld] = useState(() => withSymbolColors(initialWorld));
   const worldRef = useRef(world);
   const history = useRef<World[]>([]);
   const future = useRef<World[]>([]);
@@ -30,6 +31,7 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
 
   const getWorld = useCallback(() => worldRef.current, []);
   const applyWorld = useCallback((next: World) => {
+    next = withSymbolColors(next);
     setWorld(next);
     worldRef.current = next;
     onChange(next);
@@ -100,8 +102,9 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
       const asset = next.assets.find(asset => asset.id === assetId)!;
       for (const i of cells) {
         const x = i % next.size, z = Math.floor(i / next.size);
-        next.objects = next.objects.filter(object => object.x !== x || object.z !== z || (erase && object.asset !== asset.id));
-        if (!erase) next.objects.push({ id: uid(), asset: asset.id, x, z, rotation: 0, scale: asset.defaultScale ?? 1 });
+        if (erase) next.objects = next.objects.filter(object => object.x !== x || object.z !== z || object.asset !== asset.id);
+        else if (!next.objects.some(object => object.x === x && object.z === z && object.asset === asset.id))
+          next.objects.push({ id: uid(), asset: asset.id, x, z, rotation: 0, scale: asset.defaultScale ?? 1 });
       }
     }
     if (samePlacement(worldRef.current, next)) {

@@ -1,22 +1,22 @@
 {
   "flat": {
-    "hash": "0525b66cc93d4f9dcd4026080964b448819d14e8b7847b91f6f5e30677b6780b",
+    "hash": "6b40fa7289f7eb56144373516eeafe94e8af770b877e8dd83b7f0aabd7badd1e",
     "meshes": 3,
     "vertices": 45069
   },
   "mixed": {
-    "hash": "51ab1b0220be04382d7f01099138acb7b301e51acdad7a81c35506b44d9c0335",
-    "meshes": 15,
-    "vertices": 109014
+    "hash": "2d33775b829784a7144c54ce217a4448b98b1808f46c88ba44cf8adc860ab78d",
+    "meshes": 20,
+    "vertices": 100858
   },
   "structures": {
-    "hash": "78996cccdab6f3148bd7efe0d7935e3006597f3a8d8a512f6db17e8ee7225eb5",
-    "meshes": 16,
-    "vertices": 110382
+    "hash": "bc820676e987f1b5f173728bedfb687b269ae4f2ea2380df045b44ca446df670",
+    "meshes": 21,
+    "vertices": 102562
   },
   "large": {
-    "hash": "eeabe1f71cc153e568388fc5c0b3c0d6c6bf617bb39b2f1cd26db9051f1ad8c6",
-    "meshes": 16,
-    "vertices": 242583
+    "hash": "ba3b9cf4070e4fffe76f3d79d04209f9f1a40ccd7eb5e2bbac25973b8384b6be",
+    "meshes": 24,
+    "vertices": 267343
   }
 }

@@ -11,16 +11,28 @@ function hash(seed: number, x: number, z: number) {
 export function treeAppearance(seed: number, x: number, z: number) {
   const variantSeed = hash(seed ^ 0x71ee, x, z);
   const random = randomSequence(variantSeed);
-  const species = TREE_SPECIES[Math.floor(random() * TREE_SPECIES.length)];
+  const baseSpecies = TREE_SPECIES[Math.floor(random() * TREE_SPECIES.length)];
   const stature = random();
   const girth = random();
+  const age = hash(seed ^ 0x36a5, x, z) % 7;
+  const growth = age < 2 ? "shrub" : age < 4 ? "sapling" : "mature";
+  const species = growth === "shrub" ? (age === 0 ? "maple" : "zelkova") : baseSpecies;
+  const foliageRandom=randomSequence(hash(seed ^ 0x5f19,x,z));
+  const foliageRoll=foliageRandom();
+  const foliage=growth === "shrub" || foliageRoll < .12 ? "bare" : foliageRoll < .38 ? "sparse" : "leafy";
+  const leafSize=.42+foliageRandom()*.23;
+  const leafDensity=foliage === "bare" ? 0 : foliage === "sparse" ? .12+foliageRandom()*.18 : .45+foliageRandom()*.35;
   return {
     seed: variantSeed,
     species,
+    growth,
+    foliage,
+    leafSize,
+    leafDensity,
     scale: 0.72,
-    height: 2.4 + stature * (species === "maple" ? 2.8 : 3.8),
-    trunkRadius: 0.07 + Math.pow(girth, 1.35) * 0.35,
-    width: 1.0 + stature * 0.65 + girth * 0.45 + random() * 0.45,
+    height: growth === "shrub" ? .85 + stature * .9 : growth === "sapling" ? 1.8 + stature * 1.5 : 3.8 + stature * 2.8,
+    trunkRadius: (0.07 + Math.pow(girth, 1.35) * 0.35) * (growth === "shrub" ? .4 : growth === "sapling" ? .6 : 1),
+    width: (1.0 + stature * 0.65 + girth * 0.45 + random() * 0.45) * (growth === "shrub" ? .65 : growth === "sapling" ? .62 : 1),
     lean: (random() - 0.5) * (species === "pine" ? 1.4 : 0.5),
     rotation: random() * Math.PI * 2,
     tint: random(),

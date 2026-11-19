@@ -71,8 +71,8 @@ export function makeGrass(
   const coverMaterial = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 1,
-    transparent: true,
-    depthWrite: false,
+    transparent: false,
+    depthWrite: true,
   });
   coverMaterial.onBeforeCompile = (shader) => {
     shader.vertexShader = "attribute float grassCover; varying float vGrassCover; varying vec3 vGrassPosition;\n" + shader.vertexShader;
@@ -80,12 +80,29 @@ export function makeGrass(
       vGrassCover = grassCover;
       vGrassPosition = position;
     `);
-    shader.fragmentShader = "varying float vGrassCover; varying vec3 vGrassPosition;\n" + shader.fragmentShader;
+    shader.fragmentShader = `
+      varying float vGrassCover; varying vec3 vGrassPosition;
+      float grassEdgeHash(vec2 p) {
+        return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);
+      }
+      float grassEdgeNoise(vec2 p) {
+        vec2 cell=floor(p), f=fract(p);
+        f=f*f*(3.0-2.0*f);
+        return mix(mix(grassEdgeHash(cell),grassEdgeHash(cell+vec2(1,0)),f.x),
+          mix(grassEdgeHash(cell+vec2(0,1)),grassEdgeHash(cell+vec2(1,1)),f.x),f.y);
+      }
+    ` + shader.fragmentShader;
     shader.fragmentShader = shader.fragmentShader.replace("#include <color_fragment>", `#include <color_fragment>
-      float leafGrain = sin(vGrassPosition.x * 91.0 + sin(vGrassPosition.z * 43.0)) * sin(vGrassPosition.z * 117.0 + vGrassPosition.x * 37.0);
-      diffuseColor.rgb *= .9 + .12 * leafGrain;
-      diffuseColor.a *= vGrassCover;
-      if (diffuseColor.a < .015) discard;
+      vec2 grainUv=vGrassPosition.xz*vec2(13.0,21.0);
+      float grainFade=1.0-smoothstep(.6,1.8,max(length(dFdx(grainUv)),length(dFdy(grainUv))));
+      float leafGrain=grassEdgeNoise(grainUv)*2.0-1.0;
+      diffuseColor.rgb *= .9 + .08 * leafGrain * grainFade;
+      float fringe=smoothstep(.12,.86,vGrassCover);
+      float clump=grassEdgeNoise(vGrassPosition.xz*7.0)*.65
+        +grassEdgeNoise(vGrassPosition.xz*19.0)*.2;
+      float edgeDot=grassEdgeHash(floor(vGrassPosition.xz*64.0));
+      if (fringe <= .1+clump+edgeDot*.05) discard;
+      diffuseColor.a = 1.0;
     `);
   };
   const understory = new THREE.Mesh(cover, coverMaterial);
@@ -95,8 +112,8 @@ export function makeGrass(
 
   const bladeGeometry = makeGrassGeometry(random);
   const roots: { x: number; z: number; height: number }[] = [],
-    budget = 2600,
-    spacing = Math.max(0.115, Math.sqrt(area / 2300));
+    budget = 4200,
+    spacing = Math.max(0.095, Math.sqrt(area / 3900));
   let accepted = 0;
   for (let z = -0.5 + spacing / 2; z < world.size - 0.5; z += spacing)
     for (let x = -0.5 + spacing / 2; x < world.size - 0.5; x += spacing) {
@@ -154,21 +171,23 @@ export function makeGrass(
   const matrix = new THREE.Matrix4(),
     p = new THREE.Vector3(),
     q = new THREE.Quaternion(),
-    scale = new THREE.Vector3(),
-    up = new THREE.Vector3(0, 1, 0);
+    scale = new THREE.Vector3();
   roots.forEach((root, i) => {
     const tone = grassAppearance(
       world.terrain?.seed ?? 0,
       (root.x + world.size - 1) / 2,
       (root.z + world.size - 1) / 2,
     );
-    const width = 0.9 + random() * 0.3;
+    const width = .65 + random() * .9;
+    const depth = .65 + random() * .9;
+    const stature = .65 + random() * .8;
+    const edgeGrowth=.4+.6*grassCoverAt(world,(root.x+world.size-1)/2,(root.z+world.size-1)/2,structures,environment);
     const growth = environmentAt(environment,(root.x + world.size - 1)/2,(root.z + world.size - 1)/2).growth;
-    q.setFromAxisAngle(up, random() * Math.PI * 2);
+    q.setFromEuler(new THREE.Euler((random()-.5)*.26, random()*Math.PI*2, (random()-.5)*.26));
     matrix.compose(
       p.set(root.x, root.height - 0.015, root.z),
       q,
-      scale.set(width, tone.height * (.85 + growth * .25) * (environmentAt(environment, (root.x + world.size - 1) / 2, (root.z + world.size - 1) / 2).clusterSize < 3 ? .65 : 1), width),
+      scale.set(width, tone.height * stature * edgeGrowth * (.85 + growth * .25) * (environmentAt(environment, (root.x + world.size - 1) / 2, (root.z + world.size - 1) / 2).clusterSize < 3 ? .65 : 1), depth),
     );
     grass.setMatrixAt(i, matrix);
     patchColor.setRGB(tone.r, tone.g, tone.b, THREE.SRGBColorSpace);

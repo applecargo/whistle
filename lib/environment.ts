@@ -1,3 +1,4 @@
+import { limitEffectAreas } from "./effect-limits.ts";
 import { applyTileEffects, tileEffectDefaults } from "./tile-effects.ts";
 import { isHole } from "./tile.ts";
 import type { World } from "./world.ts";
@@ -183,6 +184,7 @@ export function deriveEnvironment(
         }
       }
   }
+  limitEffectAreas(size, cells, ["wind"]);
   const trees: Environment["trees"] = [];
   for (const group of components(
     (i) =>
@@ -277,7 +279,7 @@ export function environmentAt(
       "windX",
       "windZ",
       "fog",
-      "rain", "dust", "bounce", "flowX", "flowZ", "lift", "liftCeiling", "glide", "focus", "flicker",
+      "dust", "bounce", "flowX", "flowZ", "lift", "liftCeiling", "glide", "flicker",
     ] as const)
       out[key] += c[key] * w;
   }

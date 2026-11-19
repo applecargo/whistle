@@ -1,9 +1,10 @@
+import { contentImage } from "../../lib/text-image.ts";
 import { addNeutralGrain } from "./NeutralGrain.ts";
 import * as THREE from "three";
 import { environmentAt, type Environment } from "../../lib/environment.ts";
 import { treeAppearance } from "../../lib/vegetation.ts";
 import type { Actor, Asset, World } from "../../lib/world.ts";
-import { trunkTreeGeometry } from "./TrunkGeometry.ts";
+import { makeTrees } from "./Trees.ts";
 import { projectSurfaceImage } from "./SurfaceProjection.ts";
 
 export function makeTreeSurfaces(world: World, environment: Environment, clock: { value: number }) {
@@ -14,7 +15,18 @@ export function makeTreeSurfaces(world: World, environment: Environment, clock: 
   group.userData.treeTime = clock;
   const trees = environment.trees.map(tree => {
     const profile = treeAppearance(world.terrain?.seed ?? 0, tree.x, tree.z);
-    const geometry = trunkTreeGeometry(profile);
+    const specimen = makeTrees(world, { ...environment, trees: [tree] }, clock);
+    const wood = specimen.getObjectByName("generated-trunks") as THREE.Mesh<THREE.BufferGeometry, THREE.Material>;
+    const geometry = wood.geometry;
+    geometry.translate(-(tree.x * 2 - world.size + 1), -tree.height, -(tree.z * 2 - world.size + 1));
+    geometry.computeBoundingBox();
+    const position = geometry.getAttribute("position"), uv: number[] = [];
+    for (let i = 0; i < position.count; i++)
+      uv.push(Math.atan2(position.getX(i), position.getZ(i)) / (Math.PI * 2) + .5,
+        position.getY(i) / geometry.boundingBox!.max.y);
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    wood.material.dispose();
+    for (const child of [...specimen.children]) if (child !== wood) group.add(child);
     const material = new THREE.MeshStandardMaterial({ color: profile.bark.color, roughness: profile.bark.roughness, vertexColors: true });
     addNeutralGrain(material, "bark", profile.seed, profile.bark);
     projectSurfaceImage(material, new THREE.Vector3(0, geometry.boundingBox!.min.y, 0),
@@ -49,8 +61,9 @@ export function makeTreeSurfaces(world: World, environment: Environment, clock: 
         material.map = null;
         material.color.set(asset?.image ? "#ffffff" : entry.bark.color);
         if (asset?.image) {
-          material.map = new THREE.TextureLoader().load(asset.image);
+          material.map = new THREE.TextureLoader().load(contentImage(asset)!);
           material.map.colorSpace = THREE.SRGBColorSpace;
+          material.map.anisotropy = asset.text ? 16 : 1;
           material.map.wrapS = THREE.RepeatWrapping;
         }
         material.needsUpdate = true;

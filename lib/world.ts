@@ -25,6 +25,7 @@ export type Asset = {
 
   shape: Shape;
   color: string;
+  glyphColor?: string;
   image?: string;
   originalImage?: string;
 
@@ -480,6 +481,7 @@ export function validateWorld(input: unknown): World {
       !text(a.name, 40) ||
       !shapes.includes(a.shape) ||
       !/^#[0-9a-f]{6}$/i.test(a.color) ||
+      (a.glyphColor !== undefined && !/^#[0-9a-f]{6}$/i.test(a.glyphColor)) ||
       typeof a.solid !== "boolean" ||
       (a.placement !== undefined && !["upright", "floating", "surface", "field"].includes(a.placement)) ||
       (a.textColor !== undefined && !/^#[0-9a-f]{6}$/i.test(a.textColor)) ||

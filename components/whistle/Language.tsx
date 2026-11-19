@@ -16,7 +16,6 @@ const english: Record<string, string> = {
   안개: "Mist",
   먼지: "Dust",
   튕기기: "Bounce",
-  집중광: "Focused light",
   부유: "Float",
   활공: "Glide",
   바람: "Wind",

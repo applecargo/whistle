@@ -330,6 +330,7 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
     }),
   );
   bank.receiveShadow = true;
+  bank.name = "terrain-bank";
   bank.userData.interactionOccluder = true;
     group.add(bank);
   if (world.terrain?.tiles.some((t) => isHole(t))) {
@@ -351,27 +352,42 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
     w: number;
     h: number;
     d: number;
+    rotation?: THREE.Quaternion;
+    ladder?: boolean;
   }[] = [];
   for (const s of structures) {
     const x = toScene(s.x),
       z = toScene(s.z),
       y = s.height * LEVEL;
     if (s.kind === "stairs") {
-
-      for (let step = 0; step < 8; step++) {
-        const t = (step + 0.5) / 8,
+      const bottom = new THREE.Vector3(toScene(s.x+s.dx*.16), terrainSample(world,s.x+s.dx*.16,s.z+s.dz*.16).height+.09, toScene(s.z+s.dz*.16));
+      const top = new THREE.Vector3(toScene(s.x+s.dx*.84), terrainSample(world,s.x+s.dx*.84,s.z+s.dz*.84).height+.09, toScene(s.z+s.dz*.84));
+      const direction = top.clone().sub(bottom);
+      const rungCount = Math.max(3,Math.ceil(direction.length()/.46));
+      for (let step = 0; step < rungCount; step++) {
+        const along = (step+.5)/rungCount, t = .16+.68*along,
           gx = s.x + s.dx * t,
           gz = s.z + s.dz * t;
-        const elevation = terrainSample(world, gx, gz).height;
-        const bottom = y - foundationDepth;
         architecture.push({
           x: toScene(gx),
           z: toScene(gz),
-          y: (elevation + 0.025 + bottom) / 2,
-          w: s.dx ? 0.25 : 2,
-          d: s.dz ? 0.25 : 2,
-          h: elevation + 0.025 - bottom,
+          y: terrainSample(world,gx,gz).height+.07,
+          w: s.dx ? .065 : .5,
+          d: s.dz ? .065 : .5,
+          h: .035,
+          ladder: true,
         });
+        for (const side of [-1,1]) {
+          const railPoint = (part: number) => {
+            const g=.16+.68*part, rx=s.x+s.dx*g-s.dz*.125*side, rz=s.z+s.dz*g+s.dx*.125*side;
+            return new THREE.Vector3(toScene(rx),terrainSample(world,rx,rz).height+.065,toScene(rz));
+          };
+          const a=railPoint(step/rungCount), b=railPoint((step+1)/rungCount);
+          const rail=b.clone().sub(a), center=a.clone().add(b).multiplyScalar(.5);
+          architecture.push({x:center.x,y:center.y,z:center.z,w:.04,h:rail.length()+.012,d:.04,
+            rotation:new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),rail.normalize()),ladder:true});
+        }
+
       }
     }
     if (s.kind === "bridge") {
@@ -397,17 +413,20 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
     p = new THREE.Vector3(),
     q = new THREE.Quaternion(),
     scale = new THREE.Vector3();
-  if (architecture.length) {
+  for (const ladder of [false,true]) {
+    const pieces=architecture.filter(piece=>!!piece.ladder === ladder);
+    if (!pieces.length) continue;
     const built = new THREE.InstancedMesh(
       new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.8 }),
-      architecture.length,
+      new THREE.MeshStandardMaterial({ color: ladder ? "#a0a0a0" : "#858585", roughness: 1 }),
+      pieces.length,
     );
-    architecture.forEach((b, i) => {
-      matrix.compose(p.set(b.x, b.y, b.z), q, scale.set(b.w, b.h, b.d));
+    pieces.forEach((b, i) => {
+      matrix.compose(p.set(b.x, b.y, b.z), b.rotation ?? q, scale.set(b.w, b.h, b.d));
       built.setMatrixAt(i, matrix);
     });
     built.castShadow = built.receiveShadow = true;
+    built.name = ladder ? "abstract-ladders" : "lightweight-structures";
     built.userData.interactionOccluder = true;
     group.add(built);
   }
@@ -481,7 +500,8 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
       shader.fragmentShader = shader.fragmentShader.replace("#include <color_fragment>", `#include <color_fragment>
         vec3 sp = vStonePoint * vStoneVariant.y + vStoneVariant.z;
         float mottling = stoneNoise(sp * 4.0);
-        float grain = stoneNoise(sp * 37.0);
+        float grainFade = 1.0-smoothstep(.4,1.6,length(fwidth(sp*37.0)));
+        float grain = mix(.5,stoneNoise(sp * 37.0),grainFade);
         float vein = 1.0-smoothstep(0.035,0.13,abs(sin(sp.y*8.0+sp.x*3.0+mottling*4.0)));
         float finish = vStoneVariant.x;
         float tone = finish < 0.5 ? 0.65+mottling*0.5+grain*0.3

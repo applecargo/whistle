@@ -5,7 +5,7 @@ import { waterWeights, waterSupport, WATER_INSET } from "../../lib/water.ts";
 import { makeTileAtmosphere } from "./TileAtmosphere.ts";
 import type { World, Weather } from "../../lib/world.ts";
 import { randomSequence, terrainSample } from "../../lib/terrain.ts";
-import { type Environment } from "../../lib/environment.ts";
+import { environmentAt, type Environment } from "../../lib/environment.ts";
 import { makeTreeSurfaces } from "./TreeSurfaces.ts";
 
 export function makeEnvironment(
@@ -109,13 +109,17 @@ export function makeEnvironment(
     );
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
+    const waterPositions = geometry.getAttribute("position"), currents = new Float32Array(waterPositions.count * 2);
+    for (let i = 0; i < waterPositions.count; i++) {
+      const cell = environmentAt(env, (waterPositions.getX(i) + world.size - 1) / 2, (waterPositions.getZ(i) + world.size - 1) / 2);
+      currents[i * 2] = cell.windX + cell.flowX; currents[i * 2 + 1] = cell.windZ + cell.flowZ;
+    }
+    geometry.setAttribute("surfaceCurrent", new THREE.Float32BufferAttribute(currents, 2));
     const water = makeWaterSurface(
       geometry,
       pond.level,
       clock,
     );
-    const mean = (field: "rain" | "windX" | "windZ" | "flowX" | "flowZ") => pond.cells.reduce((sum, i) => sum + env.cells[i][field], 0) / pond.cells.length;
-    water.userData.conditions = { rain: mean("rain"), x: mean("windX") + mean("flowX"), z: mean("windZ") + mean("flowZ") };
     waters.push(water);
     group.add(water);
   }
@@ -160,13 +164,11 @@ export function makeEnvironment(
     group,
     setSurfaceImages: trees.setSurfaceImages,
     update: (time: number, camera?: THREE.Camera, mistColor?: THREE.Color, reducedMotion = false, weather: Weather = "clear", daylight = 1) => {
-      effects.update(time, weather, reducedMotion, daylight);
+      effects.update(time, reducedMotion, daylight);
       for (const water of waters) {
-        const c = water.userData.conditions;
-        const rain = weather === "rain" ? 1 : c.rain;
+        const rain = weather === "rain" ? 1 : 0;
         water.material.uniforms.rainPower.value = reducedMotion ? 0 : rain;
-        water.material.uniforms.waveStrength.value = reducedMotion ? 1 : 1 + rain * .5 + Math.hypot(c.x, c.z) * .65;
-        water.material.uniforms.surfaceDrift.value.set(c.x, c.z);
+        water.material.uniforms.waveStrength.value = reducedMotion ? 1 : 1 + rain * .5;
         water.material.uniforms.waterMotion.value = reducedMotion ? 0 : 1;
       }
       trees.update(time, reducedMotion);

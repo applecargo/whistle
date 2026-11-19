@@ -26,82 +26,24 @@ type Leaf = {
 
 
 function leafGeometry(species: TreeSpecies) {
-  const p: number[] = [],
-    indices: number[] = [],
-    colors: number[] = [];
-  if (species === "pine") {
-    for (let needle = 0; needle < 11; needle++) {
-      const angle = needle * 2.39996,
-        length = 0.19 + (needle % 4) * 0.035,
-        i = p.length / 3;
-      const dx = Math.cos(angle),
-        dz = Math.sin(angle);
-      p.push(
-        -dz * 0.006,
-        0,
-        dx * 0.006,
-        dz * 0.006,
-        0,
-        -dx * 0.006,
-        dx * length * 0.65,
-        length * 0.55,
-        dz * length * 0.65,
-      );
-      indices.push(i, i + 1, i + 2);
-      colors.push(0.55, 0.65, 0.5, 0.55, 0.65, 0.5, 1, 1, 1);
-    }
-  } else if (species === "ginkgo" || species === "maple") {
-    p.push(0, 0, 0);
-    colors.push(0.55, 0.65, 0.4);
-    const segments = species === "maple" ? 14 : 12;
-    for (let i = 0; i <= segments; i++) {
-      const angle = -Math.PI * 0.68 + (i / segments) * Math.PI * 1.36;
-      const r =
-        species === "maple"
-          ? i % 2
-            ? 0.13
-            : 0.24
-          : 0.22 * (1 - 0.12 * Math.exp(-Math.pow(angle * 9, 2)));
-      p.push(
-        Math.sin(angle) * r,
-        0.018 + Math.cos(angle) * 0.015,
-        Math.cos(angle) * r + 0.065,
-      );
-      colors.push(0.82, 0.92, 0.7);
-      if (i > 0) indices.push(0, i, i + 1);
-    }
-  } else {
-    for (let i = 0; i <= 5; i++) {
-      const t = i / 5,
-        w = Math.sin(t * Math.PI) * 0.075 * (i % 2 ? 0.9 : 1);
-      p.push(
-        -w,
-        Math.sin(t * Math.PI) * 0.027,
-        t * 0.24,
-        w,
-        Math.sin(t * Math.PI) * 0.027,
-        t * 0.24,
-      );
-      colors.push(
-        0.65 + t * 0.35,
-        0.72 + t * 0.28,
-        0.55 + t * 0.45,
-        0.65 + t * 0.35,
-        0.72 + t * 0.28,
-        0.55 + t * 0.45,
-      );
-      if (i < 5) {
-        const n = i * 2;
-        indices.push(n, n + 2, n + 1, n + 1, n + 2, n + 3);
-      }
-    }
+  const positions = [0,.025,0], colors = [.86,.86,.86], indices: number[] = [];
+  const width = species === "pine" ? .095 : species === "maple" ? .15 : .12;
+  const length = species === "ginkgo" ? .14 : .18;
+  const segments = 16;
+  for (let i=0;i<segments;i++) {
+    const angle=i/segments*Math.PI*2;
+    const lobe=1+.07*Math.sin(angle*3+.4);
+    positions.push(Math.cos(angle)*width*lobe,Math.sin(angle)*.012,Math.sin(angle)*length*lobe);
+    const tone=.76+.14*(Math.sin(angle)+1)*.5;
+    colors.push(tone,tone,tone);
+    indices.push(0,i+1,(i+1)%segments+1);
   }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(p, 3));
-  g.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-  g.setIndex(indices);
-  g.computeVertexNormals();
-  return g;
+  const geometry=new THREE.BufferGeometry();
+  geometry.setAttribute("position",new THREE.Float32BufferAttribute(positions,3));
+  geometry.setAttribute("color",new THREE.Float32BufferAttribute(colors,3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 export function makeTrees(
@@ -125,6 +67,7 @@ export function makeTrees(
     const { species, height: h, width, lean, rotation } = profile;
     const branchStart = branches.length, leafStart = leaves[species].length;
     const random = randomSequence(profile.seed ^ 0x3b19);
+    const foliageRandom=randomSequence(profile.seed ^ 0x6f27);
     const root = new THREE.Vector3(
       tree.x * 2 - world.size + 1,
       tree.height,
@@ -192,7 +135,7 @@ export function makeTrees(
     ) => {
 
 
-      for (let n = 0; n < Math.ceil(count * .6); n++) {
+      for (let n = 0; n < Math.ceil(count * .85); n++) {
         const angle = random() * Math.PI * 2,
           y = random() * 2 - 1;
         const radial = Math.sqrt(1 - y * y) * Math.cbrt(random());
@@ -212,10 +155,11 @@ export function makeTrees(
             (random() - 0.5) * 1.7,
           ),
         );
-        const s = (0.65 + random() * 0.65) * 1.25;
+        const s = (0.65 + random() * 0.65) * profile.leafSize;
         const color = base
           .clone()
           .multiplyScalar(0.7 + random() * 0.55 + (y + 1) * 0.05);
+        if (foliageRandom() >= profile.leafDensity) continue;
         leaves[species].push({
           p,
           q,
@@ -225,7 +169,7 @@ export function makeTrees(
         });
       }
     };
-    const trunkEnd =
+    const trunkEnd = profile.growth === "shrub" ? .22 :
       species === "zelkova" ? 0.6 : species === "maple" ? 0.58 : 1;
     for (let i = 0; i < 14; i++) {
       const r = profile.trunkRadius;
@@ -237,30 +181,23 @@ export function makeTrees(
         color: bark,
       });
     }
-    const limbs = species === "pine" ? 10 : species === "ginkgo" ? 16 : 9;
+    const limbs = profile.growth === "shrub" ? 7 : 5+(profile.seed%3);
+    const crownForm=(profile.seed >>> 4)%3;
+    const spread=crownForm === 0 ? 1.2 : crownForm === 1 ? .8 : 1.0;
     for (let k = 0; k < limbs; k++) {
       const t = k / (limbs - 1),
         angle = rotation + k * 2.39996 + (random() - 0.5) * 0.5;
-      const y =
-        species === "pine"
-          ? 0.43 + t * 0.48
-          : species === "ginkgo"
-            ? 0.26 + t * 0.65
-            : 0.32 + t * 0.24;
-      const start = trunkAt(y);
+        const y =
+        species === "pine" ? .4+t*.38 : .34+t*.25;
+      const start = trunkAt(profile.growth === "shrub" ? y * .35 : y);
       const reach =
-        width *
-        (species === "ginkgo"
-          ? (1 - t) * 0.8 + 0.18
-          : species === "pine"
-            ? 1 - t * 0.6
-            : 0.75 + random() * 0.45);
+        width * spread * (.45+random()*.35) * (species === "pine" ? 1-t*.32 : 1);
       const end = start
         .clone()
         .add(
           new THREE.Vector3(
             Math.cos(angle) * reach,
-            (species === "pine" ? 0.12 : 0.24) * h + (random() - 0.5) * 0.35,
+            (profile.growth === "shrub" ? .5 : .22+random()*.15) * h,
             Math.sin(angle) * reach,
           ),
         );
@@ -270,34 +207,34 @@ export function makeTrees(
         profile.trunkRadius * 0.27 * (1 - t * 0.5),
         species === "pine" ? -0.18 : 0.18,
       );
-      const forks = species === "pine" ? 3 : 4;
+      const forks = 2;
       for (let f = 0; f < forks; f++) {
         const theta = angle + (f - (forks - 1) / 2) * 0.65;
         const tip = end
           .clone()
           .add(
             new THREE.Vector3(
-              Math.cos(theta) * (0.35 + random() * 0.4),
-              species === "pine" ? 0.15 : random() * 0.65,
-              Math.sin(theta) * (0.35 + random() * 0.4),
+              Math.cos(theta) * (width*(.12+random()*.15)),
+              h*(.04+random()*.09),
+              Math.sin(theta) * (width*(.12+random()*.15)),
             ),
           );
         branch(start.clone().lerp(end, 0.65 + f * 0.07), tip, profile.trunkRadius * 0.09, 0.08);
         crown(
           tip,
-          species === "pine" ? 0.65 : 0.6,
-          species === "pine" ? 0.18 : 0.46,
-          species === "pine" ? 0.55 : 0.6,
-          species === "pine" ? 55 : species === "ginkgo" ? 38 : 64,
+          width*spread*(.4+random()*.18),
+          h*(crownForm === 1 ? .23 : .15),
+          width*(.4+random()*.18),
+          85,
         );
       }
     }
     crown(
-      trunkAt(species === "pine" ? 0.96 : species === "ginkgo" ? 0.94 : 0.86),
-      0.65,
-      0.5,
-      0.65,
-      180,
+      trunkAt(species === "pine" ? .86 : .72),
+      width*spread*.62,
+      h*(crownForm === 1 ? .28 : .21),
+      width*.64,
+      300,
     );
 
     const shrink = (p: THREE.Vector3) => p.sub(root).multiplyScalar(profile.scale).add(root);
@@ -388,7 +325,7 @@ export function makeTrees(
     geometry.computeBoundingSphere();
     const wood = new THREE.Mesh(geometry, material);
     wood.name = "generated-trunks";
-    wood.receiveShadow = true;
+    wood.castShadow = wood.receiveShadow = true;
     group.add(wood);
   }
   for (const species of TREE_SPECIES) {
@@ -433,23 +370,16 @@ export function makeTrees(
       foliage.setColorAt(i, l.color);
     });
     foliage.name = `generated-leaves-${species}`;
-    foliage.receiveShadow = true;
+    foliage.castShadow = foliage.receiveShadow = true;
+    const shadowMaterial = new THREE.MeshDepthMaterial({
+      depthPacking: THREE.RGBADepthPacking,
+      side: THREE.DoubleSide,
+    });
+    shadowMaterial.onBeforeCompile = material.onBeforeCompile;
+    foliage.customDepthMaterial = shadowMaterial;
+    material.addEventListener("dispose", () => shadowMaterial.dispose());
     foliage.computeBoundingSphere();
     group.add(foliage);
-  }
-  if (env.trees.length) {
-    const crowns = new THREE.InstancedMesh(new THREE.SphereGeometry(1,12,8),
-      new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:false}),env.trees.length);
-    crowns.name="tree-shadow-crowns";
-    crowns.castShadow=true;
-    const q=new THREE.Quaternion();
-    env.trees.forEach((tree,i)=>{
-      const profile=profiles[i], k=profile.scale;
-      matrix.compose(new THREE.Vector3(tree.x*2-world.size+1,tree.height+profile.height*k*.7,tree.z*2-world.size+1),q,
-        new THREE.Vector3(profile.width*k,profile.height*k*.3,profile.width*k));
-      crowns.setMatrixAt(i,matrix);
-    });
-    crowns.computeBoundingSphere();group.add(crowns);
   }
   return group;
 }

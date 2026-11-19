@@ -1,3 +1,4 @@
+import { contentImage } from "../../lib/text-image.ts";
 import { addNeutralGrain } from "./NeutralGrain.ts";
 import * as THREE from "three";
 import type { Environment } from "../../lib/environment.ts";
@@ -69,20 +70,25 @@ export function makeWindField(world: World, structures: Structure[], environment
       if (!indices.length) return;
       const { actor, asset } = targets[index];
       applied.add(actor.id);
-      const texture = new THREE.TextureLoader().load(asset.image!);
+      const texture = new THREE.TextureLoader().load(contentImage(asset)!,loaded=>{
+        material.userData.surfaceProjection.aspect.value=loaded.image.naturalWidth/Math.max(1,loaded.image.naturalHeight);
+      });
       texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = asset.text ? 16 : 1;
       const material = new THREE.MeshStandardMaterial({
-        map: texture, side: THREE.DoubleSide, roughness: 1, alphaTest: .05, alphaToCoverage: true,
+        map: texture, vertexColors:true, side: THREE.DoubleSide, roughness: 1, alphaTest: .05, alphaToCoverage: true,
       });
       addGrassWind(material, time, strength);
       addNeutralGrain(material, "grass", world.terrain?.seed ?? 0);
       projectSurfaceImage(material, new THREE.Vector3(actor.x * 2 - world.size + 1, 0, actor.z * 2 - world.size + 1), 1.5 * actor.scale, actor.rotation);
+      material.userData.surfaceProjection.edgeFade.value=asset.text?0:.18;
       const mesh = new THREE.InstancedMesh(grass.geometry.clone(), material, indices.length);
       mesh.name = "grass-surface-image";
       mesh.userData.placementId = actor.id;
       mesh.receiveShadow = true;
       softenEdges(mesh, world.size);
-      assign(mesh, indices, false);
+      mesh.setColorAt(0,new THREE.Color());
+      assign(mesh, indices, true);
       group.add(mesh);
       images.push(mesh);
     });

@@ -166,28 +166,50 @@ export function deriveStructures(
     if (!structures.some((s) => s.key === key))
       structures.push({ kind, x, z, height, dx, dz, key });
   };
-  if (patterns.stairs)
+  if (patterns.stairs) {
+    const directions = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    const regions = new Int32Array(world.size * world.size).fill(-1);
+    for (let start = 0; start < regions.length; start++) {
+      const tile = tileAt(world, start % world.size, Math.floor(start / world.size))!;
+      if (regions[start] !== -1 || isHole(tile) || tile.surface === "slick") continue;
+      regions[start] = start;
+      const pending = [start];
+      for (let i = 0; i < pending.length; i++) {
+        const x = pending[i] % world.size, z = Math.floor(pending[i] / world.size);
+        for (const [dx, dz] of directions) {
+          const next = tileAt(world, x + dx, z + dz);
+          const index = (z + dz) * world.size + x + dx;
+          if (!next || isHole(next) || next.surface === "slick" ||
+              next.height !== tile.height || regions[index] !== -1) continue;
+          regions[index] = start;
+          pending.push(index);
+        }
+      }
+    }
+    const routes = new Map<string, { x: number; z: number }[]>();
     for (let z = 0; z < world.size; z++)
       for (let x = 0; x < world.size; x++) {
         const tile = tileAt(world, x, z)!;
-        if (isHole(tile) || tile.surface !== "plain") continue;
-        for (const [dx, dz] of [
-          [0, -1],
-          [1, 0],
-          [0, 1],
-          [-1, 0],
-        ]) {
+        if (isHole(tile) || tile.surface === "slick") continue;
+        for (const [dx, dz] of directions) {
           const next = tileAt(world, x + dx, z + dz);
           if (
             next && !isHole(next) &&
-            next.height === tile.height + 1 &&
-            next.surface === tile.surface
+            next.height >= tile.height + 2 &&
+            next.surface !== "slick"
           ) {
+            const route = `${regions[z * world.size + x]}:${regions[(z + dz) * world.size + x + dx]}`;
+            const nearby = routes.get(route) ?? [];
+            const center = { x: x + dx / 2, z: z + dz / 2 };
+            if (nearby.some(s => Math.hypot(s.x - center.x, s.z - center.z) < 3)) continue;
             add("stairs", x, z, tile.height, dx, dz);
+            nearby.push(center);
+            routes.set(route, nearby);
             break;
           }
         }
       }
+  }
   const active = objects.filter((o) => !o.removed),
     byCell = new Map(active.map((o) => [`${o.x},${o.z}`, o]));
   for (const a of active) {
@@ -339,4 +361,13 @@ export function floorHeight(
   if (bridge) return bridge.height * LEVEL;
   const sample = terrainSample(world, x, z);
   return sample.coverage >= 0.5 ? sample.height : null;
+}
+
+export function ladderAt(structures: Structure[], x: number, z: number) {
+  return structures.find(s => {
+    if (s.kind !== "stairs") return false;
+    const along = (x-s.x)*s.dx+(z-s.z)*s.dz;
+    const across = (x-s.x)*s.dz-(z-s.z)*s.dx;
+    return along >= 0 && along <= 1 && Math.abs(across) <= .15;
+  });
 }

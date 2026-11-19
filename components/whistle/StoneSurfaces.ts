@@ -1,3 +1,4 @@
+import { contentImage } from "../../lib/text-image.ts";
 import * as THREE from "three";
 import { tileAt } from "../../lib/terrain.ts";
 import type { Actor, Asset, World } from "../../lib/world.ts";
@@ -62,8 +63,11 @@ function makeStoneSurfaceBatch(world: World, stones: THREE.InstancedMesh) {
       if (!indices.length) return;
       const { actor, asset } = targets[index];
       applied.add(actor.id);
-      const texture = new THREE.TextureLoader().load(asset.image!);
+      const texture = new THREE.TextureLoader().load(contentImage(asset)!,loaded=>{
+        material.userData.surfaceProjection.aspect.value=loaded.image.naturalWidth/Math.max(1,loaded.image.naturalHeight);
+      });
       texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy=asset.text?16:8;
       const base = stones.material as THREE.MeshStandardMaterial;
       const material = base.clone();
       material.onBeforeCompile = base.onBeforeCompile;
@@ -71,12 +75,15 @@ function makeStoneSurfaceBatch(world: World, stones: THREE.InstancedMesh) {
       material.map = texture;
       projectSurfaceImage(material, new THREE.Vector3(actor.x * 2 - world.size + 1, 0, actor.z * 2 - world.size + 1),
         1.5 * actor.scale, actor.rotation);
+      material.userData.sourceText=!!asset.text;
+      material.userData.surfaceProjection.edgeFade.value=asset.text?0:.18;
       const mesh = new THREE.InstancedMesh(stones.geometry.clone(), material, indices.length);
       mesh.name = "stones-surface-image";
       mesh.userData.placementId = actor.id;
       mesh.castShadow = mesh.receiveShadow = true;
       softenEdges(mesh, world.size);
-      assign(mesh, indices, false);
+      mesh.setColorAt(0,new THREE.Color());
+      assign(mesh, indices, true);
       group.add(mesh);
       images.push(mesh);
     });

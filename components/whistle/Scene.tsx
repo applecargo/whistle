@@ -1,4 +1,5 @@
 "use client";
+import { contentImage } from "../../lib/text-image.ts";
 import { environmentPresentation } from "../../lib/environment-presentation";
 import { makeContentPresentation } from "./ContentPresentation";
 import { useLanguage } from "./Language";
@@ -10,12 +11,13 @@ import { softenEdges } from "./Atmosphere";
 import { makeTerrain } from "./TerrainScene";
 import { makeSurfaceImage } from "./SurfaceImage";
 import { makeWaterReflection } from "./WaterReflection";
+import { applyPixelMaterials, makePixelRenderer } from "./PixelGraphics";
 import { addSymbolVisuals, makeSymbolExperience } from "./SymbolExperience";
-import { floorHeight, tileAt, terrainSample, SURFACES } from "@/lib/terrain";
+import { floorHeight, tileAt, terrainSample, ladderAt, LEVEL, SURFACES } from "@/lib/terrain";
 import type { PlayerAudioFrame } from "@/lib/audio/game-parameters";
 import type { WorldDerivation } from "@/lib/world-derivation";
 import { environmentAt } from "@/lib/environment";
-import { environmentalFlight, stepEnvironmentalFlight, type EnvironmentalFlight } from "@/lib/environment-motion";
+import { environmentalDrift, environmentalFlight, stepEnvironmentalFlight, type EnvironmentalFlight } from "@/lib/environment-motion";
 import { makeWeather } from "./WeatherScene";
 import { WEATHER } from "@/lib/weather";
 import { daylightAt } from "@/lib/daylight";
@@ -32,8 +34,7 @@ import {
   followHeading,
   movementKey,
   fallFrame,
-  blocksGroundStep,
-  blocksTerrainStep,
+  blocksWalkingStep,
 } from "@/lib/navigation";
 import {
   feedbackRegions,
@@ -81,8 +82,9 @@ function makeObject(asset: Asset): THREE.Group {
   const g = new THREE.Group();
 
   if (!asset.image) return g;
-  const texture = new THREE.TextureLoader().load(asset.image);
+  const texture = new THREE.TextureLoader().load(contentImage(asset)!);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = asset.text ? 16 : 1;
   const picture = mesh(
     new THREE.PlaneGeometry(1.5, 1.5),
     new THREE.MeshBasicMaterial({
@@ -160,7 +162,7 @@ export default function Scene({
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({
-        antialias: true,
+        antialias: false,
         alpha: false,
         powerPreference: "low-power",
       });
@@ -176,27 +178,24 @@ export default function Scene({
     let lastTimeOfDay = worldRef.current.timeOfDay ?? "auto";
     let targetDay = daylightAt(clockRef.current(), lastTimeOfDay);
     const currentDay = { ...targetDay };
+    const graphicsDaylight = { value: currentDay.daylight };
     let lastClockSample = -Infinity;
-    const white = new THREE.Color("#ffffff");
-    const nightSky = new THREE.Color("#11151c");
-    const nightMist = new THREE.Color("#525c6b");
-    const sky = new THREE.Color()
-      .copy(nightSky)
-      .lerp(white, currentDay.daylight);
+    const sky = new THREE.Color("#000000");
     const mistColor = new THREE.Color();
     scene.background = sky;
     const baseFog = mode === "play" ? 0.055 : 0.018;
     const atmosphere = new THREE.FogExp2(sky, baseFog * currentDay.fog);
     scene.fog = atmosphere;
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.7));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1,2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.setClearColor("#ffffff");
+    renderer.setClearColor("#000000");
+    const pixelRenderer = makePixelRenderer(renderer,graphicsDaylight);
     el.appendChild(renderer.domElement);
     const ambient = new THREE.HemisphereLight(
       "#ffffff",
-      "#ffffff",
+      "#111111",
       currentDay.ambient,
     );
     scene.add(ambient);
@@ -218,22 +217,24 @@ export default function Scene({
 
     const horizon = new THREE.Mesh(
       new THREE.PlaneGeometry(240, 240),
-      material("#ffffff"),
+      material("#000000"),
     );
     horizon.rotation.x = -Math.PI / 2;
+    horizon.name = "world-horizon";
     horizon.position.y = -18.01;
     horizon.receiveShadow = true;
     softenEdges(horizon, world.size);
     scene.add(horizon);
     let structures = derivationRef.current.structures;
     let terrain = makeTerrain(world, structures, derivationRef.current.environment);
+    applyPixelMaterials(terrain.group, graphicsDaylight);
     softenEdges(terrain.group, world.size);
     scene.add(terrain.group);
     let terrainSignature = derivationRef.current.key;
     const camera =
       mode === "play"
-        ? new THREE.PerspectiveCamera(66, 1, 0.08, 80)
-        : new THREE.OrthographicCamera(-15, 15, 15, -15, 0.1, 100);
+        ? new THREE.PerspectiveCamera(66, 1, 0.08, 300)
+        : new THREE.OrthographicCamera(-15, 15, 15, -15, 0.1, 400);
     if (mode === "overview") {
       camera.position.set(20, 24, 25);
       camera.lookAt(0, 0, 0);
@@ -354,6 +355,7 @@ export default function Scene({
         scene.remove(terrain.group);
         disposeGroup(terrain.group);
         terrain = makeTerrain(worldRef.current, structures, nextDerivation.environment);
+        applyPixelMaterials(terrain.group, graphicsDaylight);
         softenEdges(terrain.group, world.size);
         scene.add(terrain.group);
       }
@@ -421,7 +423,7 @@ export default function Scene({
       const w = el.clientWidth,
         h = el.clientHeight;
       if (!w || !h) return;
-      renderer.setSize(w, h);
+      pixelRenderer.resize(w, h);
       if (camera instanceof THREE.PerspectiveCamera) camera.aspect = w / h;
       else {
         const size = world.size * 1.22;
@@ -436,15 +438,11 @@ export default function Scene({
     ro.observe(el);
     resize();
     const blocked = (x: number, z: number) =>
-      ((!jump && !air) && blocksTerrainStep(worldRef.current, player, {x, z}, structures)) ||
+      ((!jump && !air) && blocksWalkingStep(worldRef.current, player, {x, z}, structures)) ||
       (jump || air
         ? blocksAirStep(air ? air.y : jumpFrame(jump!.origin, jump!.elapsed).y,
             floorHeight(worldRef.current, x, z, structures))
-        : blocksGroundStep(
-            floorHeight(worldRef.current, player.x, player.z, structures),
-            floorHeight(worldRef.current, x, z, structures),
-            Math.hypot(x - player.x, z - player.z),
-          )) ||
+        : false) ||
       terrain.environment.trees.some(tree => Math.hypot(tree.x - x, tree.z - z) < .18) ||
       actors.current.some(
         (a) =>
@@ -568,16 +566,18 @@ export default function Scene({
       ] as const)
         currentDay[key] += (targetDay[key] - currentDay[key]) * blend;
       const weather = worldRef.current.weather ?? "clear";
+      graphicsDaylight.value = currentDay.daylight;
       const climate = WEATHER[weather];
       weatherSky.set(climate.sky);
-      sky.copy(nightSky).lerp(weatherSky, currentDay.daylight);
+      const skyLight = weatherSky.r * .2126 + weatherSky.g * .7152 + weatherSky.b * .0722;
+      sky.setScalar(.002 + skyLight * currentDay.daylight * .48);
       atmosphere.color.copy(sky);
       atmosphere.density = baseFog * currentDay.fog * climate.fog;
-      mistColor.copy(nightMist).lerp(weatherSky, currentDay.daylight);
-      ambient.intensity = currentDay.ambient * climate.ambient;
-      sun.intensity = currentDay.sun * climate.sun;
+      mistColor.copy(sky).multiplyScalar(.88).addScalar(.072);
+      ambient.intensity = (.5 + currentDay.daylight * .22) * climate.ambient;
+      sun.intensity = currentDay.sun * climate.sun * 1.3;
       sun.position.set(currentDay.sunX, currentDay.sunY, currentDay.sunZ);
-      moon.intensity = currentDay.moon;
+      moon.intensity = currentDay.moon * 3;
       updateModels();
       updateTrackingMarker();
       previewOrbit?.update();
@@ -630,7 +630,7 @@ export default function Scene({
               ring.userData.radius * (reducedMotion ? 1 : 0.9 + age * 0.3),
             );
             ring.material.opacity = reducedMotion ? 0.5 : 0.7 * (1 - age);
-            ring.material.color.setScalar(1 - currentDay.daylight);
+            ring.material.color.setScalar(1);
           }
       }
       for (const a of actors.current) {
@@ -724,7 +724,7 @@ export default function Scene({
           }
           if (!air && !jump && ground !== null && localEffects.bounce > .1 && !crouching &&
               localEffects.water === null && Math.abs(velocity) > .15 && bounceCooldown === 0) {
-            air = environmentalFlight("bounce", ground, Math.sin(player.yaw) * velocity, -Math.cos(player.yaw) * velocity);
+            air = environmentalFlight("bounce", ground, Math.sin(player.yaw) * velocity, -Math.cos(player.yaw) * velocity, 5 + localEffects.bounce * 2);
             bounceCooldown = 1.4;
           }
           for (const [command, turn] of [
@@ -766,6 +766,7 @@ export default function Scene({
               Math.min(dt * 1.5, Math.abs(stepRemaining));
             stepRemaining -= distance;
           }
+          const airInput = dt > 0 ? distance / (dt * 1.5) : 0;
           const surface =
             tileAt(worldRef.current, player.x, player.z)?.surface ?? "plain";
           const conditions = environmentAt(
@@ -778,21 +779,24 @@ export default function Scene({
             conditions.water >
               (floorHeight(worldRef.current, player.x, player.z, structures) ??
                 0);
+          const ladder = !jump && !air ? ladderAt(structures,player.x,player.z) : undefined;
+          const rise = ladder ? ((tileAt(worldRef.current,ladder.x+ladder.dx,ladder.z+ladder.dz)?.height ?? ladder.height)-ladder.height)*LEVEL : 0;
+          const climbSpeed = ladder ? Math.min(1,1.2/Math.max(rise,1))/profile.speed : 1;
           const speed =
-            SURFACES.find((s) => s.id === surface)!.speed * (wet ? 0.55 : 1) * profile.speed;
+            SURFACES.find((s) => s.id === surface)!.speed * (wet ? 0.55 : 1) * profile.speed * climbSpeed;
           const desired = dt ? (distance / dt) * speed : 0;
           velocity +=
             (desired - velocity) *
             (surface === "slick" ? 1 - Math.exp(-3 * dt) : 1);
           distance = velocity * dt;
           if (air && air.mode !== "bounce") {
-            const steering = (Number(!!heldForward) - Number(!!backward)) * (air.mode === "glide" ? 2.1 : 1.2);
+            const steering = airInput * (air.mode === "glide" ? 2.1 : 1.2);
             air.vx += (Math.sin(player.yaw) * steering - air.vx) * (1 - Math.exp(-3 * dt));
             air.vz += (-Math.cos(player.yaw) * steering - air.vz) * (1 - Math.exp(-3 * dt));
           }
-          const drift = !jump && !air ? dt : 0;
-          const dx = (air ? air.vx * dt : jump ? jump.vx * dt : Math.sin(player.yaw) * distance) + conditions.flowX * drift,
-            dz = (air ? air.vz * dt : jump ? jump.vz * dt : -Math.cos(player.yaw) * distance) + conditions.flowZ * drift;
+          const drift = environmentalDrift(conditions, time / 1000, !!(jump || air), crouching);
+          const dx = (air ? air.vx * dt : jump ? jump.vx * dt : Math.sin(player.yaw) * distance) + drift.x * dt,
+            dz = (air ? air.vz * dt : jump ? jump.vz * dt : -Math.cos(player.yaw) * distance) + drift.z * dt;
           if (!blocked(player.x + dx, player.z)) player.x += dx;
           if (!blocked(player.x, player.z + dz)) player.z += dz;
           const floor = floorHeight(
@@ -808,6 +812,10 @@ export default function Scene({
               lift: effects.lift, liftCeiling: effects.liftCeiling,
               glideHeld: !!active("jump-held"), crouching,
             });
+            if (!reducedMotion) {
+              player.yaw += result.yawDelta;
+              targetYaw += result.yawDelta;
+            }
             air = result.landed || result.missed ? null : result.flight;
             feet = result.missed ? null : result.flight.y;
           } else if (jump) {
@@ -886,7 +894,7 @@ export default function Scene({
         if(fade>=1) {scene.remove(fog.mesh);disposeGroup(fog.mesh);fadingMist.splice(i,1);}
       }
       waterReflection.update(renderer, scene, camera, terrain.group, time);
-      renderer.render(scene, camera);
+      pixelRenderer.render(scene, camera);
       frame = requestAnimationFrame(render);
     };
     frame = requestAnimationFrame(render);
@@ -908,6 +916,7 @@ export default function Scene({
       previewOrbit?.dispose();
       renderer.domElement.removeEventListener("keydown", rotatePreview);
       waterReflection.dispose();
+      pixelRenderer.dispose();
       disposeGroup(scene);
       renderer.dispose();
       renderer.domElement.remove();
