@@ -197,7 +197,8 @@ export function makePixelRenderer(renderer: THREE.WebGLRenderer, daylight = {val
                   float markShape=1.0;
                   if (markKind >= .5 && markKind < .8)
                     markShape=1.0-step(1.5,mod(markCell.x,2.0)+mod(markCell.y,2.0));
-                  float shadeDots=step(markThreshold,waterShade*.8)*markShape*detailFade;
+                  float waveDetail=smoothstep(.008,.04,abs(waveFacing));
+                  float shadeDots=step(markThreshold,waterShade*.55*waveDetail)*markShape*detailFade;
                   float markTint=waterHash(markOrigin+vec2(41.7,29.3));
                   float inkTone=markTint < .5 ? -.055 : markTint < .82 ? -.028 : markTint < .94 ? .035 : .065;
                   float shadeCore=smoothstep(.55,.85,waterShade);
@@ -222,7 +223,7 @@ export function makePixelRenderer(renderer: THREE.WebGLRenderer, daylight = {val
                     float groundInk=mix(groundNight,surfaceLight,pixelDaylight);
                     shade=pixelTone(groundInk,dotThreshold,detailFade);
                     float nightGroundVisibility=1.0-smoothstep(18.0,60.0,length(vViewPosition));
-                    shade=mix(mix(.025,.98,pixelDaylight),shade,
+                    shade=mix(pixelHorizon(pixelDaylight),shade,
                       groundDetail*.7*mix(nightGroundVisibility,1.0,pixelDaylight));
                   ` : "shade=ink;"}
                 }
@@ -239,7 +240,7 @@ export function makePixelRenderer(renderer: THREE.WebGLRenderer, daylight = {val
                 float ladderLight=mix(.16+smoothstep(.004,.42,surfaceLight)*.32,mix(.48,surfaceLight,.74),pixelDaylight);
                 gl_FragColor.rgb=vec3(pixelLinear(pixelTone(ladderLight,dotThreshold,detailFade)));
               ` : ""}
-              ${object.name === "world-horizon" ? `gl_FragColor.rgb=vec3(pixelLinear(mix(.025,.98,pixelDaylight)));` : ""}
+              ${object.name === "world-horizon" ? `gl_FragColor.rgb=vec3(pixelLinear(pixelHorizon(pixelDaylight)));` : ""}
               if (pixelMaskPass > .5) {
                 gl_FragColor.rgb = vec3(sourceCoverage, pixelSurfaceDetail * (1.0-sourceCoverage), pixelSoftSurface * (1.0-sourceCoverage));
               }

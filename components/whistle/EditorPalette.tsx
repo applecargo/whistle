@@ -4,6 +4,7 @@ import { SURFACES, type Surface } from "@/lib/terrain";
 import type { TerrainTool } from "@/lib/tile";
 import { DaylightIndicator } from "./DaylightIndicator";
 import { WeatherControls } from "./WeatherControls";
+import { HoleGlyph } from "./HoleGlyph";
 import { useLanguage } from "./Language";
 
 type Props = {
@@ -34,7 +35,7 @@ export function EditorPalette({ weather, timeOfDay, surface, terrainTool, placin
         })}
         <button className={`surface-choice clear-tile ${terrainTool === "hole" && !placingStart && !selectedSymbol ? "active" : ""}`}
           aria-label={t("꺼짐")} aria-pressed={terrainTool === "hole" && !placingStart && !selectedSymbol}
-          onClick={() => onSelectTerrainTool("hole")}><span className="surface-swatch" aria-hidden="true" /></button>
+          onClick={() => onSelectTerrainTool("hole")}><HoleGlyph className="hole-glyph" /></button>
       </div>
       <div className="height-choices" aria-label={t("바닥 높이")}>
         {(["raise", "lower"] as const).map(tool => <button key={tool} aria-label={t(tool === "raise" ? "높이기" : "낮추기")}

@@ -51,6 +51,7 @@ export function makeDitheredSky() {
         float grain=skyHash(vec3(micro,13.0));
         threshold=mix(threshold,grain,.18);
         float tone=pixelTone(paper,threshold,1.0);
+        tone=mix(pixelHorizon(daylight),tone,smoothstep(.02,.2,direction.y));
         gl_FragColor=vec4(vec3(pixelLinear(tone)),1.0);
       }
     `,

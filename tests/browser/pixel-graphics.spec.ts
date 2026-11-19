@@ -232,3 +232,44 @@ test("water keeps reflected contrast without dense dots or hard tonal bands", as
   expect(result.gradientRange).toBeGreaterThan(35);
   await testInfo.attach("water-tone-gradient",{body:Buffer.from(result.screenshot.split(",")[1],"base64"),contentType:"image/png"});
 });
+
+test("sky and distant ground keep the same horizon tone during automatic sunset", async ({ page }, testInfo) => {
+  const world = terrainFixtures().flat;
+  world.timeOfDay = "auto";
+  world.weather = "cloud";
+  await page.clock.install({ time: new Date(2026, 10, 19, 12) });
+  await page.setViewportSize({ width: 960, height: 720 });
+  await page.route(/\/components\/whistle\/Scene\.tsx(\?|$)/, async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, body: (await response.text()).replace(
+      "pixelRenderer.render(scene, camera);",
+      'if(mode === "play") { camera.position.set(0,1.35,0); camera.lookAt(0,1.35,-1); camera.updateMatrixWorld(); scene.getObjectByName("dithered-sky").position.copy(camera.position); } pixelRenderer.render(scene, camera);',
+    ) });
+  });
+  await page.addInitScript(world => {
+    localStorage.setItem("whistle.world.v2", JSON.stringify(world));
+    localStorage.setItem("whistle.language", "ko");
+  }, world);
+  await page.goto(".");
+  await page.getByRole("button", { name: "플레이", exact: true }).click();
+  for (const [hour, minute] of [[17, 30], [18, 0], [18, 30], [23, 0]]) {
+    await page.clock.setSystemTime(new Date(2026, 10, 19, hour, minute));
+    await page.clock.runFor(2500);
+    const tones = await page.locator(".play-shell canvas").evaluate(canvas => {
+      const source = canvas as HTMLCanvasElement;
+      const copy = document.createElement("canvas");
+      copy.width = source.width; copy.height = source.height;
+      const context = copy.getContext("2d")!;
+      context.drawImage(source, 0, 0);
+      return [.48, .52].map(y => {
+        const pixels = context.getImageData(Math.floor(copy.width*.25), Math.floor(copy.height*y), Math.floor(copy.width*.5), 1).data;
+        let sum = 0;
+        for (let i = 0; i < pixels.length; i += 4) sum += pixels[i];
+        return sum / (pixels.length/4);
+      });
+    });
+    expect(tones[0], "the canvas contains a rendered frame").toBeGreaterThan(3);
+    expect(Math.abs(tones[0]-tones[1]), `horizon at ${hour}:${minute}: ${tones}`).toBeLessThan(4);
+    if (hour === 18 && minute === 0) await page.locator(".play-shell canvas").screenshot({ path: testInfo.outputPath("sunset-horizon.png") });
+  }
+});

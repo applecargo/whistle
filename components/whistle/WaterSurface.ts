@@ -59,7 +59,9 @@ export function makeWaterSurface(
       vec3 displaced=position;
       float t=waterTime*waterMotion;
       float swell=waterNoise(position.xz*.65+vec2(t*.06,t*.025)).x-.5;
-      displaced.y+=swell*.025*(waveStrength-1.+length(localCurrent)*.65)*smoothstep(.05,.25,depth);
+      vec2 crossFlow=mat2(.8,-.6,.6,.8)*position.xz;
+      float ripple=waterNoise(crossFlow*1.7-vec2(t*.045,t*.065)).x-.5;
+      displaced.y+=(swell*.05+ripple*.018)*(waveStrength+length(localCurrent)*.35)*smoothstep(.05,.3,depth);
       waterWorldPosition=(modelMatrix*vec4(displaced,1.0)).xyz;
       reflectionPosition=reflectionMatrix*vec4(waterWorldPosition,1.0);
       vec4 mvPosition=modelViewMatrix*vec4(displaced,1.0);
@@ -136,9 +138,11 @@ export function makeWaterSurface(
       float shore=1.0-smoothstep(.03,.6,depth);
       float foam=shore*crest*smoothstep(.5,.75,breaks);
       float daylight=clamp(lightPower*.5,0.0,1.0);
+      float waveFacing=dot(slope,normalize(sunVector.xz));
+      float waveRelief=clamp(waveFacing*.32,-.025,.025)*smoothstep(.05,.3,depth);
       float waterInk = mix(.006,.018,daylight)+longWave*.008
         +reflectionInk*(.58+fresnel*.2)+crest*.025+fineCrest*.012
-        +glint*.1+foam*.025+transmission*.008;
+        +glint*.1+foam*.025+transmission*.008+waveRelief*mix(.45,1.0,daylight);
       vec3 color=vec3(waterInk);
       gl_FragColor=vec4(color,1.0);
       #include <tonemapping_fragment>

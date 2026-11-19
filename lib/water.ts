@@ -1,4 +1,4 @@
-import { isHole } from "./tile.ts";
+import { groundTileHeight, isHole } from "./tile.ts";
 import type { World } from "./world.ts";
 type Ground = Pick<World, "size" | "terrain">;
 export const WATER_INSET = 0.06;
@@ -51,6 +51,11 @@ export function waterLevelAt(
   hole?: (i: number) => boolean,
   ground?: number,
 ) {
+  const cx = Math.max(0, Math.min(size - 1, x)), cz = Math.max(0, Math.min(size - 1, z));
+  if (ground !== undefined) {
+    for (const [h, w] of waterWeights(size, cx, cz, level, hole))
+      if (h > 0 && w > .02 && ground < h - .002 && !hole?.(Math.round(cz) * size + Math.round(cx))) return h;
+  }
   for (const [h, w] of waterWeights(size, x, z, level, hole)) if (w * (ground === undefined ? 1 : waterSupport(ground, h + WATER_INSET)) > 0.8) return h;
   return null;
 }
@@ -64,7 +69,7 @@ export function carveWaterBed(
 ) {
   const weights = waterWeights(world.size, x, z, (i) =>
     isWaterTile(world, i % world.size, Math.floor(i / world.size))
-      ? world.terrain!.tiles[i].height
+      ? groundTileHeight(world.terrain!.tiles[i])
       : null,
     (i) => isHole(world.terrain?.tiles[i]),
   );

@@ -1,4 +1,11 @@
+export function horizonTone(daylight: number) {
+  return .025 + .955 * Math.max(0, Math.min(1, daylight));
+}
+
 export const PIXEL_PALETTE_GLSL = `
+  float pixelHorizon(float daylight) {
+    return mix(.025,.98,clamp(daylight,0.0,1.0));
+  }
   float pixelDisplay(float value) {
     return value <= .0031308 ? value*12.92 : 1.055*pow(max(value,0.0),1.0/2.4)-.055;
   }

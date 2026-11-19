@@ -218,12 +218,14 @@ test("single water tiles work at each elevation and connected levels stay horizo
     w.terrain!.tiles[0] = { height, surface: "slick", hole: false };
     assert.equal(deriveEnvironment(w).ponds.length, 1);
     w.terrain!.tiles[1] = { height, surface: "slick", hole: false };
-    assert.equal(deriveEnvironment(w).ponds[0].cells.length, 2);
-    assert.equal(deriveEnvironment(w).ponds[0].level, height * LEVEL - .06);
+    assert.ok(deriveEnvironment(w).ponds[0].cells.includes(1));
+    assert.equal(deriveEnvironment(w).ponds[0].level, Math.min(height, 0) * LEVEL - .06);
     w.terrain!.tiles[1].height = height + 1;
-    assert.equal(deriveEnvironment(w).ponds.length, 2);
+    assert.equal(deriveEnvironment(w).ponds.length, 1);
+    assert.equal(deriveEnvironment(w).ponds[0].level, Math.min(height + 1, 0) * LEVEL - .06);
     w.terrain!.tiles[1].hole = true;
-    assert.equal(deriveEnvironment(w).ponds[0].cells.length, 1);
+    assert.ok(deriveEnvironment(w).ponds[0].cells.includes(0));
+    assert.ok(!deriveEnvironment(w).ponds[0].cells.includes(1));
   }
 });
 test("diagonal water tiles remain separate until an orthogonal connection is added", () => {
@@ -253,7 +255,7 @@ test("water is inset into a carved bed with a dry bank, never a floating sheet",
   assert.equal(terrainSample(w, 4, 4).height, -LEVEL);
 });
 test("water mesh shore meets its terrain at both zero and depressed elevations", () => {
-  for (const [height, cellX, cellZ] of [[0, 4, 4], [-1, 4, 4], [2, 4, 4], [0, 0, 0], [-1, 0, 0]]) {
+  for (const [height, cellX, cellZ] of [[0, 4, 4], [-1, 4, 4], [0, 0, 0], [-1, 0, 0]]) {
     const w = empty(),
       i = cellZ * w.size + cellX;
     w.terrain!.tiles[i] = { height, surface: "slick", hole: false };
@@ -858,7 +860,7 @@ test("grass, bark and stones use neutral tones with stable varied grain", async 
   disposeTerrain(terrain.group);
 });
 
-test("adjacent water elevations never select a different basin with a discontinuous ground jump", () => {
+test("connected water uses one flat level without lifting the ground between its tiles", () => {
   const world = empty();
   for (let z = 3; z <= 7; z++) for (let x = 3; x <= 7; x++)
     world.terrain!.tiles[z * world.size + x] = { height: x < 5 ? 4 : 0, surface: "slick" };
@@ -867,16 +869,19 @@ test("adjacent water elevations never select a different basin with a discontinu
     assert.ok(Math.abs(a - b) < .002, `water bed jumps at ${x},${z}: ${a} -> ${b}`);
   }
   const env = deriveEnvironment(world);
+  assert.equal(env.ponds.length, 1);
   for (let x = 4; x < 5; x += .025) {
     const natural = terrainSample(world, x, 5, false).height;
-    if (natural > .45 && natural < 4 * LEVEL - .45) assert.equal(environmentAt(env, x, 5).water, null);
+    assert.equal(natural, 0);
+    assert.equal(environmentAt(env, x, 5).water, -.06);
   }
 });
 
-test("water at different elevations shares its shoreline with the rendered ground", async () => {
+test("a raised flat surface meets higher land at its actual shoreline", async () => {
   const { disposeTerrain } = await import("./terrain-fixtures.ts");
   for (const [high, low] of [[4, 0], [2, -1], [6, 3]]) {
     const world = empty();
+    for (const tile of world.terrain!.tiles) tile.height = high + 1;
     for (let z = 3; z <= 7; z++) for (let x = 3; x <= 7; x++)
       world.terrain!.tiles[z * world.size + x] = { height: x < 5 ? high : low, surface: "slick", hole: false };
     const terrain = makeTerrain(world, []);
@@ -888,6 +893,7 @@ test("water at different elevations shares its shoreline with the rendered groun
       const mesh = object as THREE.Mesh, geometry = mesh.geometry;
       const positions = geometry.getAttribute("position"), depths = geometry.getAttribute("waterDepth");
       for (const index of new Set(geometry.index!.array)) {
+        assert.ok(Math.abs(positions.getY(index) - (high * LEVEL - .06)) < .00001);
         if (depths.getX(index) !== 0 || shore++ % 12 !== 0) continue;
         const point = new THREE.Vector3().fromBufferAttribute(positions, index);
         ray.ray.origin.set(point.x, 20, point.z);
@@ -898,4 +904,40 @@ test("water at different elevations shares its shoreline with the rendered groun
     assert.ok(shore > 0);
     disposeTerrain(terrain.group);
   }
+});
+
+test("water floods reachable low ground, stops at high land and recedes without changing terrain", async () => {
+  const { blocksWalkingStep } = await import("../lib/navigation.ts");
+  const world = empty();
+  for (const tile of world.terrain!.tiles) tile.height = 3;
+  for (let z = 2; z <= 8; z++) for (let x = 1; x <= 5; x++) world.terrain!.tiles[z * world.size + x].height = 0;
+  const source = 5 * world.size + 3;
+  world.terrain!.tiles[source].surface = "slick";
+  const before = structuredClone(world.terrain!.tiles);
+  world.terrain!.tiles[source].height = 1;
+  const raised = deriveEnvironment(world);
+  assert.equal(raised.cells[5 * world.size + 1].water, LEVEL - .06);
+  assert.equal(raised.cells[5 * world.size + 6].water, null);
+  assert.equal(raised.cells[5 * world.size + 8].water, null);
+  assert.equal(terrainSample(world, 3, 5, false).height, 0);
+  assert.equal(blocksWalkingStep(world, { x: 2.49, z: 5 }, { x: 2.51, z: 5 }, []), false);
+  world.terrain!.tiles[source].height = 0;
+  const lowered = deriveEnvironment(world);
+  assert.equal(lowered.cells[5 * world.size + 1].water, null);
+  assert.deepEqual(world.terrain!.tiles, before);
+});
+
+test("open ground and drainage holes cannot accumulate a raised sheet of water", () => {
+  const world = empty(), source = 5 * world.size + 5;
+  world.terrain!.tiles[source] = { height: 6, surface: "slick" };
+  let env = deriveEnvironment(world);
+  assert.equal(env.ponds[0].level, -.06);
+  assert.equal(env.ponds[0].cells.length, 1);
+  for (const tile of world.terrain!.tiles) if (tile.surface !== "slick") tile.height = 2;
+  env = deriveEnvironment(world);
+  assert.equal(env.ponds[0].level, 2 * LEVEL - .06);
+  world.terrain!.tiles[source+1] = { height: 0, surface: "plain", hole: true };
+  env = deriveEnvironment(world);
+  assert.equal(env.ponds[0].level, -.06);
+  assert.equal(env.cells[source+1].water, null);
 });

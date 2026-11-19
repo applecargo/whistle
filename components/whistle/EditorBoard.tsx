@@ -3,10 +3,12 @@ import { useMemo } from "react";
 import type { Actor, World } from "@/lib/world";
 import type { PlacementFeedback } from "@/lib/placement-feedback";
 import type { WorldDerivation } from "@/lib/world-derivation";
-import { tileAt, SURFACES } from "@/lib/terrain";
+import { tileAt, SURFACES, LEVEL } from "@/lib/terrain";
+import { WATER_INSET } from "@/lib/water";
 import { isHole } from "@/lib/tile";
 import { PaintGrid } from "./PaintGrid";
 import { EnvironmentTile, environmentTileKind } from "./EnvironmentTile";
+import { HoleGlyph } from "./HoleGlyph";
 import { EnvironmentEffects } from "./EnvironmentEffects";
 import { effectRegions } from "@/lib/effect-regions";
 import { useEffectFeedback } from "./useEffectFeedback";
@@ -79,7 +81,7 @@ export function EditorBoard({
               Math.floor(i / world.size),
             )!;
             const c = environment.cells[i];
-            return `surface-${effectCells.has(i) || environmentTileKind(c) ? "plain" : tile.surface} level-${tile.height} ${isHole(tile) ? "tile-void" : ""} ${effectCells.has(i) ? "has-effect" : ""} ${c.grass ? "has-grass" : ""} ${c.water !== null ? "has-water" : ""} ${c.tree ? "has-tree" : ""} ${c.fog > 0.05 ? "has-fog" : ""}`;
+            return `surface-${effectCells.has(i) || environmentTileKind(c) ? "plain" : tile.surface} level-${c.water === null ? tile.height : 0} ${isHole(tile) ? "tile-void" : ""} ${effectCells.has(i) ? "has-effect" : ""} ${c.grass ? "has-grass" : ""} ${c.water !== null ? "has-water" : ""} ${c.tree ? "has-tree" : ""} ${c.fog > 0.05 ? "has-fog" : ""}`;
           }}
           label={(i) => {
             const x = i % world.size,
@@ -88,7 +90,9 @@ export function EditorBoard({
             const objects = world.objects.filter(
               (o) => o.x === x && o.z === z,
             );
-            return `${String.fromCharCode(65 + x)}${z + 1} ${isHole(tile) ? t("꺼짐") : `${t("높이")} ${tile.height} ${t(SURFACES.find((s) => s.id === tile.surface)!.name)}`} ${objects.map(object => world.assets.find(a => a.id === object.asset)?.name).filter(Boolean).join(" · ")}${x === world.start.x && z === world.start.z ? " " + t("시작점") : ""} ${environmentLabels(i)}`;
+            const water = environment.cells[i].water;
+            const height = water === null ? tile.height : Math.round((water + WATER_INSET) / LEVEL);
+            return `${String.fromCharCode(65 + x)}${z + 1} ${isHole(tile) ? t("꺼짐") : `${t("높이")} ${height} ${t(SURFACES.find((s) => s.id === tile.surface)!.name)}`} ${objects.map(object => world.assets.find(a => a.id === object.asset)?.name).filter(Boolean).join(" · ")}${x === world.start.x && z === world.start.z ? " " + t("시작점") : ""} ${environmentLabels(i)}`;
           }}
           renderCell={(i) => {
             const x = i % world.size,
@@ -102,6 +106,7 @@ export function EditorBoard({
               (t) => t.x === x && t.z === z,
             );
             const conditions = environment.cells[i];
+            const height = conditions.water === null ? tile.height : Math.round((conditions.water + WATER_INSET) / LEVEL);
             const reaction = feedback?.cells.find((c) => c.index === i);
             return (
               <>
@@ -110,9 +115,11 @@ export function EditorBoard({
                   aria-hidden="true"
                   style={{ opacity: (1 - conditions.light) * 0.2 }}
                 />
-                {!effectCells.has(i) && <EnvironmentTile cell={conditions} />}
-                {tile.height !== 0 && !isHole(tile) && (
-                  <span className="tile-height">{tile.height}</span>
+                {!effectCells.has(i) && (isHole(tile)
+                  ? <HoleGlyph className="result-tile result-hole" />
+                  : <EnvironmentTile cell={conditions} />)}
+                {height !== 0 && !isHole(tile) && (
+                  <span className="tile-height">{height}</span>
                 )}
                 {!effectCells.has(i) && generated.map((t) => (
                   <span

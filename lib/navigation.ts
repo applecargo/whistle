@@ -1,6 +1,6 @@
 import type { World } from "./world.ts";
 import { floorHeight, ladderAt, type Structure } from "./terrain.ts";
-import { isHole } from "./tile.ts";
+import { groundTileHeight, isHole } from "./tile.ts";
 
 export function blocksTerrainStep(
   world: Pick<World, "size" | "terrain">,
@@ -13,7 +13,7 @@ export function blocksTerrainStep(
     const bridge = structures.find(s => s.kind === "bridge" && s.x === x && s.z === z);
     if (bridge) return bridge.height;
     const tile = world.terrain?.tiles[z * world.size + x];
-    return isHole(tile) ? null : tile?.height ?? 0;
+    return isHole(tile) ? null : groundTileHeight(tile);
   };
   const steep = (ax: number, az: number, bx: number, bz: number) => {
     const a = height(ax, az), b = height(bx, bz);

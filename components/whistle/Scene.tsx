@@ -12,6 +12,7 @@ import { makeTerrain } from "./TerrainScene";
 import { makeSurfaceImage } from "./SurfaceImage";
 import { makeWaterReflection } from "./WaterReflection";
 import { applyPixelMaterials, makePixelRenderer } from "./PixelGraphics";
+import { horizonTone } from "./PixelPalette";
 import { addSymbolVisuals, makeSymbolExperience } from "./SymbolExperience";
 import { floorHeight, tileAt, terrainSample, ladderAt, LEVEL, SURFACES } from "@/lib/terrain";
 import type { PlayerAudioFrame } from "@/lib/audio/game-parameters";
@@ -571,7 +572,7 @@ export default function Scene({
       weatherSky.set(climate.sky);
       const skyLight = weatherSky.r * .2126 + weatherSky.g * .7152 + weatherSky.b * .0722;
       sky.setScalar(.002 + skyLight * currentDay.daylight * .48);
-      atmosphere.color.copy(sky);
+      atmosphere.color.setScalar(horizonTone(currentDay.daylight)).convertSRGBToLinear();
       atmosphere.density = baseFog * currentDay.fog * climate.fog;
       mistColor.copy(sky).multiplyScalar(.88).addScalar(.072);
       ambient.intensity = (.5 + currentDay.daylight * .22) * climate.ambient;

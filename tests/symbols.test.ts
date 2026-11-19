@@ -142,6 +142,8 @@ test("discovery lights stay above grass and water and never require a ground mar
   f.tick(.1);assert.ok(f.light.getWorldPosition(new f.THREE.Vector3()).y>=1.7);
   assert.equal(f.model.getObjectByName("mark"),undefined);
   f.frame.environment.cells[i].grass=0;
+  for (let z = 8; z <= 10; z++) for (let x = 5; x <= 7; x++)
+    f.world.terrain!.tiles[z*f.world.size+x] = { height: 3, surface: "plain" };
   f.world.terrain!.tiles[i] = { height: 2, surface: "slick" };
   const { deriveEnvironment } = await import("../lib/environment.ts");
   f.frame.environment = deriveEnvironment(f.world);

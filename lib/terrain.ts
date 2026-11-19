@@ -1,4 +1,4 @@
-import { isHole } from "./tile.ts";
+import { groundTileHeight, isHole } from "./tile.ts";
 import type { World, Placed } from "./world.ts";
 import { carveWaterBed } from "./water.ts";
 export type Surface = "plain" | "rough" | "slick" | "soft";
@@ -302,7 +302,7 @@ export function terrainSample(
       voidAmount += w * rim;
       continue;
     }
-    elevation += tile.height * LEVEL * w;
+    elevation += groundTileHeight(tile) * LEVEL * w;
     coverage += w;
     weights[tile.surface] += w;
   }

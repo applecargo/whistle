@@ -1,8 +1,9 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clone, uid, type World } from "@/lib/world";
-import { editTile, type TerrainTool } from "@/lib/tile";
-import { flatTerrain, type Surface } from "@/lib/terrain";
+import { editTile, MIN_HEIGHT, MAX_HEIGHT, type TerrainTool } from "@/lib/tile";
+import { flatTerrain, LEVEL, type Surface } from "@/lib/terrain";
+import { WATER_INSET } from "@/lib/water";
 import { createWorldDeriver, samePlacement } from "@/lib/world-derivation";
 import { placementChanges, type PlacementFeedback } from "@/lib/placement-feedback";
 import { withSymbolColors } from "@/lib/symbol-color";
@@ -92,7 +93,20 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
     const next = clone(strokeBase.current!);
     if (layer === "tiles") {
       next.terrain ??= flatTerrain(next.size);
+      const waterEdits = new Set<number>();
+      if (terrainTool === "raise" || terrainTool === "lower") {
+        for (const pond of deriveWorld(strokeBase.current!).environment.ponds) {
+          if (!pond.cells.some(i => cells.includes(i))) continue;
+          const height = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT,
+            Math.round((pond.level + WATER_INSET) / LEVEL) + (terrainTool === "raise" ? 1 : -1)));
+          for (const i of pond.cells) {
+            waterEdits.add(i);
+            if (next.terrain.tiles[i].surface === "slick") next.terrain.tiles[i] = { ...next.terrain.tiles[i], height, hole: false };
+          }
+        }
+      }
       for (const i of cells) {
+        if (waterEdits.has(i)) continue;
         if (terrainTool === "hole" && i === next.start.z * next.size + next.start.x)
           continue;
         next.terrain.tiles[i] = editTile(next.terrain.tiles[i], terrainTool, surface);

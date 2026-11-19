@@ -1,6 +1,6 @@
 import { limitEffectAreas } from "./effect-limits.ts";
 import { applyTileEffects, tileEffectDefaults } from "./tile-effects.ts";
-import { isHole } from "./tile.ts";
+import { groundTileHeight, isHole } from "./tile.ts";
 import type { World } from "./world.ts";
 import { isWaterTile, WATER_INSET, waterLevelAt } from "./water.ts";
 import {
@@ -54,7 +54,7 @@ export function deriveEnvironment(
       .filter((n) => n >= 0);
   const height = (x: number, z: number) => {
     const tile = tiles[index(x, z)];
-    return !tile || isHole(tile) ? -Infinity : tile.height;
+    return !tile || isHole(tile) ? -Infinity : groundTileHeight(tile);
   };
   const cells: EnvironmentCell[] = tiles.map((tile) => ({
     ...tileEffectDefaults,
@@ -88,22 +88,45 @@ export function deriveEnvironment(
     return result;
   };
   const ponds: Environment["ponds"] = [];
-
-  for (const elevation of new Set(
-    tiles.filter((t) => !isHole(t) && t.surface === "slick").map((t) => t.height),
-  )) {
-    for (const group of components(
-      (i) =>
-        tiles[i].height === elevation &&
-        isWaterTile(world, i % size, Math.floor(i / size)),
-    )) {
-      const level = elevation * LEVEL - WATER_INSET;
-      for (const i of group) {
-        cells[i].water = level;
-        cells[i].moisture = 1;
-      }
-      ponds.push({ cells: group, level });
+  const spill = new Float64Array(count).fill(Infinity);
+  const outlets: { index: number; height: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    const x = i % size, z = Math.floor(i / size);
+    if (x !== 0 && z !== 0 && x !== size-1 && z !== size-1 && !isHole(tiles[i])) continue;
+    spill[i] = isHole(tiles[i]) ? -Infinity : groundTileHeight(tiles[i]);
+    outlets.push({ index: i, height: spill[i] });
+  }
+  while (outlets.length) {
+    outlets.sort((a,b) => b.height-a.height);
+    const outlet = outlets.pop()!;
+    if (outlet.height !== spill[outlet.index]) continue;
+    for (const n of adjacent(outlet.index)) {
+      const height = Math.max(outlet.height, groundTileHeight(tiles[n]));
+      if (height >= spill[n]) continue;
+      spill[n] = height;
+      outlets.push({ index: n, height });
     }
+  }
+
+  const sources = tiles.map((_, i) => i)
+    .filter(i => isWaterTile(world, i % size, Math.floor(i / size)))
+    .sort((a, b) => tiles[b].height - tiles[a].height);
+  for (const source of sources) {
+    if (cells[source].water !== null) continue;
+    const elevation = Math.min(tiles[source].height, spill[source]), level = elevation * LEVEL - WATER_INSET;
+    const group = [source];
+    cells[source].water = level;
+    for (let cursor = 0; cursor < group.length; cursor++) {
+      const i = group[cursor];
+      cells[i].moisture = 1;
+      for (const n of adjacent(i)) {
+        if (isHole(tiles[n]) || cells[n].water !== null) continue;
+        if (!isWaterTile(world, n % size, Math.floor(n / size)) && groundTileHeight(tiles[n]) * LEVEL >= level) continue;
+        cells[n].water = level;
+        group.push(n);
+      }
+    }
+    ponds.push({ cells: group, level });
   }
 
   for (let i = 0; i < count; i++) {

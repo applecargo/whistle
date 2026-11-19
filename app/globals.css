@@ -1397,20 +1397,6 @@ p {
 .paint-grid .tile-void {
   background: #fff;
   background-image: none;
-  border-color: #eee;
-}
-.tile-void::after {
-  content: "";
-  position: absolute;
-  width: 52%;
-  height: 52%;
-  border: 1px solid #111;
-  border-radius: 50%;
-  background: transparent;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
 }
 .tile-height {
   position: absolute;
@@ -1882,7 +1868,6 @@ p {
 }
 @keyframes effect-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes effect-fade-out { from { opacity: 1; } to { opacity: 0; } }
-.has-effect.tile-void::after { display: none; }
 .has-effect .start-marker { left: auto; top: 3px; right: 3px; transform: none; z-index: 3; }
 .result-tile ~ .tile-height {
   color: #000;
@@ -1975,8 +1960,10 @@ p {
   padding: 8px;
   font-size: 21px;
 }
-.clear-tile .surface-swatch {
-  border-style: dashed;
+.hole-glyph {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 .direct-palette .symbols {
   border-top: 1px solid #e5e5e5;
