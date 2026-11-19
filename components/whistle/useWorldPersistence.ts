@@ -9,12 +9,13 @@ const STORAGE = "whistle.world.v2";
 
 type Options = {
   world: World;
+  enabled?: boolean;
   onLoad: (world: World, beforeUpgrade: World) => void;
   onImport: (world: World) => void;
   notify: (message: string) => void;
 };
 
-export function useWorldPersistence({ world, onLoad, onImport, notify }: Options) {
+export function useWorldPersistence({ world, onLoad, onImport, notify, enabled = true }: Options) {
   const [ready, setReady] = useState(false);
   const [saveStatus, setSaveStatus] = useState("준비 중");
   const autosaveAllowed = useRef(false);
@@ -27,6 +28,7 @@ export function useWorldPersistence({ world, onLoad, onImport, notify }: Options
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     let active = true, generation = 0;
     const load = async (initial: boolean) => {
       const encoded = new URLSearchParams(location.hash.slice(1)).get("world");
@@ -66,10 +68,10 @@ export function useWorldPersistence({ world, onLoad, onImport, notify }: Options
       active = false;
       window.removeEventListener("hashchange", changed);
     };
-  }, [notify, onLoad, resumeAutosave]);
+  }, [enabled, notify, onLoad, resumeAutosave]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!enabled || !ready) return;
     setSaveStatus("저장 중");
     const timeout = setTimeout(() => {
       if (!autosaveAllowed.current) return;
@@ -81,7 +83,7 @@ export function useWorldPersistence({ world, onLoad, onImport, notify }: Options
       }
     }, 350);
     return () => clearTimeout(timeout);
-  }, [world, ready]);
+  }, [enabled, world, ready]);
 
   const importFile = useCallback(async (file?: File) => {
     if (!file) return;

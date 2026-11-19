@@ -1,0 +1,416 @@
+.zine {
+  --ink: #243d31;
+  --paper: #f7f5eb;
+  --rule: #c8cabb;
+  --rust: #a2442c;
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 100dvh;
+  font-family: "Helvetica Neue", "Apple SD Gothic Neo", Arial, sans-serif;
+}
+.zine button,
+.zine input,
+.zine textarea {
+  font-family: inherit;
+}
+.z-mast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px max(5vw, 20px);
+  border-bottom: 1px solid var(--ink);
+  gap: 15px;
+}
+.z-wordmark {
+  font:
+    italic 600 38px/1 Georgia,
+    serif !important;
+  letter-spacing: -2.5px;
+  padding: 0;
+}
+.z-wordmark span {
+  font:
+    16px Georgia,
+    serif;
+  vertical-align: top;
+  display: inline-block;
+  margin: 0 0 0 4px;
+}
+.z-mast nav,
+.z-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.zine .z-primary,
+.z-finish {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 11px 20px;
+  font-weight: 600;
+  font-size: 14px;
+}
+.z-primary span {
+  padding-left: 14px;
+}
+.z-textbtn {
+  font-size: 14px;
+}
+.z-desk,
+.z-shelf,
+.z-spread {
+  width: min(1240px, 90vw);
+  margin: auto;
+}
+.z-desk-head,
+.z-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--rule);
+  padding: 22px 0 15px;
+}
+.zine h1 {
+  font-family: Georgia, "AppleMyungjo", "Batang", serif;
+  line-height: 1.14;
+  font-weight: 500;
+  letter-spacing: -0.055em;
+  font-size: clamp(32px, 3.6vw, 54px);
+  overflow-wrap: anywhere;
+}
+.zine small,
+.z-page-no,
+.z-caption,
+.z-strip > span {
+  font-size: 12px;
+  color: #536456;
+}
+.z-desk-head small,
+.z-copy-side small {
+  display: block;
+  margin-bottom: 8px;
+}
+.z-page-no {
+  font:
+    italic 19px Georgia,
+    serif;
+}
+.z-desk .studio {
+  min-height: 0;
+}
+.z-desk .workspace {
+  min-height: 0;
+  padding: 18px 0 12px;
+  gap: 20px;
+  grid-template-columns: 108px minmax(250px, 1.2fr) minmax(200px, 1fr);
+}
+.z-desk .canvas-area {
+  height: auto;
+  min-height: 0;
+}
+.z-desk .world-grid {
+  width: min(100%, 48vh);
+  min-width: 0;
+}
+.z-desk .direct-palette {
+  border-color: var(--rule);
+}
+.z-desk .live-preview {
+  height: clamp(230px, 44vh, 480px);
+  background: #fff;
+  border: 1px solid var(--rule);
+}
+.z-desk .preview-panel {
+  grid-column: auto;
+  align-self: center;
+}
+.z-desk .canvas-tools {
+  margin-top: 3px;
+}
+.z-desk .canvas-tools button {
+  font-size: 12px;
+}
+.z-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 14px 0 22px;
+  border-top: 1px solid var(--rule);
+}
+.z-strip > span {
+  margin-right: 8px;
+}
+.z-strip button {
+  border: 1px solid var(--rule);
+  background: #fbfaf3;
+  padding: 9px 12px;
+}
+.z-strip button[aria-current] {
+  background: var(--ink);
+  color: var(--paper);
+}
+.z-strip button span {
+  font-family: Georgia, serif;
+  margin-right: 5px;
+  font-style: italic;
+}
+.z-strip .z-add {
+  border-style: dashed;
+}
+.z-section-head {
+  padding: 48px 0 24px;
+}
+.z-collection {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 28px;
+  align-items: start;
+  padding: 30px 0 60px;
+}
+.z-shelf-item {
+  padding: 0;
+  text-align: left;
+  max-width: 300px;
+}
+.z-caption {
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid var(--rule);
+  margin: 15px 0 0;
+  padding-top: 8px;
+}
+.z-new-sheet {
+  border: 1px dashed #a6ae9b;
+  min-height: 190px;
+  aspect-ratio: 0.83;
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 300px;
+  margin: 0;
+  color: #4b5e50;
+}
+.z-new-sheet span {
+  font-size: 31px;
+}
+.z-spread {
+  display: grid;
+  grid-template-columns: minmax(0, 1.04fr) minmax(0, 1fr);
+  padding: clamp(32px, 6vh, 76px) 0;
+  align-items: stretch;
+}
+.z-print-side {
+  display: grid;
+  place-items: center;
+  min-height: 470px;
+  background: #e1e4d5;
+  padding: 32px 12%;
+}
+.z-book {
+  background: var(--paper);
+  padding: 7% 7% 7% 10%;
+  box-shadow:
+    4px 5px 0 #28372c20,
+    0 9px 20px #22352b17;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  max-width: 390px;
+  overflow: hidden;
+  text-align: left;
+  color: var(--ink);
+}
+.z-book::before {
+  content: "";
+  position: absolute;
+  left: 3%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #bbc1ae;
+}
+.z-print-side .z-book {
+  transform: rotate(-2deg);
+}
+.z-reply-book {
+  background: #fbefe3;
+}
+.z-imprint {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 1px solid currentColor;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+.z-imprint i {
+  font:
+    italic bold 20px Georgia,
+    serif;
+}
+.z-imprint span {
+  font-size: 11px;
+}
+.z-print {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+}
+.z-book-title {
+  font:
+    500 clamp(18px, 2.6vw, 36px)/1.22 Georgia,
+    "AppleMyungjo",
+    serif;
+  letter-spacing: -0.065em;
+  margin-top: 13px;
+  overflow-wrap: anywhere;
+}
+.z-copy-side {
+  display: flex;
+  align-items: center;
+  padding: 26px 0 26px 12%;
+  min-width: 0;
+}
+.z-copy-side > section,
+.z-copy-side > form {
+  width: 100%;
+  max-width: 460px;
+}
+.z-copy-side h1 {
+  margin-bottom: 24px;
+  text-wrap: balance;
+}
+.z-copy-side label {
+  display: grid;
+  gap: 7px;
+  color: var(--ink);
+  font-size: 13px;
+  margin: 20px 0;
+}
+.z-copy-side input,
+.z-copy-side textarea {
+  width: 100%;
+  background: transparent;
+  color: var(--ink);
+  padding: 10px 4px;
+  border: 0;
+  border-bottom: 1px solid #a2ad9d;
+  font-size: 17px;
+}
+.z-copy-side textarea {
+  min-height: 64px;
+  resize: vertical;
+  font-size: 15px;
+}
+.z-copy-side p,
+.z-copy-side blockquote {
+  font-size: 16px;
+  line-height: 1.65;
+  word-break: keep-all;
+}
+.z-copy-side p {
+  margin: 0 0 24px;
+  color: #526052;
+}
+.z-copy-side blockquote {
+  border-left: 2px solid var(--rust);
+  padding-left: 15px;
+  margin: 12px 0 28px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.z-actions {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.z-actions > button:last-child:not(:first-child) {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.z-route {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 15px 0 22px;
+}
+.z-route i {
+  width: 20px;
+  height: 3px;
+  background: #c6492b;
+}
+.z-message {
+  padding: 12px 5vw;
+  background: #ebe9d6;
+}
+.z-finish {
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  z-index: 5;
+}
+.zine:has(.studio.playing) > .z-mast,
+.z-desk:has(.playing) > .z-desk-head,
+.z-desk:has(.playing) > .z-strip {
+  display: none;
+}
+.zine .studio.playing .play-shell {
+  height: 100dvh;
+}
+.z-desk:has(.playing) {
+  width: 100%;
+}
+@media (max-width: 760px) {
+  .z-desk .workspace {
+    padding-inline: 0;
+  }
+  .z-spread {
+    grid-template-columns: 1fr;
+    gap: 22px;
+    padding-top: 24px;
+  }
+  .z-print-side {
+    min-height: 0;
+    padding: 24px;
+  }
+  .z-print-side .z-book {
+    max-width: 215px;
+  }
+  .z-copy-side {
+    padding: 0 0 25px;
+  }
+  .z-desk .world-grid {
+    width: min(100%, 420px);
+  }
+  .z-collection {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 15px;
+  }
+  .z-new-sheet {
+    min-height: 140px;
+  }
+  .z-book-title {
+    font-size: 22px;
+  }
+  .z-desk .preview-panel {
+    width: 100%;
+  }
+  .z-copy-side h1 {
+    font-size: 34px;
+  }
+  .z-mast {
+    padding-block: 10px;
+  }
+  .z-print-side .z-book-title {
+    margin-top: 7px;
+  }
+}
+.zine .z-book-title {
+  word-break: keep-all;
+}
+.z-finish {
+  border: 1px solid #bac2b5;
+  background: #243d31f0;
+}

@@ -61,6 +61,7 @@ export function EditorToolbar({
           </button>
         </div>
         <div className="file-actions">
+          <a href="?zine" style={{ alignSelf: "center", color: "inherit" }}>{language === "ko" ? "진 작업대" : "Zine studio"}</a>
           <button onClick={onNew}>{t("다시 시작")}</button>
           <button onClick={onImport}>
             {t("불러오기")}
