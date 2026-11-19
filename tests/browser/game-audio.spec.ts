@@ -52,7 +52,7 @@ async function openWorld(page: Page, world: World) {
     ` });
   });
   await page.goto(".");
-  await expect(page.getByRole("button", { name: "공유", exact: true }))
+  await expect(page.getByRole("button", { name: "파일 저장", exact: true }))
     .toHaveAttribute("aria-description", "이 브라우저에 저장됨");
 }
 const probe = (page: Page) => page.evaluate(() => {

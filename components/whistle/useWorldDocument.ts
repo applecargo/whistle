@@ -7,6 +7,13 @@ import { WATER_INSET } from "@/lib/water";
 import { createWorldDeriver, samePlacement } from "@/lib/world-derivation";
 import { placementChanges, type PlacementFeedback } from "@/lib/placement-feedback";
 import { withSymbolColors } from "@/lib/symbol-color";
+import { contentKind, MAX_CONTENT_COUNT } from "@/lib/content-limits";
+
+function copyDocument(world: World): World {
+  return { ...clone({ ...world, assets: [] }), assets: world.assets.map(asset => ({
+    ...asset, ...(asset.sound ? { sound: { ...asset.sound } } : {}),
+  })) };
+}
 
 type PaintOptions = {
   layer: "tiles" | "symbols";
@@ -48,20 +55,20 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
 
   const commit = useCallback((next: World) => {
     revealChanges(next);
-    history.current.push(clone(worldRef.current));
+    history.current.push(copyDocument(worldRef.current));
     if (history.current.length > 40) history.current.shift();
     future.current = [];
     applyWorld(next);
   }, [applyWorld, revealChanges]);
 
   const edit = useCallback((change: (world: World) => void) => {
-    const next = clone(worldRef.current);
+    const next = copyDocument(worldRef.current);
     change(next);
     commit(next);
   }, [commit]);
 
   const load = useCallback((next: World, beforeUpgrade: World) => {
-    history.current = next !== beforeUpgrade ? [clone(beforeUpgrade)] : [];
+    history.current = next !== beforeUpgrade ? [copyDocument(beforeUpgrade)] : [];
     if (history.current[0]?.terrain) history.current[0].terrain.generatorVersion = 2;
     future.current = [];
     applyWorld(next);
@@ -70,7 +77,7 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
   const undo = useCallback(() => {
     const previous = history.current.pop();
     if (!previous) return false;
-    future.current.push(clone(worldRef.current));
+    future.current.push(copyDocument(worldRef.current));
     revealChanges(previous);
     applyWorld(previous);
     return true;
@@ -79,7 +86,7 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
   const redo = useCallback(() => {
     const next = future.current.pop();
     if (!next) return false;
-    history.current.push(clone(worldRef.current));
+    history.current.push(copyDocument(worldRef.current));
     revealChanges(next);
     applyWorld(next);
     return true;
@@ -89,8 +96,8 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
     const { layer, assetId, surface, terrainTool } = options;
     if (layer === "symbols" && !worldRef.current.assets.some(asset => asset.id === assetId)) return;
     const first = !strokeBase.current;
-    if (first) strokeBase.current = clone(worldRef.current);
-    const next = clone(strokeBase.current!);
+    if (first) strokeBase.current = copyDocument(worldRef.current);
+    const next = copyDocument(strokeBase.current!);
     if (layer === "tiles") {
       next.terrain ??= flatTerrain(next.size);
       const waterEdits = new Set<number>();
@@ -117,7 +124,8 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
       for (const i of cells) {
         const x = i % next.size, z = Math.floor(i / next.size);
         if (erase) next.objects = next.objects.filter(object => object.x !== x || object.z !== z || object.asset !== asset.id);
-        else if (!next.objects.some(object => object.x === x && object.z === z && object.asset === asset.id))
+        else if ((!contentKind(asset) || next.objects.filter(object => contentKind(next.assets.find(a => a.id === object.asset)) === contentKind(asset)).length < MAX_CONTENT_COUNT) &&
+          !next.objects.some(object => object.x === x && object.z === z && object.asset === asset.id))
           next.objects.push({ id: uid(), asset: asset.id, x, z, rotation: 0, scale: asset.defaultScale ?? 1 });
       }
     }

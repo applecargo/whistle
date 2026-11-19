@@ -64,7 +64,7 @@ test("UDP ranges reach the existing scene and Pd; height, invalid frames and tim
     device.valid();
     await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
     device.pause();
-    await expect(page.locator("#device-status")).toContainText("1초 동안 위치 수신 없음");
+    await expect(page.locator("#device-status")).toContainText("위치를 1초 이상 수신하지 못했습니다.");
     await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
     device.resume();
     await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
@@ -104,7 +104,7 @@ test("tag selection, saved Whistle world and connection loss do not use another 
     await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
     device.pause();
     await device.stopBridge();
-    await expect(page.locator("#device-status")).toContainText("PC 수신기 연결 끊김");
+    await expect(page.locator("#device-status")).toContainText("PC 수신기 연결이 끊겼습니다.");
     await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
     expect(await page.evaluate(() => localStorage.getItem("whistle.world.v2"))).toBe(stored);
   } finally { await device.close(); }

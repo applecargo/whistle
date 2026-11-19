@@ -19,8 +19,8 @@ export function textImage(value: string, color = "#111111"): string {
 }
 
 function renderText(value: string, color = "#111111", resolution = 1): string {
-  if (!value.trim()) throw Error("텍스트를 입력하세요.");
-  if (value.length > MAX_TEXT_LENGTH) throw Error("텍스트는 10,000자까지 입력할 수 있어요.");
+  if (!value.trim()) throw Error("텍스트가 비어 있습니다.");
+  if (value.length > MAX_TEXT_LENGTH) throw Error("텍스트가 10,000자를 초과했습니다.");
   const canvas = document.createElement("canvas");
   const size = value.length > 500 ? 1024 : 512;
   canvas.width = canvas.height = size * resolution;

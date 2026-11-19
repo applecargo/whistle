@@ -1,4 +1,5 @@
 "use client";
+import { SoundGlyph } from "./SoundGlyph";
 import type { Asset, Weather, TimeOfDay } from "@/lib/world";
 import { SURFACES, type Surface } from "@/lib/terrain";
 import type { TerrainTool } from "@/lib/tile";
@@ -15,7 +16,7 @@ type Props = {
   onSelectTerrainTool: (tool: TerrainTool) => void;
   onTimeOfDayChange: (time: TimeOfDay) => void;
   onWeatherChange: (weather: Weather) => void;
-  onCreateSymbol: (type: "image" | "text") => void;
+  onCreateSymbol: (type: "image" | "text" | "sound") => void;
   onSelectSymbol: (id: string) => void;
   onEditSymbol: (id: string) => void;
   onToggleStart: () => void;
@@ -49,12 +50,13 @@ export function EditorPalette({ weather, timeOfDay, surface, terrainTool, placin
       <div className="symbol-create">
         <button onClick={() => onCreateSymbol("image")} aria-label={t("이미지 만들기")}>{t("이미지")} <span aria-hidden="true">＋</span></button>
         <button onClick={() => onCreateSymbol("text")} aria-label={t("텍스트 만들기")}>{t("텍스트")} <span aria-hidden="true">＋</span></button>
+        <button onClick={() => onCreateSymbol("sound")} aria-label={t("사운드 만들기")}>{t("사운드")} <span aria-hidden="true">＋</span></button>
       </div>
       <div className="symbol-library">{symbols.map(symbol => <div key={symbol.id} className="symbol-library-item">
         <button data-symbol-asset={symbol.id} className={selectedSymbol === symbol.id ? "active" : ""}
           aria-pressed={selectedSymbol === symbol.id} aria-label={`${t("배치")}: ${symbol.text ?? symbol.name}`}
           onClick={() => onSelectSymbol(symbol.id)}>
-          {symbol.text !== undefined ? <span style={{ color: symbol.textColor }}>{symbol.text.slice(0, 2)}</span> : <img src={symbol.image} alt="" />}
+          {symbol.sound ? <span className="sound-symbol" title={symbol.name}><SoundGlyph color={symbol.glyphColor ?? symbol.color} /><span>{symbol.name}</span></span> : symbol.text !== undefined ? <span style={{ color: symbol.textColor }}>{symbol.text.slice(0, 2)}</span> : <img src={symbol.image} alt="" />}
         </button>
         {selectedSymbol === symbol.id && <button className="symbol-edit" aria-label={t("편집")} onClick={() => onEditSymbol(symbol.id)}>
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><path d="m3 10 7-7 3 3-7 7-4 1zM9 4l3 3" /></svg>

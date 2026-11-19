@@ -12,6 +12,8 @@ import { HoleGlyph } from "./HoleGlyph";
 import { EnvironmentEffects } from "./EnvironmentEffects";
 import { effectRegions } from "@/lib/effect-regions";
 import { useEffectFeedback } from "./useEffectFeedback";
+import { SoundGlyph } from "./SoundGlyph";
+import { soundRangeAt } from "@/lib/audio/sound-range";
 import { SiteGlyph } from "./SiteGlyph";
 import { useLanguage } from "./Language";
 
@@ -81,7 +83,9 @@ export function EditorBoard({
               Math.floor(i / world.size),
             )!;
             const c = environment.cells[i];
-            return `surface-${effectCells.has(i) || environmentTileKind(c) ? "plain" : tile.surface} level-${c.water === null ? tile.height : 0} ${isHole(tile) ? "tile-void" : ""} ${effectCells.has(i) ? "has-effect" : ""} ${c.grass ? "has-grass" : ""} ${c.water !== null ? "has-water" : ""} ${c.tree ? "has-tree" : ""} ${c.fog > 0.05 ? "has-fog" : ""}`;
+            const sound = world.assets.find(a => a.id === placingAsset)?.sound;
+            const inSoundRange = sound && world.objects.some(o => o.asset === placingAsset && Math.hypot(o.x - i % world.size, o.z - Math.floor(i / world.size)) < soundRangeAt(environment, o.x, o.z));
+            return `${inSoundRange ? "sound-range" : ""} surface-${effectCells.has(i) || environmentTileKind(c) ? "plain" : tile.surface} level-${c.water === null ? tile.height : 0} ${isHole(tile) ? "tile-void" : ""} ${effectCells.has(i) ? "has-effect" : ""} ${c.grass ? "has-grass" : ""} ${c.water !== null ? "has-water" : ""} ${c.tree ? "has-tree" : ""} ${c.fog > 0.05 ? "has-fog" : ""}`;
           }}
           label={(i) => {
             const x = i % world.size,
@@ -99,7 +103,7 @@ export function EditorBoard({
               z = Math.floor(i / world.size),
               tile = tileAt(world, x, z)!;
             const cellActors = actors.filter(
-              (a) => a.x === x && a.z === z && !a.removed && world.assets.some(asset => asset.id === a.asset && (asset.image || asset.text?.trim())),
+              (a) => a.x === x && a.z === z && !a.removed && world.assets.some(asset => asset.id === a.asset && (asset.image || asset.text?.trim() || asset.sound)),
             );
             const actor = cellActors[0];
             const generated = structures.filter(
@@ -149,7 +153,7 @@ export function EditorBoard({
                     style={{ marginLeft: offset, marginTop: -offset, zIndex: 5 + layer }}
                     onPointerDown={e => { if (!placingStart && !placingAsset) e.stopPropagation(); }}
                     onClick={e => { if (!placingStart && !placingAsset) { e.stopPropagation(); onOpenSymbol(i, placed.id); } }}>
-                    <SiteGlyph kind={kind} filled={!!asset?.image || !!asset?.text?.trim()} color={asset.glyphColor ?? asset.color} />
+                    {asset.sound ? <SoundGlyph color={asset.glyphColor ?? asset.color} /> : <SiteGlyph kind={kind} filled={!!asset?.image || !!asset?.text?.trim()} color={asset.glyphColor ?? asset.color} />}
                   </span>;
                 })}
                 {!!actor?.marks.length && (

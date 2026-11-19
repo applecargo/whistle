@@ -79,7 +79,7 @@ for (const mobile of [false, true]) test(`preview rotates without editing the bo
     await expect.poll(() => page.evaluate(() => (globalThis as any).__testCamera.position.x)).not.toBe(x);
   }
   await canvas.screenshot({ path: testInfo.outputPath("rotated-preview.png") });
-  await page.getByRole("button", { name: "세계에 들어가기", exact: true }).click();
+  await page.getByRole("button", { name: "들어가기", exact: true }).click();
   await expect(page.locator(".play-shell canvas")).toBeVisible();
   expect(errors).toEqual([]);
 });

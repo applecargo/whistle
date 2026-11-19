@@ -930,15 +930,13 @@ export default function Scene({
       ref={host}
       role="img"
       aria-label={t(
-        mode === "play" ? "1인칭으로 탐험하는 세계" : "세계의 3D 미리보기",
+        mode === "play" ? "플레이 화면" : "3D 미리보기",
       )}
     >
       <div ref={fallVeil} className="fall-veil" aria-hidden="true" />
       {failed && (
         <div className="scene-error">
-          {t("3D 화면을 시작하지 못했어요.")}
-          <br />
-          {t("WebGL을 지원하는 브라우저에서 다시 열어 주세요.")}
+          {t("3D 화면을 시작할 수 없습니다.")}
         </div>
       )}
     </div>

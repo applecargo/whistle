@@ -7,7 +7,7 @@ test.beforeEach(async ({ page }) => {
     localStorage.setItem("whistle.language", "ko");
   }, terrainFixtures().flat);
   await page.goto(".");
-  await expect(page.getByRole("button", { name: "공유", exact: true }))
+  await expect(page.getByRole("button", { name: "파일 저장", exact: true }))
     .toHaveAttribute("aria-description", "이 브라우저에 저장됨");
 });
 
@@ -16,12 +16,13 @@ test("toolbar and palette keep language, dialogs, and file selection connected",
   await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Raise", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "한국어", exact: true }).click();
-  await page.getByRole("button", { name: "공유", exact: true }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "세계 링크" })).toHaveValue(/#world=/);
-  await page.getByRole("dialog").getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(page.getByRole("button", { name: "공유", exact: true })).toHaveCount(0);
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "파일 저장", exact: true }).click();
+  expect((await download).suggestedFilename()).toMatch(/\.whistle\.json$/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("button", { name: "다시 시작", exact: true }).click();
-  await expect(page.getByRole("dialog")).toContainText("지금 만든 세계를 지우고 새로 시작할까요?");
+  await expect(page.getByRole("dialog")).toContainText("현재 작업이 삭제됩니다.");
   await page.getByRole("dialog").getByRole("button", { name: "닫기", exact: true }).click();
   await page.getByRole("button", { name: "높이기", exact: true }).click();
   await page.locator('[data-cell="0"]').click();

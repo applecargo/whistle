@@ -51,7 +51,7 @@ test("forest and water keep a limited grayscale palette through resize, night an
   await page.locator(".daylight-indicator").click();
   await page.getByRole("button", { name: "한밤중", exact: true }).click();
   await check();
-  await page.getByRole("button", { name: "세계에 들어가기", exact: true }).click();
+  await page.getByRole("button", { name: "들어가기", exact: true }).click();
   await page.locator(".play-shell canvas").waitFor();
   await check();
   await page.locator(".play-shell canvas").screenshot({ path: testInfo.outputPath("pixel-play.png") });

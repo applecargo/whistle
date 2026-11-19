@@ -58,7 +58,7 @@ function leastSquares(rows: number[][], values: number[]): number[] {
 export function solvePosition(ranges: Range[], config: BridgeConfig): Point & { residual: number; anchors: number } {
   const seen = new Set<string>();
   const readings = ranges.flatMap((range) => {
-    if (!finite(range.distance) || range.distance <= 0 || range.distance > 500 || seen.has(range.anchorId)) throw new Error("거리값 오류");
+    if (!finite(range.distance) || range.distance <= 0 || range.distance > 500 || seen.has(range.anchorId)) throw new Error("거리값이 올바르지 않습니다.");
     seen.add(range.anchorId);
     const anchor = config.anchors.find((a) => a.id === range.anchorId);
     return anchor ? [{ anchor, distance: range.distance }] : [];

@@ -35,7 +35,7 @@ export function useLiveWorld(receive: (world: World) => void) {
         setError("");
       } catch {
         setStatus("unavailable");
-        setError("Whistle 세계를 불러오지 못했습니다.");
+        setError("작업을 불러올 수 없습니다.");
       }
     };
     loadSaved();
@@ -53,7 +53,7 @@ export function useLiveWorld(receive: (world: World) => void) {
         } catch {
           if (!source || source === data.source) {
             setStatus("unavailable");
-            setError("편집기에서 받은 세계가 올바르지 않습니다.");
+            setError("작업 데이터가 올바르지 않습니다.");
           }
         }
       } else if (!source || source === data.source) {

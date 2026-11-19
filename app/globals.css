@@ -750,14 +750,12 @@ p {
   font-family: monospace;
   font-size: 20px;
 }
-.share-actions,
 .new-actions {
   display: flex;
   gap: 13px;
   justify-content: flex-end;
   margin-top: 18px;
 }
-.share-actions button,
 .new-actions button {
   border: 1px solid #ccc;
   font-size: 11px;
@@ -2181,4 +2179,53 @@ p {
   .symbol-create button { gap: 12px; }
   .symbol-library { display: flex; flex-wrap: wrap; }
   .symbol-library-item { width: 40px; }
+}
+
+.sound-editor .error { margin: 8px 0; }
+.sound-name { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #777; }
+.sound-name input { width: 92px; min-width: 0; padding: 4px; border: 0; border-bottom: 1px solid #ddd; border-radius: 0; font: inherit; color: #111; }
+.sound-preview { display: flex; align-items: center; gap: 8px; min-height: 64px; padding: 12px; border: 1px solid #ddd; }
+.sound-preview button { display: flex; align-items: center; gap: 4px; padding: 4px 0; font-size: 11px; white-space: nowrap; }
+.sound-preview svg { width: 14px; height: 14px; fill: currentColor; }
+.sound-preview input { flex: 1; min-width: 0; width: 0; }
+.sound-preview output { font-size: 10px; color: #777; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sound-options-row { flex-wrap: nowrap; }
+.sound-options-row > .sound-playback { flex: 0 0 auto; width: auto; }
+.sound-playback > div { grid-template-columns: repeat(2, auto); }
+.sound-volume { display: flex; align-items: center; gap: 8px; min-width: 0; margin-left: auto; font-size: 11px; color: #777; white-space: nowrap; }
+.sound-volume input { width: 72px; min-width: 0; }
+.sound-volume output { width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+.sound-preview input[type="range"], .sound-volume input[type="range"] { padding: 0; accent-color: #111; }
+.sound-range::after { content: ""; position: absolute; inset: 0; background: rgba(65, 115, 155, .12); pointer-events: none; }
+.symbol-library .site-glyph { width: 28px; height: 28px; }
+
+.symbol-library .sound-symbol { display: flex; flex-direction: column; align-items: center; gap: 1px; width: 100%; min-width: 0; }
+.symbol-library .sound-symbol .site-glyph { width: 18px; height: 18px; }
+.sound-symbol > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; line-height: 11px; }
+
+.maker-dialog .dialog-inner { padding: 20px; }
+.maker-dialog .dialog-heading { margin-bottom: 16px; }
+.maker-dialog .dialog-heading h2 { font-size: 14px; }
+.maker-dialog .image-editor { margin: 0; }
+.maker-dialog .photo-actions,
+.maker-dialog .text-object-actions { min-height: 36px; margin: 0 0 10px; }
+.maker-dialog .photo-actions button { min-height: 36px; }
+.maker-dialog .photo-canvas-wrap { width: min(100%, 220px, 32dvh); }
+.maker-dialog .text-object-input { height: 180px; min-height: 100px; max-height: 32dvh; padding: 12px; }
+.maker-dialog .photo-tools { margin-top: 8px; }
+.maker-dialog .photo-tools button { min-height: 36px; }
+.maker-dialog .photo-options { min-height: 36px; padding-top: 4px; gap: 8px; font-size: 11px; }
+.maker-dialog .photo-options:empty { display: none; }
+.maker-dialog .asset-options-row { flex-wrap: nowrap; gap: 8px; margin-top: 12px; }
+.maker-dialog .asset-options-row > .asset-size-options { flex: 1; min-width: 0; }
+.maker-dialog .asset-size-options > div { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 2px; }
+.maker-dialog .asset-size-options button { min-height: 36px; padding: 4px 2px; font-size: 11px; white-space: nowrap; }
+.maker-dialog .asset-presentation-controls button { height: 36px; }
+.maker-dialog .sound-options-row > .sound-playback { flex: 0 0 auto; }
+.maker-dialog .sound-playback > div { grid-template-columns: repeat(2, auto); gap: 8px; }
+.maker-dialog .sound-preview output { font-size: 11px; }
+.maker-dialog .dialog-footer { position: sticky; bottom: 0; z-index: 2; gap: 8px; margin-top: 0; padding-top: 16px; background: #fff; }
+.maker-dialog .dialog-footer button { min-height: 40px; font-size: 12px; }
+@media (max-width: 370px) {
+  .maker-dialog .dialog-inner { padding: 16px; }
 }

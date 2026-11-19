@@ -171,3 +171,17 @@ test("cached structures preserve the walking surface across the whole board", ()
     assert.equal(floorHeight(world, x, z, cached.structures), floorHeight(world, x, z, direct));
   }
 });
+
+test("sound placements do not generate structures or invalidate the terrain cache", () => {
+  const world = terrainFixtures().flat;
+  world.objects = [];
+  const derive = createWorldDeriver(), initial = derive(world);
+  world.assets.push({ id: "recording", name: "Sound", shape: "sphere", color: "#111111", solid: false,
+    sound: { data: "data:audio/wav;base64,AAAA", duration: 1, radius: 4, volume: 1, mode: "loop" } });
+  world.objects = [[3, 3], [5, 3], [3, 5], [5, 5]].map(([x, z], i) => ({ id: `sound${i}`, asset: "recording", x, z, scale: 1, rotation: 0 }));
+  assert.strictEqual(derive(world), initial);
+  assert.deepEqual(deriveStructures(world), initial.structures);
+  delete world.assets.at(-1)!.sound;
+  assert.notStrictEqual(derive(world), initial);
+  assert.ok(derive(world).structures.some(structure => structure.kind === "canopy"));
+});

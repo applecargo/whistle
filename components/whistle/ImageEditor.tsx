@@ -146,7 +146,7 @@ export const ImageEditor = forwardRef<
       if (crop) applyCrop();
       const pixels = context().getImageData(0, 0, SIZE, SIZE).data;
       if (!pixels.some((value, i) => i % 4 === 3 && value > 0))
-        throw Error("사진이나 그림을 추가하세요.");
+        throw Error("이미지가 비어 있습니다.");
       const image = optimizedImage(canvas.current!);
       return {
         image,
@@ -166,7 +166,7 @@ export const ImageEditor = forwardRef<
       return;
     }
     if (file.size > 15 * 1024 * 1024) {
-      setError("최대 15MB");
+      setError("파일 용량이 15MB를 초과했습니다.");
       return;
     }
     setBusy(true);
@@ -387,11 +387,10 @@ export const ImageEditor = forwardRef<
               <button onClick={() => setCrop(null)}>{t("취소")}</button>
             </>
           ) : (
-            <span>{t("남길 영역을 드래그하세요")}</span>
+            null
           ))}
         {tool === "background" && (
           <>
-            <span>{t("지울 배경을 누르세요")}</span>
             <label>
               {t("범위")}{" "}
               <input

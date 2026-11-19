@@ -210,7 +210,7 @@ export function deriveStructures(
         }
       }
   }
-  const active = objects.filter((o) => !o.removed),
+  const active = objects.filter((o) => !o.removed && !world.assets.find(a => a.id === o.asset)?.sound),
     byCell = new Map(active.map((o) => [`${o.x},${o.z}`, o]));
   for (const a of active) {
     const tile = tileAt(world, a.x, a.z);

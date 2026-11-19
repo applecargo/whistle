@@ -26,7 +26,7 @@ export function withSymbolColors(world: World): World {
   const seen = new Set<string>();
   let changed = false;
   const assets = world.assets.map(asset => {
-    if (!asset.image && !asset.text?.trim()) return asset;
+    if (!asset.image && !asset.text?.trim() && !asset.sound) return asset;
     const color = asset.glyphColor?.toLowerCase();
     if (color && !seen.has(color)) { seen.add(color); return asset; }
     const glyphColor = randomSymbolColor(reserved);

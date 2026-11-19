@@ -14,7 +14,7 @@ async function openMedia(page: Page, kind: "image" | "text" = "image") {
     localStorage.setItem("media-ready", "1");
   }, world);
   await page.goto(".");
-  await expect(page.getByRole("button", { name: "공유", exact: true }))
+  await expect(page.getByRole("button", { name: "파일 저장", exact: true }))
     .toHaveAttribute("aria-description", "이 브라우저에 저장됨");
   await page.getByRole("button", { name: kind === "image" ? "이미지 만들기" : "텍스트 만들기", exact: true }).click();
 }
@@ -72,7 +72,7 @@ test("large photos are compressed with transparency and without a duplicate orig
   expect(decoded.cornerAlpha).toBe(0);
   expect(decoded.centerAlpha).toBe(255);
   await page.reload();
-  await expect(page.getByRole("button", { name: "공유", exact: true }))
+  await expect(page.getByRole("button", { name: "파일 저장", exact: true }))
     .toHaveAttribute("aria-description", "이 브라우저에 저장됨");
   expect((await savedAssets(page)).find(a => a.image)?.image).toBe(asset.image);
 });
@@ -97,7 +97,7 @@ test("native paste preserves long text without clipboard buttons", async ({ page
   const asset = (await savedAssets(page)).find(a => a.text)!;
   expect(asset.image!.length).toBeLessThanOrEqual(400_000);
   await page.reload();
-  await expect(page.getByRole("button", { name: "공유", exact: true }))
+  await expect(page.getByRole("button", { name: "파일 저장", exact: true }))
     .toHaveAttribute("aria-description", "이 브라우저에 저장됨");
   await page.locator("[data-symbol-asset]").click();
   await page.getByRole("button", { name: "편집", exact: true }).click();

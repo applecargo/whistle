@@ -538,7 +538,9 @@ test("symbol colors stay saturated and unique at the full asset limit", async ()
   }
   assert.ok(world.assets.every(asset => asset.glyphColor === undefined));
   assert.equal(withSymbolColors(colored), colored);
-  assert.deepEqual(validateWorld(JSON.parse(JSON.stringify(colored))).assets, colored.assets);
+  assert.throws(() => validateWorld(JSON.parse(JSON.stringify(colored))), /20개/);
+  const allowed = { ...colored, assets: colored.assets.slice(0, 20) };
+  assert.deepEqual(validateWorld(JSON.parse(JSON.stringify(allowed))).assets, allowed.assets);
   const first = randomSymbolColor([], () => 0);
   assert.notEqual(randomSymbolColor([first], () => 0), first);
   assert.notEqual(randomSymbolColor([], () => .9), first);
