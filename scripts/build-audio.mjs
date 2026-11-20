@@ -14,7 +14,12 @@ const { default: runtimeCode } = await import(pathToFileURL(join(webpd, "dist/sr
 const root = fileURLToPath(new URL("../", import.meta.url));
 const patchDir = join(root, "audio/patches");
 const output = join(root, "public/audio-test");
-const compile = (input, out) => execFileSync(process.execPath, [join(webpd, "bin/cli.mjs"), "-i", input, "-o", out, "-f", "wasm"], { stdio: ["ignore", "ignore", "inherit"] });
+const compile = (name, out) => {
+  const started = Date.now();
+  console.log(`WebPd: compiling ${name}.pd ...`);
+  execFileSync(process.execPath, [join(webpd, "bin/cli.mjs"), "-i", join(patchDir, `${name}.pd`), "-o", out, "-f", "wasm"], { stdio: ["ignore", "ignore", "inherit"] });
+  console.log(`WebPd: compiled ${name}.pd (${((Date.now() - started) / 1000).toFixed(1)}s)`);
+};
 
 await mkdir(output, { recursive: true });
 await writeFile(join(output, "webpd-runtime.js"), runtimeCode);
@@ -23,17 +28,27 @@ for (const name of ["COPYING", "COPYING.LESSER"]) await copyFile(join(webpd, nam
 const temporary = await mkdtemp(join(tmpdir(), "whistle-webpd-"));
 try {
   // --- 기존 단일 패치(uwb-player) 빌드: 새 엔진으로 교체할 때 삭제 예정 ---
-  const legacyWasm = join(temporary, "patch.wasm");
-  compile(join(patchDir, "uwb-player.pd"), legacyWasm);
-  const wasm = await readFile(legacyWasm);
-  const io = busPorts(await readMetadata("assemblyscript", wasm));
-  for (const name of ["whistle-edit", "whistle-player", "whistle-gate", "whistle-event", "whistle-player-stop", "whistle-board-height"]) {
-    if (!io.inputs[name] || !io.outputs[name]) throw new Error(`Missing Pd bus: ${name}`);
+  const legacyHashFile = join(output, ".legacy-hash");
+  const legacyHash = await patchHash(patchDir, "uwb-player", webpdVersion);
+  const legacyCached = await readFile(legacyHashFile, "utf8").catch(() => "") === legacyHash
+    && await access(join(output, "patch.wasm")).then(() => true, () => false)
+    && await access(join(output, "io.json")).then(() => true, () => false);
+  if (legacyCached) {
+    console.log("WebPd: uwb-player.pd up to date (patch.wasm)");
+  } else {
+    const legacyWasm = join(temporary, "patch.wasm");
+    compile("uwb-player", legacyWasm);
+    const wasm = await readFile(legacyWasm);
+    const io = busPorts(await readMetadata("assemblyscript", wasm));
+    for (const name of ["whistle-edit", "whistle-player", "whistle-gate", "whistle-event", "whistle-player-stop", "whistle-board-height"]) {
+      if (!io.inputs[name] || !io.outputs[name]) throw new Error(`Missing Pd bus: ${name}`);
+    }
+    if (!io.outputs["whistle-ready"]) throw new Error("Missing Pd ready signal");
+    await writeFile(join(output, "patch.wasm"), wasm);
+    await writeFile(join(output, "io.json"), JSON.stringify(io, null, 2) + "\n");
+    await writeFile(legacyHashFile, legacyHash);
+    console.log(`WebPd patch compiled: ${wasm.byteLength} bytes`);
   }
-  if (!io.outputs["whistle-ready"]) throw new Error("Missing Pd ready signal");
-  await writeFile(join(output, "patch.wasm"), wasm);
-  await writeFile(join(output, "io.json"), JSON.stringify(io, null, 2) + "\n");
-  console.log(`WebPd patch compiled: ${wasm.byteLength} bytes`);
 
   // --- 패치별 빌드: audio/patch-targets.json에 등재된 패치만 <이름>.wasm으로 ---
   const patchOutput = join(output, "patches");
@@ -53,7 +68,7 @@ try {
       continue;
     }
     const out = join(temporary, file);
-    compile(join(patchDir, `${name}.pd`), out);
+    compile(name, out);
     const bytes = await readFile(out);
     manifest.patches[name] = { file, hash, bytes: bytes.byteLength, ...busPorts(await readMetadata("assemblyscript", bytes)) };
     await writeFile(join(patchOutput, file), bytes);
