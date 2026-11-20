@@ -112,6 +112,19 @@ npm run build
 빌드 결과에도 `/whistle/audio-lab/index.html` 테스트 페이지가 포함된다.
 생성 파일 `public/audio-test/`는 Git에서 제외하며 빌드로 재생성한다.
 
+### 패치별 빌드 (사운드스케이프용)
+
+`audio/patch-targets.json`의 `patches` 배열에 등재한 패치만 각각 컴파일한다.
+다른 패치 안에서 불러오는 하위 패치(abstraction)는 등재하지 않는다.
+
+- 출력: `public/audio-test/patches/<이름>.wasm`, 전체 목록은 `patches/manifest.json`
+  (파일명·해시·크기·send/receive 버스)
+- 캐시: 대상 패치와 그것이 불러오는 하위 패치 전체의 내용, WebPd 버전으로 해시를 만든다.
+  해시가 같고 wasm이 있으면 건너뛴다. 하위 패치만 고쳐도 다시 컴파일된다.
+- 목록에서 빠진 패치의 이전 결과물은 빌드 때 지운다.
+- WebPd 런타임(`webpd-runtime.js`)은 모든 패치가 공유하며 패키지에서 그대로 복사한다.
+- 기존 단일 패치(`uwb-player.pd` → `patch.wasm`) 빌드는 새 엔진으로 교체할 때까지 유지한다.
+
 게임 화면(`/whistle/`)에서는 격자를 편집하거나 플레이를 시작하면 연결된다.
 실험 페이지에서는 같은 패치에 직접 입력한 파라미터를 보내 비교할 수 있다.
 비주얼과 플레이어 이동 로직은 유지했다. 기존 이벤트음은 Pd 합성으로 교체되어 감쇠 특성이 다를 수 있다.

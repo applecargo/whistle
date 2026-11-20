@@ -23,6 +23,7 @@ npm run dev  # Pd 자동 컴파일 · 서버 시작
 - 적용: Pd 저장 → `npm run audio:build` → 페이지 새로고침 → 오디오 시작
 - 서버 재시작 시에도 자동 컴파일
 - 입력 파라미터 변경 시 연결 패치·앱 코드 확인
+- `audio/patch-targets.json`: 패치별로 빌드할 대상 목록 (하위 패치는 등재하지 않음)
 - `public/audio-test/`: 자동 생성 파일, 직접 수정 금지
 - `whistle-board-height`: 보드 높이 수신만 연결, 소리 변화 없음
 

@@ -11,7 +11,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "npm run test:unit && npm run test:browser",
-    "test:unit": "node --experimental-strip-types --test tests/engine.test.ts tests/environment.test.ts tests/effect-rules.test.ts tests/symbols.test.ts tests/derivation.test.ts tests/game-audio.test.ts tests/placed-sounds.test.ts tests/uwb-position.test.ts tests/uwb-bridge.test.ts",
+    "test:unit": "node --experimental-strip-types --test tests/audio-patches.test.ts tests/engine.test.ts tests/environment.test.ts tests/effect-rules.test.ts tests/symbols.test.ts tests/derivation.test.ts tests/game-audio.test.ts tests/placed-sounds.test.ts tests/uwb-position.test.ts tests/uwb-bridge.test.ts",
     "test:browser": "playwright test",
     "test:storage": "playwright test tests/browser/storage.spec.ts",
     "benchmark:editor": "node tests/performance/editor.mjs",
