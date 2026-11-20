@@ -44,12 +44,12 @@
 
 ## 최소 테스트 구현
 
-- 원본: `audio/patches/interaction-test.pd`
+- 원본: `audio/patches/uwb-player.pd` (`player3.pd`를 불러옴)
 - WebPd: `1.0.0-alpha.14` 고정, 개발 의존성. `.pd`를 WASM으로 사전 컴파일한다.
 - 브리지: `lib/audio/webpd-session.ts`
 - 게임 연결: `components/whistle/useGameAudio.ts`, `lib/audio/game-audio.ts`, `lib/audio/game-parameters.ts`
 - 수동 테스트: `audio-lab/index.html`
-- 브라우저 회귀 테스트: `tests/browser/audio.spec.ts`
+- 다중 패치 실험: `audio-lab/soundscape.html`, 회귀 테스트 `tests/browser/soundscape-lab.spec.ts`
 
 | Pd 버스 | 입력 | 테스트 패치의 반응 |
 | --- | --- | --- |
@@ -133,22 +133,16 @@ npm run build
 
 ## 검증 범위
 
-`tests/game-audio.test.ts`는 문맥 매핑·무변경 드래그·좌표 변환·비동기 초기화·
-전환 중 취소·실패 재시도를 확인한다. `tests/browser/game-audio.spec.ts`는 실제 게임에서
-격자 편집, 풀/바위 구간 보행, 점프, 정지, blur, 화면 복귀와 기존 규칙 이벤트를 검사한다.
-브라우저 검사는 테스트에서만 WebPd 런타임을 계측해 실제 Pd 수신값과 출력 파형을 읽는다.
-앱에는 측정용 전역 변수를 추가하지 않는다.
+upstream의 사인파 시험 패치(`interaction-test.pd`)와 그 브라우저 테스트
+(`audio.spec.ts`, `game-audio.spec.ts`)는 현재 패치와 맞지 않아 폐기했다.
+위 버스 표의 주파수 설명은 그 시험 패치 기준이며, 기존 엔진 교체 시 함께 정리한다.
 
-Chromium에서 실제 WASM AudioWorklet 출력에 AnalyserNode를 연결해 확인한다.
+`tests/browser/soundscape-lab.spec.ts`는 실험 페이지에서 Chromium으로 다음을 확인한다.
 
-- 편집: 겹침 0/1 메시지 수신, 약 440/660Hz 출력, 엔벌로프 종료 후 무음.
-- 플레이: X/Y/Z·재질값 수신, 약 220/770Hz 출력, 좌우 분리, 고정 크기 출력. 다른 값을 고정하고 Y만 바꾸면 주파수를 유지한다.
-- UWB 보드 높이: 별도 버스 수신, 높이 1m당 110Hz 증가, 지형 높이와 독립성, 잘못된 입력의 음소거와 재시작.
-- 생명주기: 클릭 전 AudioContext 없음, 마이크 요청 없음, 음소거/해제, 화면 복귀·탭 이탈 시 무음,
-  로드 실패 후 컨텍스트 정리·재시도, 종료 후 재시작.
+- AudioContext 1개에서 WebPd 초기화 1회, 패치 인스턴스 2개 동시 실행
+- 마스터 출력이 무음이 아님(AnalyserNode), 제거·종료, 콘솔 오류 없음
 
-자동 측정은 음원 생성과 전달 경로를 검증한다. 실제 스피커의 청감, 모바일 Safari,
-실기기의 CPU·지연, 최종 샘플/외부 오브젝트 호환성은 별도 검증 대상이다.
+좌우 패닝이 실제로 분리되어 들리는지는 귀로 확인한다.
 
 ## 참고
 

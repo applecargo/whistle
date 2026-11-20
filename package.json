@@ -17,7 +17,7 @@
     "benchmark:editor": "node tests/performance/editor.mjs",
     "audio:build": "node scripts/build-audio.mjs",
     "dev:audio": "npm run dev",
-    "test:audio": "npm run audio:build && playwright test tests/browser/audio.spec.ts tests/browser/game-audio.spec.ts",
+    "test:audio": "npm run audio:build && playwright test tests/browser/soundscape-lab.spec.ts",
     "pretest:browser": "npm run audio:build",
     "prebuild": "npm run audio:build",
     "predev": "npm run audio:build",

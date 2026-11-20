@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.svg" />
+    <title>Whistle · 다중 패치 테스트</title>
+    <style>
+      body { max-width: 780px; margin: 40px auto; padding: 0 20px; font-family: system-ui, sans-serif; line-height: 1.6; color: #222; background: #fafafa; }
+      fieldset { margin: 24px 0; padding: 20px; border: 1px solid #bbb; }
+      label { display: inline-flex; flex-direction: column; margin: 6px 16px 12px 0; }
+      button { padding: 8px 14px; margin: 4px; cursor: pointer; }
+      table { border-collapse: collapse; width: 100%; }
+      td, th { border-bottom: 1px solid #ddd; padding: 6px; text-align: left; }
+      pre { white-space: pre-wrap; background: #eee; padding: 12px; max-height: 240px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>다중 패치 테스트</h1>
+    <p>AudioContext 하나에서 여러 패치를 동시에 실행하고, 각각 좌우로 패닝해 하나의 마스터로 믹스한다.</p>
+    <button id="start">오디오 시작</button>
+    <button id="stop" disabled>오디오 종료</button>
+    <p id="status" role="status">시작 전</p>
+    <fieldset id="controls" disabled>
+      <legend>패치 추가</legend>
+      <label>패치<select id="patch"></select></label>
+      <label>패닝 (−1 왼쪽 ~ 1 오른쪽)<input id="pan" type="range" min="-1" max="1" step="0.1" value="0" /></label>
+      <button id="add">추가</button>
+    </fieldset>
+    <table>
+      <thead><tr><th>#</th><th>패치</th><th>패닝</th><th></th></tr></thead>
+      <tbody id="voices"></tbody>
+    </table>
+    <p>마스터 출력 (채널별 최근 1초 peak): <output id="meter">—</output></p>
+    <pre id="log"></pre>
+    <script type="module" src="./soundscape.ts"></script>
+  </body>
+</html>
