@@ -1,14 +1,15 @@
 import type { World } from "../world.ts";
 import type { Terrain, Surface } from "../terrain.ts";
 import { SoundscapeManager } from "./soundscape-manager.ts";
+import type { SoundscapePatchName } from "./patch-targets.ts";
 
 /**
  * 지형 표면(Surface)에 따라 적절한 컴파일된 WASM 패치 이름을 결정합니다.
  */
-export function getPatchForSurface(surface: Surface): string {
+export function getPatchForSurface(surface: Surface): SoundscapePatchName {
   switch (surface) {
     case "plain":
-      return "bell01";
+      return "terrain_clock";
     case "rough":
       return "stone_knock";
     case "slick":
