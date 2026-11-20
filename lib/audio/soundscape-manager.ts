@@ -1,4 +1,4 @@
-import { createWasmPatchInstance, type WasmPatchInstance } from "./wasm-patch-instance";
+import { createWasmPatchInstance, type WasmPatchInstance } from "./wasm-patch-instance.ts";
 
 export type ActivationPolicy = 
   | { type: "distance"; radius: number } // 플레이어와의 거리 기반 컬링 (타일/오브젝트 기본값)
@@ -19,13 +19,22 @@ export class SoundscapeManager {
     instance: WasmPatchInstance;
     descriptor: SoundscapePatchDescriptor;
   }>();
+  private context: AudioContext;
+  private destination: AudioNode;
+  private baseUrl: string;
+  public defaultCullingRadius: number;
 
   constructor(
-    private context: AudioContext,
-    private destination: AudioNode,
-    private baseUrl: string,
-    public defaultCullingRadius = 18.0
-  ) {}
+    context: AudioContext,
+    destination: AudioNode,
+    baseUrl: string,
+    defaultCullingRadius = 18.0
+  ) {
+    this.context = context;
+    this.destination = destination;
+    this.baseUrl = baseUrl;
+    this.defaultCullingRadius = defaultCullingRadius;
+  }
 
   /**
    * 새로운 사운드스케이프 패치(타일, 오브젝트, 전역 앰비언트 등)를 등록

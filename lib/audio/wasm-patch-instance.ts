@@ -1,4 +1,4 @@
-import { loadRuntime, type PdMessage } from "./webpd-session";
+import { loadRuntime, type PdMessage } from "./webpd-session.ts";
 
 type Port = { nodeId: string; portletId: string };
 type Manifest = { inputs: Record<string, Port>; outputs: Record<string, Port> };
