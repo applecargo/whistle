@@ -112,6 +112,27 @@ npm run build
 빌드 결과에도 `/whistle/audio-lab/index.html` 테스트 페이지가 포함된다.
 생성 파일 `public/audio-test/`는 Git에서 제외하며 빌드로 재생성한다.
 
+### 사운드스케이프 엔진
+
+```text
+패치 노드 → 게인(fade) → PannerNode(3D) → 마스터 → 출력      (AudioContext 1개)
+```
+
+- `lib/audio/webpd-runtime.ts`: 런타임 스크립트는 페이지당 1회, 워클릿 초기화는
+  AudioContext당 1회. 패치 wasm은 한 번 받아 캐시하고 인스턴스마다 사본을 넘긴다.
+  만든 노드는 연결하지 않고 돌려준다.
+- `lib/audio/soundscape.ts`: 소스 등록(`set`)만으로는 노드를 만들지 않는다.
+  `activate`에서 로드·연결하고 fade in, `deactivate`에서 fade out 후
+  `update()`(매 프레임)가 오디오 시계 기준으로 노드를 정리한다. 타이머는 쓰지 않는다.
+  로딩 중 끄기, fade out 중 다시 켜기(같은 노드로 현재 값에서 복귀), 로드 실패 후 재시도를 처리한다.
+- 좌표는 3D 장면 좌표(미터). 리스너는 위치와 바라보는 방향 벡터로 설정한다.
+  타일 좌표 변환과 yaw → 방향 벡터 변환은 게임 연결 쪽 책임이다.
+- 패닝 기본값은 equalpower(가벼움, 좌우 뚜렷, 앞뒤 구분 없음). HRTF(앞뒤·높이 단서,
+  더 무거움)는 `panning: "HRTF"` 옵션. 성능을 확인한 뒤 HRTF로 옮기는 것이 목표다.
+  HRTF에서 저음은 좌우 음량차가 작고 방향감은 주로 도달 시간차로 생긴다.
+- 실험 페이지: `audio-lab/soundscape.html` (`?panning=hrtf`로 비교).
+  평면도를 클릭해 패치를 놓고 리스너 방향을 돌린다.
+
 ### 패치별 빌드 (사운드스케이프용)
 
 `audio/patch-targets.json`의 `patches` 배열에 등재한 패치만 각각 컴파일한다.
@@ -137,12 +158,17 @@ upstream의 사인파 시험 패치(`interaction-test.pd`)와 그 브라우저 �
 (`audio.spec.ts`, `game-audio.spec.ts`)는 현재 패치와 맞지 않아 폐기했다.
 위 버스 표의 주파수 설명은 그 시험 패치 기준이며, 기존 엔진 교체 시 함께 정리한다.
 
-`tests/browser/soundscape-lab.spec.ts`는 실험 페이지에서 Chromium으로 다음을 확인한다.
+`tests/soundscape.test.ts`는 가짜 AudioContext로 엔진의 연결 순서, fade 램프 값,
+오디오 시계 기준 정리, 로딩 중 끄기·다시 켜기, 실패 후 재시도, dispose를 확인한다.
 
-- AudioContext 1개에서 WebPd 초기화 1회, 패치 인스턴스 2개 동시 실행
-- 마스터 출력이 무음이 아님(AnalyserNode), 제거·종료, 콘솔 오류 없음
+`tests/browser/soundscape-lab.spec.ts`는 실험 페이지에서 Chromium과 Firefox로 다음을 확인한다
+(`npm run test:audio`가 둘 다 실행. Firefox는 AudioListener의 AudioParam이 없어 예전 API로 설정한다).
 
-좌우 패닝이 실제로 분리되어 들리는지는 귀로 확인한다.
+- equalpower(기본): 리스너 정확히 왼쪽의 소리는 R 채널 무음, 뒤로 돌면 L 채널 무음(기하 검증)
+- HRTF(옵션): AudioContext 1개에서 WebPd 초기화 1회, 패치 인스턴스 2개 동시 실행,
+  끄면 fade 후 노드 정리·무음, 다시 켜기, 종료, 콘솔 오류 없음
+
+HRTF의 공간감(앞뒤·거리감)은 귀로 확인한다.
 
 ## 참고
 
