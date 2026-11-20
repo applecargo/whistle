@@ -37,10 +37,24 @@ function fakeContext() {
   const listener = Object.fromEntries(
     ["positionX", "positionY", "positionZ", "forwardX", "forwardY", "forwardZ", "upX", "upY", "upZ"].map(k => [k, param()]),
   );
+  const clocks: (FakeNode & { offset: FakeParam; stopAt: number; ended: boolean; onended: (() => void) | null })[] = [];
+  /** 오디오 시계를 진행하고, 그때까지 끝난 예약 소스의 onended를 부른다. */
+  const advance = (time: number) => {
+    clock.currentTime = time;
+    for (const c of clocks) if (!c.ended && c.stopAt <= time) { c.ended = true; c.onended?.(); }
+  };
   const context = {
     get currentTime() { return clock.currentTime; },
     destination: new FakeNode(),
     listener,
+    createConstantSource() {
+      const node = Object.assign(new FakeNode(), {
+        offset: param(1), stopAt: Infinity, ended: false, onended: null as (() => void) | null,
+        start() {}, stop(time: number) { node.stopAt = time; },
+      });
+      clocks.push(node);
+      return node;
+    },
     createGain() {
       const node = Object.assign(new FakeNode(), { gain: param(1) });
       created.gains.push(node);
@@ -52,7 +66,7 @@ function fakeContext() {
       return node;
     },
   };
-  return { context: context as unknown as BaseAudioContext, clock, created, listener };
+  return { context: context as unknown as BaseAudioContext, clock, created, listener, advance, clocks };
 }
 function fakePatches() {
   const started: { name: string; node: FakeNode; destroyed: boolean; resolve: () => void; reject: (e: Error) => void }[] = [];
@@ -126,6 +140,40 @@ test("deactivate: fade out 후 update()에서 오디오 시계 기준으로 정�
   assert.equal(gain.disconnected, true);
   assert.deepEqual(scape.snapshot().voices, []);
   assert.deepEqual(types(), ["loading:a", "active:a", "releasing:a", "released:a"]);
+});
+
+test("update()를 부르지 않아도 fade out이 끝나는 오디오 시각에 정리된다(onended)", async () => {
+  const { scape, started, clocks, advance, types } = setup(0.5);
+  scape.set({ id: "a", patch: "p", position: origin });
+  scape.activate("a");
+  started[0].resolve();
+  await flush();
+  advance(1);
+  scape.deactivate("a");
+  assert.equal(clocks.length, 1);
+  assert.equal(clocks[0].stopAt, 1.5);
+  assert.equal(clocks[0].offset.value, 0, "무음");
+  advance(1.4);
+  assert.equal(started[0].destroyed, false);
+  advance(1.5);
+  assert.equal(started[0].destroyed, true);
+  assert.equal(clocks[0].disconnected, true);
+  assert.deepEqual(types(), ["loading:a", "active:a", "releasing:a", "released:a"]);
+});
+
+test("다시 켠 뒤에 도착한 onended는 정리하지 않는다", async () => {
+  const { scape, started, advance } = setup(0.5);
+  scape.set({ id: "a", patch: "p", position: origin });
+  scape.activate("a");
+  started[0].resolve();
+  await flush();
+  advance(1);
+  scape.deactivate("a");
+  advance(1.2);
+  scape.activate("a");
+  advance(2);
+  assert.equal(started[0].destroyed, false);
+  assert.equal(scape.snapshot().voices[0].state, "active");
 });
 
 test("fade out 중에 다시 켜면 같은 노드로 현재 값에서 다시 올린다", async () => {

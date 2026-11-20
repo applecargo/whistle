@@ -7,7 +7,8 @@
 // - 소스는 등록만으로는 아무 오디오 노드도 만들지 않는다. activate()할 때 패치를 로드한다.
 // - 좌표는 3D 장면 좌표(미터)다. 타일 좌표 변환은 호출하는 쪽(게임 연결) 책임.
 // - fade는 AudioParam 스케줄링으로만 한다(타이머 없음). fade-out이 끝난 노드는
-//   update()에서 오디오 시계(currentTime)가 해제 시각을 지났을 때 정리한다.
+//   해제 시각에 끝나도록 예약한 무음 ConstantSourceNode의 onended(오디오 시계 기준)에서 정리한다.
+//   update()를 매 프레임 불러도 같은 정리를 한다(둘 중 먼저 오는 쪽).
 
 export type Vec3 = { x: number; y: number; z: number };
 export type SoundscapeSource = { id: string; patch: string; position: Vec3; gain?: number };
@@ -135,6 +136,23 @@ export function createSoundscape(options: SoundscapeOptions) {
     }
   };
 
+  function reap() {
+    const now = context.currentTime;
+    for (const [id, voice] of voices) {
+      if (voice.state === "releasing" && voice.releaseAt !== undefined && now >= voice.releaseAt) release(id, voice);
+    }
+  }
+
+  /** 오디오 시계로 time에 reap()이 불리게 한다. 값 0인 소스라 소리에는 영향이 없다. */
+  function reapAt(time: number) {
+    const clock = context.createConstantSource();
+    clock.offset.value = 0;
+    clock.connect(master); // 연결되지 않은 노드는 처리되지 않을 수 있다
+    clock.onended = () => { clock.disconnect(); if (!disposed) reap(); };
+    clock.start(context.currentTime);
+    clock.stop(time);
+  }
+
   function deactivate(id: string) {
     const voice = voices.get(id);
     if (!voice) return;
@@ -144,6 +162,7 @@ export function createSoundscape(options: SoundscapeOptions) {
     const now = context.currentTime;
     voice.releaseAt = now + fade;
     ramp(voice.gain!.gain, 0, now, fade);
+    reapAt(voice.releaseAt);
     emit({ type: "releasing", id, patch: voice.source.patch });
   }
 
@@ -188,13 +207,8 @@ export function createSoundscape(options: SoundscapeOptions) {
     setListener(position: Vec3, forward: Vec3) {
       placeListener(context.listener, position, forward, context.currentTime);
     },
-    /** 매 프레임 호출. fade-out이 끝난 소스의 노드를 정리한다. */
-    update() {
-      const now = context.currentTime;
-      for (const [id, voice] of voices) {
-        if (voice.state === "releasing" && voice.releaseAt !== undefined && now >= voice.releaseAt) release(id, voice);
-      }
-    },
+    /** fade-out이 끝난 소스의 노드를 정리한다. 자동으로도 불리므로 선택 사항. */
+    update: reap,
     /** 디버깅·테스트용 현재 상태 */
     snapshot() {
       return {

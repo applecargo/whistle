@@ -73,9 +73,10 @@ function loadBytes(url: string) {
 }
 
 export type StartOptions = {
-  /** 이 버스에서 메시지가 오면 DSP 준비 완료로 본다(예: uwb-player의 whistle-ready). run() 반환만으로는 준비를 가정하지 않는다. */
+  /** 이 버스에서 메시지가 오면 DSP 준비 완료로 본다(예: edit·player·event 패치의 whistle-ready). run() 반환만으로는 준비를 가정하지 않는다. */
   ready?: string;
-  /** ready 응답을 기다리는 최대 시간(ms). 패치가 응답하지 않을 때 실패를 알아채기 위한 것. */
+  /** ready 응답을 기다리는 최대 시간(ms, 기본 30초). 패치가 응답하지 않을 때 실패를 알아채기 위한 것.
+   *  메시지는 메인 스레드로 오므로 무거운 렌더링 중에는 늦어진다(GPU 없는 headless에서 3D 중 17~23초 측정). */
   readyTimeout?: number;
 };
 
@@ -122,7 +123,7 @@ export async function startPatch(
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([ready, new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${name}: Pd 패치 시작 응답이 없습니다.`)), options.readyTimeout ?? 8000);
+        timer = setTimeout(() => reject(new Error(`${name}: Pd 패치 시작 응답이 없습니다.`)), options.readyTimeout ?? 30_000);
       })]);
     } catch (error) {
       destroy();

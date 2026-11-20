@@ -42,6 +42,35 @@
 최종 발걸음 샘플·착지 소리·개별 바위 오브젝트 접촉음은 아직 구현하지 않았다.
 현재 아이콘 ID, 추가/삭제, 지면 종류는 패치로 전달되지만 개별 아이콘 음색은 아직 지정하지 않았다.
 
+### 믹스 구조와 지형 사운드스케이프 (`components/whistle/useGameAudio.ts`)
+
+```text
+edit.pd · player.pd(→ 이동음 게인) · event.pd ─┐
+지형 타일 패치들(PannerNode, equalpower) ────────┼─→ 마스터 게인 → 리미터 → 출력   (AudioContext 1개)
+배치한 녹음 사운드 ─────────────────────────────┘
+```
+
+- 상호작용 패치는 `edit`(whistle-edit), `player`(whistle-player·whistle-board-height),
+  `event`(whistle-event) 세 개로 나뉘며 각각 `whistle-ready`를 받은 뒤 사용한다.
+- 음소거(편집 화면 복귀·blur·탭 숨김)는 `whistle-gate` 대신 마스터 게인 fade, 3D 이동음 정지는
+  `whistle-player-stop` 대신 `player` 패치 뒤의 게인 fade로 한다. 두 버스는 더 이상 쓰지 않는다.
+- 3D 플레이 중 오디오 프레임(80ms)마다 `lib/audio/game-soundscape.ts`가
+  - 지형이 바뀌었을 때만 타일 소스를 다시 등록하고(노드 없음),
+  - 리스너를 발 높이 + 1.35m(눈높이), yaw 방향으로 옮기고,
+  - 플레이어에서 반경 3타일 안의 가까운 타일 최대 10개만 켠다(fade in/out).
+    이미 켜진 타일은 반경 + 0.5타일까지 유지하고 순위에서도 0.5타일 가깝게 쳐서 경계에서 깜빡이지 않는다.
+- 편집 화면 복귀·일시정지 시 켜진 타일을 모두 fade out한다. fade가 끝난 노드는 오디오 시계 기준으로 정리된다.
+- 좌표: 격자 (x, z) → 장면 `n × 2 − size + 1`(타일 한 칸 2m), 높이 `tile.height × LEVEL`.
+  구멍 타일은 소스가 없다. 지면 종류 → 패치 매핑(`SURFACE_PATCHES`)은 지금 모두 `terrain_clock`.
+- 콘솔 로그(`[Whistle:Audio]`): 오디오 시작(준비까지 걸린 시간), 지형 소스 등록 개수,
+  타일별 켜짐/꺼짐, 로드 실패(warn).
+- 패치 준비 신호는 메인 스레드로 오므로 무거운 3D 렌더링 중에는 늦다. GPU 없는 headless Chromium에서
+  3D 장면 실행 중 17~23초가 걸렸다(실험 페이지에서는 0.1초대). 제한 시간은 30초.
+
+게임 화면 연결은 단위 테스트(`tests/game-soundscape.test.ts`, `tests/terrain-sources.test.ts`)와
+실제 브라우저에서의 청취로 확인한다. GPU 없는 headless 브라우저에서는 3D 장면이 너무 느려
+게임 화면 브라우저 테스트가 클릭 단계에서 멈추므로 자동화하지 않았다.
+
 ## 최소 테스트 구현
 
 - 원본: `audio/patches/uwb-player.pd` (`player3.pd`를 불러옴)

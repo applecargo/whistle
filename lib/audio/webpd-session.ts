@@ -1,11 +1,14 @@
-// 상호작용 패치(uwb-player.pd)의 버스 인터페이스.
-// 에디터 편집음(whistle-edit), 3D 이동(whistle-player), 규칙 이벤트(whistle-event),
-// 음소거(whistle-gate), UWB 보드 높이(whistle-board-height)를 보낸다.
-// 패치는 패치별 빌드(named patch)로 로드한다: webpd-runtime의 startPatch.
-import { startPatch, type PdMessage } from "./webpd-runtime.ts";
+// 상호작용 패치들의 버스 인터페이스. 패치별 빌드(named patch)로 각각 로드한다.
+// - edit.pd   : whistle-edit           (에디터 편집음)
+// - player.pd : whistle-player, whistle-board-height (3D 이동음, UWB 보드 높이)
+// - event.pd  : whistle-event          (시뮬레이션 규칙 이벤트음)
+// 켜고 끄기는 Pd 메시지(whistle-gate, whistle-player-stop) 대신 WebAudio 게인 fade로 한다.
+import { startPatch, type PdMessage, type PatchInstance } from "./webpd-runtime.ts";
 
 export type { PdMessage };
-export const INTERACTION_PATCH = "uwb-player";
+export const INTERACTION_PATCHES = { edit: "edit", player: "player", event: "event" } as const;
+/** 음소거·이동음 정지 fade 길이(초) */
+const FADE = 0.03;
 
 export type EditSound = {
   x: number; z: number; overlap: number;
@@ -28,36 +31,42 @@ const bounded = (value: number, min: number, max: number) => {
   return Math.max(min, Math.min(max, value));
 };
 
-type Sender = { send(bus: string, message: PdMessage): void };
+type Sender = Pick<PatchInstance, "send">;
 
-/** 상호작용 패치의 버스별 메시지를 값 검사와 함께 보낸다. */
-export function interactionMessages(patch: Sender) {
-  const send = patch.send.bind(patch);
+/** 버스별 메시지를 값 검사와 함께 해당 패치로 보낸다. */
+export function interactionMessages(patches: { edit: Sender; player: Sender; event: Sender }) {
   return {
     edit({ x, z, overlap, asset, action, surface }: EditSound) {
-      send("whistle-edit", [bounded(x, 0, 1), bounded(z, 0, 1), bounded(overlap, 0, 1),
+      patches.edit.send("whistle-edit", [bounded(x, 0, 1), bounded(z, 0, 1), bounded(overlap, 0, 1),
         ...(asset === undefined ? [] : [asset, action ?? "paint", surface ?? "plain"])]);
     },
     player({ x, y, z, grass, rough, grounded, falling, yaw, water }: PlayerSound) {
-      send("whistle-player", [
+      patches.player.send("whistle-player", [
         bounded(x, 0, 1), bounded(y, -1000, 1000), bounded(z, 0, 1),
         bounded(grass, 0, 1), bounded(rough, 0, 1),
         ...(grounded === undefined ? [] : [Number(grounded), Number(!!falling),
           bounded(yaw ?? 0, -1e6, 1e6), bounded(water ?? 0, 0, 1)]),
       ]);
     },
-    stopPlayer() { send("whistle-player-stop", ["bang"]); },
-    boardHeight(height: number) { send("whistle-board-height", [validateBoardHeight(height)]); },
+    boardHeight(height: number) { patches.player.send("whistle-board-height", [validateBoardHeight(height)]); },
     event(frequency: number, gain: number, pan: number) {
-      send("whistle-event", [bounded(frequency, 20, 20000), bounded(gain, 0, 0.12), bounded(pan, -1, 1)]);
+      patches.event.send("whistle-event", [bounded(frequency, 20, 20000), bounded(gain, 0, 0.12), bounded(pan, -1, 1)]);
     },
-    mute(muted: boolean) { send("whistle-gate", [muted ? 0 : 1]); },
   };
 }
 
+function fadeTo(param: AudioParam, target: number, context: BaseAudioContext) {
+  const now = context.currentTime;
+  const current = param.value;
+  param.cancelScheduledValues(now);
+  param.setValueAtTime(current, now);
+  param.linearRampToValueAtTime(target, now + FADE);
+}
+
 /**
- * 상호작용 패치를 시작한다. context를 주면 그 AudioContext를 공유하고(닫지 않음),
- * 주지 않으면 새로 만들고 close() 때 닫는다. output을 주면 거기로, 아니면 destination으로 연결한다.
+ * 상호작용 패치 세 개를 시작한다(각각 whistle-ready를 받은 뒤).
+ * context를 주면 그 AudioContext를 공유하고(닫지 않음), 주지 않으면 새로 만들고 close() 때 닫는다.
+ * 출력: edit/event → 세션 출력 게인, player → 이동음 게인 → 세션 출력 게인 → output(없으면 destination).
  */
 export async function createInteractionSession(
   baseUrl: string,
@@ -66,23 +75,52 @@ export async function createInteractionSession(
 ) {
   const context = shared?.context ?? new AudioContext();
   const owned = !shared;
+  const started: PatchInstance[] = [];
   try {
     await context.resume();
-    const patch = await startPatch(context, baseUrl, INTERACTION_PATCH, receive, { ready: "whistle-ready" });
-    patch.node.connect(shared?.output ?? context.destination);
+    // 하나가 실패해도 나머지가 끝날 때까지 기다려야 늦게 시작된 패치를 정리할 수 있다.
+    const results = await Promise.allSettled([INTERACTION_PATCHES.edit, INTERACTION_PATCHES.player, INTERACTION_PATCHES.event]
+      .map((name) => startPatch(context, baseUrl, name, receive, { ready: "whistle-ready" })));
+    for (const result of results) if (result.status === "fulfilled") started.push(result.value);
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed) throw failed.reason;
+    const [edit, player, event] = started;
+    const output = context.createGain();
+    const playerGain = context.createGain();
+    output.connect(shared?.output ?? context.destination);
+    edit.node.connect(output);
+    event.node.connect(output);
+    player.node.connect(playerGain).connect(output);
+    const messages = interactionMessages({ edit, player, event });
+    let playerOn = true;
     let closed = false;
     return {
       context,
-      node: patch.node,
-      ...interactionMessages(patch),
+      /** 세션 전체 출력(측정·연결용) */
+      node: output,
+      ...messages,
+      player(sound: PlayerSound) {
+        messages.player(sound);
+        if (!playerOn) { playerOn = true; fadeTo(playerGain.gain, 1, context); }
+      },
+      /** 3D 이동음만 끈다. 다음 player() 때 다시 켠다. */
+      stopPlayer() {
+        if (!playerOn) return;
+        playerOn = false;
+        fadeTo(playerGain.gain, 0, context);
+      },
+      /** 세션 전체 음소거(편집음·이동음·이벤트음) */
+      mute(muted: boolean) { fadeTo(output.gain, muted ? 0 : 1, context); },
       async close() {
         if (closed) return;
         closed = true;
-        patch.destroy();
+        for (const patch of started) patch.destroy();
+        output.disconnect();
         if (owned) await context.close();
       },
     };
   } catch (error) {
+    for (const patch of started) patch.destroy();
     if (owned) await context.close();
     throw error;
   }
