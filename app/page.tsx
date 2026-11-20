@@ -105,6 +105,11 @@ export default function Home() {
     () => deriveWorld(world, simulation.actors),
     [deriveWorld, world, simulation.actors],
   );
+  useEffect(() => {
+    if (world.terrain) {
+      void audio.registerTerrain?.(world.terrain, world);
+    }
+  }, [world.terrain, world, audio]);
   const symbols = world.assets.filter(asset => asset.image || asset.text?.trim() || asset.sound);
   const nextSoundName = String(Math.max(0, ...world.assets.filter(a => a.sound && /^[1-9]\d{0,5}$/.test(a.name)).map(a => Number(a.name))) + 1);
   const activeAsset = symbols.find(asset => asset.id === placingAsset)?.id ?? null;

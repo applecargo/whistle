@@ -8,6 +8,7 @@ import type { Environment } from "@/lib/environment";
 import type { SpatialSoundOptions, PlayerAudioState } from "@/lib/audio/types";
 import type { SoundscapePatchDescriptor } from "@/lib/audio/soundscape-manager";
 import type { World, Actor, Event, Player } from "@/lib/world";
+import type { Terrain } from "@/lib/terrain";
 
 export function useGameAudio() {
   const controller = useRef<ReturnType<typeof createGameAudio> | null>(null);
@@ -47,6 +48,7 @@ export function useGameAudio() {
       registerTilePatch: (desc: SoundscapePatchDescriptor) => get().registerTilePatch(desc),
       unregisterTilePatch: (id: string) => controller.current?.unregisterTilePatch(id),
       updateSoundscape: (player: { x: number; y: number; z: number }) => controller.current?.updateSoundscape(player),
+      registerTerrain: (terrain: Terrain, world: World) => get().registerTerrain(terrain, world),
     };
   }, []);
   useEffect(() => {

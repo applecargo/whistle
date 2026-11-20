@@ -3,6 +3,9 @@ import type { SpatialSoundOptions, SoundInstance, PlayerAudioState } from "./typ
 import { soundAssetManager } from "./sound-assets.ts";
 import { audioStateBus } from "./audio-state.ts";
 import { SoundscapeManager, type SoundscapePatchDescriptor } from "./soundscape-manager.ts";
+import { registerWorldTerrainSoundscapes } from "./terrain-soundscape.ts";
+import type { Terrain } from "../terrain.ts";
+import type { World } from "../world.ts";
 
 type Session = Pick<PdSession, "context" | "edit" | "player" | "stopPlayer" | "event" | "mute" | "close"> & {
   masterGain?: GainNode;
@@ -139,6 +142,15 @@ export function createGameAudio(load: () => Promise<Session>, onError: (error: u
     updateSoundscape(player: { x: number; y: number; z: number }) {
       if (!playing || paused || disposed) return;
       soundscape?.update(player);
+    },
+    async registerTerrain(terrain: Terrain, world: World) {
+      if (disposed) return;
+      if (!session && !loading) activate();
+      if (loading) await loading;
+      const manager = getSoundscape();
+      if (manager) {
+        await registerWorldTerrainSoundscapes(manager, world, terrain);
+      }
     },
   };
 }
