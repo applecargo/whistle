@@ -7,7 +7,7 @@ import { createSymbolSession, interactionKind, syncSymbols, stepSymbols, type Sy
 export function addSymbolVisuals(model: THREE.Group, picture: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>, asset: Asset) {
   picture.name = "symbol-content";
   picture.material.depthWrite = false;
-  if (asset.text !== undefined) {
+  if (asset.text !== undefined && !asset.textColor) {
     const ink = {value: new THREE.Color("#111111")};
     picture.material.userData.symbolInk = ink;
     picture.material.onBeforeCompile = shader => {
@@ -16,6 +16,7 @@ export function addSymbolVisuals(model: THREE.Group, picture: THREE.Mesh<THREE.P
     };
     picture.material.customProgramCacheKey = () => "whistle-symbol-text";
   }
+  if (asset.display) return;
   const kind = interactionKind(asset.shape);
   picture.material.opacity = kind === "touch" || kind === "follow" ? 1 : 0;
   const canvas = document.createElement("canvas");
@@ -75,14 +76,15 @@ export function makeSymbolExperience() {
     const toScene = (n: number) => n * 2 - frame.world.size + 1;
     for (const actor of frame.actors) {
       const state = session.states.get(actor.id), model = frame.models.get(actor.id);
-      if (!state || !model) continue;
+      if (!state || !model || model.userData.surface) continue;
       const x = state.kind === "follow" || state.kind === "cross" ? state.x : actor.x;
       const z = state.kind === "follow" || state.kind === "cross" ? state.z : actor.z;
       const ground = floorHeight(frame.world,x,z,frame.structures) ?? 0;
       const conditions = environmentAt(frame.environment,x,z);
       const surface = Math.max(ground, conditions.water ?? -Infinity);
-      const clearance = conditions.grass > .1 ? 1.7 : 1.15;
-      const center = Math.max(.8 * actor.scale, clearance);
+      const asset = frame.world.assets.find(asset => asset.id === actor.asset);
+      const center = asset?.placement === "upright" ? .8 * actor.scale
+        : Math.max(.8 * actor.scale, conditions.grass > .1 ? 1.7 : 1.15);
       model.position.set(toScene(x),surface,toScene(z));
       model.rotation.set(0,Math.atan2(frame.camera.position.x-model.position.x,frame.camera.position.z-model.position.z),0);
       const picture = model.getObjectByName("symbol-content")!;
@@ -96,7 +98,10 @@ export function makeSymbolExperience() {
     update(frame: Frame) {
       latest = frame;
       if (lastActors !== frame.actors || lastAssets !== frame.world.assets) {
-        syncSymbols(session,frame.actors,frame.world.assets,frame.world.start);
+        syncSymbols(session,frame.actors.filter(actor => {
+          const model = frame.models.get(actor.id);
+          return !model?.userData.surface && !model?.userData.environmentPresentation && !frame.world.assets.find(asset => asset.id === actor.asset)?.display;
+        }),frame.world.assets,frame.world.start);
         lastActors = frame.actors;
         lastAssets = frame.world.assets;
       }

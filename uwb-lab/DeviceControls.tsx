@@ -38,6 +38,5 @@ export default function DeviceControls({ device }: { device: ReturnType<typeof u
       <dt>보드 높이 (m)</dt><dd>{device.position.boardHeight.toFixed(3)} ({device.position.heightSource === "fixed" ? "고정값" : "UWB 계산"})</dd>
       <dt>거리 오차 RMS (m)</dt><dd>{device.position.residual.toFixed(3)} · 앵커 {device.position.anchors}개</dd>
     </dl> : null}
-    <p>PC 프로그램의 실제 장비·가상 장비를 같은 경로로 받습니다. 태그를 바꾼 뒤 다시 연결하세요.</p>
   </fieldset>;
 }

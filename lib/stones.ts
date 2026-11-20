@@ -1,6 +1,6 @@
 import { randomSequence } from "./terrain.ts";
 
-const COLORS = ["#888b87", "#b3aea0", "#666b70", "#8b7d6c", "#a09c94", "#555c57"];
+const COLORS = ["#8a8a8a", "#aeaeae", "#6b6b6b", "#7f7f7f", "#9c9c9c", "#5a5a5a"];
 
 export function stoneAppearance(seed: number, x: number, z: number) {
   const random = randomSequence(seed ^ Math.imul(Math.floor(x * 997), 73856093) ^ Math.imul(Math.floor(z * 997), 19349663));
@@ -19,5 +19,6 @@ export function stoneAppearance(seed: number, x: number, z: number) {
     texture: Math.floor(random() * 3),
     grain: 0.7 + random() * 1.8,
     offset: random() * 100,
+    shape: random() < .75 ? 0 : 1,
   };
 }

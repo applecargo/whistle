@@ -29,7 +29,7 @@ test("simulated coordinates update the scene, mapping and environment", async ({
   expect((await data(page)).pd.x).toBe(0.25);
   expect((await data(page)).pd.z).toBe(0.25);
   await page.getByLabel("관객 X (m)", { exact: true }).fill("13");
-  await expect(page.locator("#tracking-status")).toContainText("공간 범위 밖");
+  await expect(page.locator("#tracking-status")).toContainText("공간 범위를 벗어났습니다.");
   await expect(page.getByTestId("position-marker")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "오디오 시작", exact: true })).toBeDisabled();
 });
@@ -61,12 +61,12 @@ test("Pd receives mapped values and stops for invalid input and blur", async ({ 
 
 test("two world menus show the existing world without a popup or overwriting storage", async ({ page, context }) => {
   const world = createLabWorld();
-  world.title = "저장된 테스트 세계";
+  world.title = "저장된 테스트 공간";
   const stored = JSON.stringify(world);
   await page.evaluate((stored) => localStorage.setItem("whistle.world.v2", stored), stored);
-  const menu = page.getByRole("navigation", { name: "테스트 세계" });
+  const menu = page.getByRole("navigation", { name: "테스트 공간" });
   await expect(menu.getByRole("button")).toHaveCount(2);
-  await expect(menu.getByRole("button", { name: "샘플 세계", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(menu.getByRole("button", { name: "샘플", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(menu.getByRole("button", { name: "Whistle 3D", exact: true })).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByRole("button", { name: "저장된 세계 읽기", exact: true })).toHaveCount(0);
   await expect(page.locator('input[type="file"]')).toHaveCount(0);
@@ -78,7 +78,7 @@ test("two world menus show the existing world without a popup or overwriting sto
   const audio = await page.getByRole("button", { name: "오디오 시작", exact: true }).boundingBox();
   const mapping = await page.getByRole("group", { name: "전시장 매핑", exact: true }).boundingBox();
   expect(audio!.y + audio!.height).toBeLessThan(mapping!.y);
-  await menu.getByRole("button", { name: "샘플 세계", exact: true }).click();
+  await menu.getByRole("button", { name: "샘플", exact: true }).click();
   await expect(page.getByRole("heading", { name: "UWB 샘플 · 풀 / 바위 / 물", exact: true })).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("whistle.world.v2"))).toBe(stored);
 });
@@ -86,7 +86,7 @@ test("two world menus show the existing world without a popup or overwriting sto
 test("audio loading failure can retry and cancellation does not start a late session", async ({ page }) => {
   await page.route("**/audio-test/patch.wasm", (route) => route.fulfill({ status: 503, body: "unavailable" }));
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
-  await expect(page.locator("#audio-status")).toContainText("불러오지 못했습니다");
+  await expect(page.locator("#audio-status")).toHaveText("오디오를 시작할 수 없습니다.");
   await page.unroute("**/audio-test/patch.wasm");
   let release!: () => void;
   const hold = new Promise<void>((resolve) => { release = resolve; });
@@ -141,7 +141,7 @@ test("board height reaches Pd independently of virtual ground and survives resta
   }
   for (const invalid of ["", "-1", "11"]) {
     await height.fill(invalid);
-    await expect(page.locator("#height-status")).toContainText("오디오 정지");
+    await expect(page.locator("#height-status")).toContainText("보드 높이");
     await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
     await expect.poll(async () => (await probe()).rms).toBeLessThan(0.00000001);
   }

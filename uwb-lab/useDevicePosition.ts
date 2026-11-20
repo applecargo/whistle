@@ -15,7 +15,7 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
   const [correctionError, setCorrectionError] = useState("");
   const [position, setPosition] = useState<{ value: PositionMessage; calibration: BridgeConfig | null; profile: CorrectionProfile | null } | null>(null);
   const [ranges, setRanges] = useState<RangeMessage | null>(null);
-  const [status, setStatus] = useState("PC 수신기에 연결하세요.");
+  const [status, setStatus] = useState("PC 수신기에 연결되지 않았습니다.");
   const connect = useCallback((url: string, tagId: string) => {
     setPosition(null);
     setRanges(null);
@@ -23,7 +23,7 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
   }, []);
   const disconnect = useCallback(() => {
     setCapture(null);
-    setRequest(null); setPosition(null); setRanges(null); setStatus("연결 종료 · 오디오 정지");
+    setRequest(null); setPosition(null); setRanges(null); setStatus("연결이 종료되었습니다.");
   }, []);
 
   useEffect(() => {
@@ -35,7 +35,7 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
       const url = new URL(request.url);
       if (!["ws:", "wss:"].includes(url.protocol)) throw new Error();
       socket = new WebSocket(url);
-    } catch { setStatus("WebSocket 주소를 확인하세요."); return; }
+    } catch { setStatus("수신기 주소가 올바르지 않습니다."); return; }
     let disposed = false;
     let lastReceived = 0;
     let lastSequence = -1;
@@ -111,7 +111,7 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
           return;
         }
         if (message.type === "invalid") {
-          const reason = `${message.error} · 오디오 정지`;
+          const reason = `위치를 계산할 수 없습니다. ${message.error}`;
           const remaining = INVALID_HOLD_MS - (performance.now() - lastValid);
           if (remaining <= 0) clear(reason);
           else invalidTimer ??= setTimeout(() => clear(reason), remaining);
@@ -122,14 +122,14 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
         const filtered = tracking.update(message, lastValid);
         if (filtered) setPosition({ value: filtered, calibration, profile: activeProfile });
         setStatus(`태그 ${message.tagId} 수신 중 · ${message.heightSource === "fixed" ? "높이 고정" : "높이 UWB 계산"}`);
-      } catch { clear("수신 데이터 오류 · 오디오 정지"); }
+      } catch { clear("수신 데이터가 올바르지 않습니다."); }
     };
-    socket.onerror = () => { if (!disposed) { lastReceived = 0; clear("PC 수신기 연결 실패 · 오디오 정지"); } };
-    socket.onclose = () => { if (!disposed) { lastReceived = 0; clear("PC 수신기 연결 끊김 · 오디오 정지"); } };
+    socket.onerror = () => { if (!disposed) { lastReceived = 0; clear("PC 수신기에 연결할 수 없습니다."); } };
+    socket.onclose = () => { if (!disposed) { lastReceived = 0; clear("PC 수신기 연결이 끊겼습니다."); } };
     const timer = window.setInterval(() => {
       if (lastReceived && performance.now() - lastReceived > TRACKING_TIMEOUT_MS) {
         lastReceived = 0;
-        clear(rangesOnly ? "1초 동안 거리 수신 없음" : "1초 동안 위치 수신 없음 · 오디오 정지");
+        clear(rangesOnly ? "1초 동안 거리 수신 없음" : "위치를 1초 이상 수신하지 못했습니다.");
       }
     }, 100);
     const connectionTimeout = window.setTimeout(() => {

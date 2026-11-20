@@ -11,6 +11,7 @@ type Props = {
   onEnd: () => void;
   onHold: (i: number) => void;
   canHold: boolean;
+  overlay?: ReactNode;
 };
 export function PaintGrid(p: Props) {
   const { t } = useLanguage();
@@ -134,6 +135,7 @@ export function PaintGrid(p: Props) {
           {p.renderCell(i)}
         </button>
       ))}
+      {p.overlay}
     </div>
   );
 }

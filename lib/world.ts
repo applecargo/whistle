@@ -1,10 +1,13 @@
+import { validateContentCounts } from "./content-limits.ts";
 import { isHole, MIN_HEIGHT, MAX_HEIGHT } from "./tile.ts";
+import { validRecording, type Recording } from "./audio/recording.ts";
 import {
   deriveStructures,
   floorHeight,
   type Terrain,
   type Structure,
 } from "./terrain.ts";
+export const MAX_TEXT_LENGTH = 10_000;
 export type Shape =
   | "cone"
   | "ring"
@@ -24,14 +27,22 @@ export type Asset = {
 
   shape: Shape;
   color: string;
+  glyphColor?: string;
   image?: string;
   originalImage?: string;
+  sound?: Recording;
 
   text?: string;
+  textColor?: string;
+  display?: "steady" | "nearby" | "pulse";
   defaultScale?: number;
+  placement?: "upright" | "floating" | "surface" | "field";
+  motion?: "still" | "wind";
   solid: boolean;
 };
+export type SymbolSiteKind = "cluster" | "peak" | "boundary";
 export type Placed = {
+  site?: { kind: SymbolSiteKind; cells: number[]; height: number };
   id: string;
   asset: string;
   x: number;
@@ -54,6 +65,7 @@ export type Rule = {
   enabled: boolean;
 };
 export type Weather = "clear" | "cloud" | "rain" | "snow";
+export type TimeOfDay = "auto" | "noon" | "midnight";
 export type World = {
   version: 1;
   title: string;
@@ -65,6 +77,7 @@ export type World = {
   start: { x: number; z: number };
   sky: string;
   weather?: Weather;
+  timeOfDay?: TimeOfDay;
   terrain?: Terrain;
 };
 export type Actor = Placed & { marks: string[]; removed: boolean };
@@ -349,12 +362,12 @@ export function stepSimulation(
       if (rule.action === "mark") {
         if (next.marks.includes(rule.result)) continue;
         next.marks.push(rule.result);
-        message = `${name}에 ${rule.result} 표시가 생겼어요`;
+        message = `${name}에 ${rule.result} 표시가 생겼습니다.`;
       }
-      if (rule.action === "sound") message = `${name}이 소리를 냈어요`;
+      if (rule.action === "sound") message = `${name}이 소리를 냈습니다.`;
       if (rule.action === "disappear") {
         next.removed = true;
-        message = `${name}이 사라졌어요`;
+        message = `${name}이 사라졌습니다.`;
       }
       if (rule.action === "change") {
         if (
@@ -363,7 +376,7 @@ export function stepSimulation(
         )
           continue;
         next.asset = rule.replacement;
-        message = `${name}의 모습이 바뀌었어요`;
+        message = `${name}의 모습이 바뀌었습니다.`;
       }
       if (rule.action === "move") {
         const x = Math.round(
@@ -382,7 +395,7 @@ export function stepSimulation(
           continue;
         next.x = x;
         next.z = z;
-        message = `${name}이 한 칸 움직였어요`;
+        message = `${name}이 한 칸 움직였습니다.`;
       }
       if (message)
         events.push({
@@ -426,7 +439,7 @@ export function describeRule(r: Rule, w: World) {
 }
 export function validateWorld(input: unknown): World {
   if (!input || typeof input !== "object")
-    throw Error("세계 파일을 읽을 수 없어요.");
+    throw Error("파일을 읽을 수 없습니다.");
   const w = input as World;
   const shapes = [
     "cone",
@@ -448,6 +461,7 @@ export function validateWorld(input: unknown): World {
     typeof v === "string" && v.length <= max;
   if (
     w.version !== 1 ||
+    (w.timeOfDay !== undefined && !["auto", "noon", "midnight"].includes(w.timeOfDay)) ||
     (w.weather !== undefined && !["clear", "cloud", "rain", "snow"].includes(w.weather)) ||
     !text(w.title, 60) ||
     !text(w.description, 300) ||
@@ -455,13 +469,13 @@ export function validateWorld(input: unknown): World {
     !number(w.size, 6, 24) ||
     !Array.isArray(w.assets) ||
     w.assets.length < 1 ||
-    w.assets.length > 40 ||
+    w.assets.length > 250 ||
     !Array.isArray(w.objects) ||
     w.objects.length > 250 ||
     !Array.isArray(w.rules) ||
     w.rules.length > 40
   )
-    throw Error("지원하지 않는 세계 형식이에요.");
+    throw Error("지원하지 않는 파일 형식입니다.");
   const ids = new Set<string>();
   for (const a of w.assets) {
     if (
@@ -470,10 +484,16 @@ export function validateWorld(input: unknown): World {
       !text(a.name, 40) ||
       !shapes.includes(a.shape) ||
       !/^#[0-9a-f]{6}$/i.test(a.color) ||
+      (a.glyphColor !== undefined && !/^#[0-9a-f]{6}$/i.test(a.glyphColor)) ||
       typeof a.solid !== "boolean" ||
+      (a.sound !== undefined && (!validRecording(a.sound) || a.solid || a.image !== undefined || a.text !== undefined)) ||
+      (a.placement !== undefined && !["upright", "floating", "surface", "field"].includes(a.placement)) ||
+      (a.textColor !== undefined && !/^#[0-9a-f]{6}$/i.test(a.textColor)) ||
+      (a.display !== undefined && !["steady", "nearby", "pulse"].includes(a.display)) ||
+      (a.motion !== undefined && !["still", "wind"].includes(a.motion)) ||
       (a.defaultScale !== undefined &&
         ![0.5, 1, 2, 3].includes(a.defaultScale)) ||
-      (a.text !== undefined && (!text(a.text, 500) || !a.text.trim())) ||
+      (a.text !== undefined && (!text(a.text, MAX_TEXT_LENGTH) || !a.text.trim())) ||
       [a.image, a.originalImage].some(
         (image) =>
           image !== undefined &&
@@ -483,9 +503,10 @@ export function validateWorld(input: unknown): World {
             )),
       )
     )
-      throw Error("사물 데이터가 올바르지 않아요.");
+      throw Error("사물 데이터가 올바르지 않습니다.");
     ids.add(a.id);
   }
+  validateContentCounts(w);
   const placed = new Set<string>();
   for (const o of w.objects) {
     if (
@@ -499,7 +520,11 @@ export function validateWorld(input: unknown): World {
       !number(o.scale, 0.4, 3) ||
       !number(o.rotation, 0, 359)
     )
-      throw Error("사물 위치가 올바르지 않아요.");
+      throw Error("사물 위치가 올바르지 않습니다.");
+    if (o.site !== undefined && (!o.site || !["cluster", "peak", "boundary"].includes(o.site.kind) ||
+        !Array.isArray(o.site.cells) || !o.site.cells.length || o.site.cells.length > w.size * w.size ||
+        o.site.cells.some(i => !Number.isInteger(i) || !number(i, 0, w.size * w.size - 1)) ||
+        !number(o.site.height, -20, 20))) throw Error("기호 자리 데이터가 올바르지 않습니다.");
     placed.add(o.id);
   }
   const ruleIds = new Set<string>();
@@ -517,7 +542,7 @@ export function validateWorld(input: unknown): World {
       (!ids.has(r.source) && r.source !== "*") ||
       (r.action === "change" && !ids.has(r.replacement))
     )
-      throw Error("규칙 데이터가 올바르지 않아요.");
+      throw Error("규칙 데이터가 올바르지 않습니다.");
     ruleIds.add(r.id);
   }
   if (
@@ -528,7 +553,7 @@ export function validateWorld(input: unknown): World {
     !number(w.start.z, 0, w.size - 1) ||
     !/^#[0-9a-f]{6}$/i.test(w.sky)
   )
-    throw Error("시작 위치가 올바르지 않아요.");
+    throw Error("시작 위치가 올바르지 않습니다.");
   if (w.terrain !== undefined) {
     const t = w.terrain;
     if (
@@ -552,9 +577,9 @@ export function validateWorld(input: unknown): World {
           typeof t.patterns[key as keyof typeof t.patterns] !== "boolean",
       )
     )
-      throw Error("지형 데이터가 올바르지 않아요.");
+      throw Error("지형 데이터가 올바르지 않습니다.");
     if (isHole(t.tiles[w.start.z * w.size + w.start.x]))
-      throw Error("시작점에는 바닥이 필요해요.");
+      throw Error("시작점에는 바닥이 필요합니다.");
   }
   return clone(w);
 }

@@ -8,7 +8,7 @@ async function openWorld(page: Page, world: World) {
     localStorage.setItem("whistle.language", "ko");
   }, world);
   await page.goto(".");
-  await expect(page.getByRole("button", { name: "공유", exact: true }))
+  await expect(page.getByRole("button", { name: "파일 저장", exact: true }))
     .toHaveAttribute("aria-description", "이 브라우저에 저장됨");
 }
 
@@ -45,27 +45,33 @@ test("file imports and explicit restarts remain undoable and redoable", async ({
   await expect.poll(async () => (await savedWorld(page)).title).toBe("무제");
 });
 
-test("a shared world replaces history and exits play without repeated loading", async ({ page }) => {
+test("old shared links do not replace the document or its undo history", async ({ page }) => {
+  const original = terrainFixtures().flat;
+  await openWorld(page, original);
+  await page.getByRole("button", { name: "높이기", exact: true }).click();
+  await page.locator('[data-cell="0"]').click();
+  const shared = terrainFixtures().flat;
+  shared.title = "old link";
+  const encoded = "j" + Buffer.from(JSON.stringify(shared)).toString("base64url");
+  await page.evaluate(encoded => { location.hash = `world=${encoded}`; }, encoded);
+  await expect(page.locator('[data-cell="0"]')).toHaveAccessibleName(/높이 1/);
+  await expect.poll(async () => (await savedWorld(page)).terrain!.tiles[0].height).toBe(1);
+  expect((await savedWorld(page)).title).toBe(original.title);
+  await page.getByRole("button", { name: "되돌리기", exact: true }).click();
+  await expect(page.locator('[data-cell="0"]')).toHaveAccessibleName(/높이 0/);
+});
+
+test("automatic audio failures do not show error toasts or block editing", async ({ page }) => {
+  let attempts = 0;
+  await page.route("**/audio-test/webpd-runtime.js", async route => { attempts++; await route.abort(); });
   await openWorld(page, terrainFixtures().flat);
   await page.getByRole("button", { name: "높이기", exact: true }).click();
   await page.locator('[data-cell="0"]').click();
-  await page.getByRole("button", { name: "플레이", exact: true }).click();
-  await expect(page.locator(".play-shell canvas")).toBeVisible();
-  const shared = terrainFixtures().flat;
-  shared.title = "공유 문서";
-  shared.terrain!.tiles[1].height = 2;
-  const encoded = "j" + Buffer.from(JSON.stringify(shared)).toString("base64url");
-  await page.evaluate((encoded) => { location.hash = `world=${encoded}`; }, encoded);
-  await expect(page.locator(".workspace")).toBeVisible();
-  await expect(page.locator('[data-cell="1"]')).toHaveAccessibleName(/높이 2/);
-  await expect(page.getByRole("button", { name: "되돌리기", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "다시 실행", exact: true })).toBeDisabled();
-  await expect.poll(async () => (await savedWorld(page)).title).toBe("공유 문서");
-  await page.locator('[data-cell="0"]').click();
-  await expect.poll(async () => (await savedWorld(page)).terrain!.tiles[0].height).toBe(1);
-  await page.getByRole("button", { name: "되돌리기", exact: true }).click();
-  await expect(page.locator('[data-cell="0"]')).toHaveAccessibleName(/높이 0/);
-  await expect(page.locator('[data-cell="1"]')).toHaveAccessibleName(/높이 2/);
+  await expect.poll(() => attempts).toBeGreaterThan(0);
+  await expect(page.locator(".toast")).toHaveCount(0);
+  await page.getByRole("button", { name: "텍스트 만들기", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.locator(".toast")).toHaveCount(0);
 });
 
 test("legacy terrain migration retains its single undo checkpoint", async ({ page }) => {

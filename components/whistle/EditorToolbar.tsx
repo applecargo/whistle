@@ -10,11 +10,11 @@ type Props = {
   onExit: () => void;
   onNew: () => void;
   onImport: () => void;
-  onShare: () => void;
+  onSave: () => void;
 };
 
 export function EditorToolbar({
-  playing, saveStatus, makeButton, onEnter, onExit, onNew, onImport, onShare,
+  playing, saveStatus, makeButton, onEnter, onExit, onNew, onImport, onSave,
 }: Props) {
   const { language, setLanguage, t } = useLanguage();
   return (
@@ -66,10 +66,10 @@ export function EditorToolbar({
             {t("불러오기")}
           </button>
           <button
-            onClick={onShare}
+            onClick={onSave}
             aria-description={t(saveStatus)}
           >
-            {t("공유")}
+            {t("파일 저장")}
           </button>
         </div>
       </div>

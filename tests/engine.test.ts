@@ -416,6 +416,36 @@ test("seeded terrain repeats exactly and preserves a grounded entrance", async (
   assert.ok(a.tiles.every((t) => t.height >= 0));
   assert.ok(a.tiles.slice(108).every((t) => t.height === 0));
 });
+test("generated ponds stay at ground level with flat banks while authored raised water survives loading", async () => {
+  const { generateTerrain, terrainSample, upgradeTerrain, randomSequence } = await import("../lib/terrain.ts");
+  const { deriveEnvironment } = await import("../lib/environment.ts");
+  const { WATER_INSET } = await import("../lib/water.ts");
+  const random = randomSequence(1731);
+  let waterTiles = 0;
+  for (const size of [12, 24]) for (let n = 0; n < 64; n++) {
+    const world = starterWorld();
+    world.size = size;
+    world.objects = [];
+    world.terrain = generateTerrain(size, Math.floor(random() * 4294967296));
+    world.terrain.tiles.forEach((tile, i) => {
+      if (tile.surface !== "slick") return;
+      waterTiles++;
+      assert.equal(tile.height, 0);
+      const x = i % size, z = Math.floor(i / size);
+      for (const [dx, dz] of [[-.8, -.8], [.8, -.8], [-.8, .8], [.8, .8]])
+        assert.ok(Math.abs(terrainSample(world, x + dx, z + dz, false).height) < .05);
+    });
+    assert.ok(deriveEnvironment(world, []).ponds.every(pond => pond.level === -WATER_INSET));
+    assert.ok(world.terrain.tiles.slice(size * (size - 3)).every(tile => tile.height === 0 && tile.surface === "plain"));
+  }
+  assert.ok(waterTiles > 0);
+  const authored = starterWorld();
+  authored.terrain = generateTerrain(authored.size, 1234);
+  authored.terrain.tiles[25] = { height: 3, surface: "slick", hole: false };
+  const loaded = validateWorld(JSON.parse(JSON.stringify(authored)));
+  assert.equal(upgradeTerrain(loaded), loaded);
+  assert.deepEqual(loaded.terrain!.tiles, authored.terrain.tiles);
+});
 test("matching symbols bridge only aligned equal-height gaps and removal reverses it", async () => {
   const { flatTerrain, deriveStructures, floorHeight, LEVEL } = await import(
     "../lib/terrain.ts"
@@ -449,7 +479,7 @@ test("matching symbols bridge only aligned equal-height gaps and removal reverse
   w.objects.pop();
   assert.equal(floorHeight(w, 3, 2), null);
 });
-test("stairs join same-surface levels continuously and four corners create a canopy", async () => {
+test("ladders join high terrain and four corners create a canopy", async () => {
   const { flatTerrain, deriveStructures, floorHeight } = await import(
     "../lib/terrain.ts"
   );
@@ -457,20 +487,17 @@ test("stairs join same-surface levels continuously and four corners create a can
   w.terrain = flatTerrain(w.size);
   w.objects = [];
   w.terrain.tiles[2 * w.size + 3].height = 1;
+  assert.ok(!deriveStructures(w).some(s => s.kind === "stairs"));
+  w.terrain.tiles[2 * w.size + 3].height = 2;
+  const ladders = deriveStructures(w).filter(s => s.kind === "stairs");
+  assert.equal(ladders.length, 1);
+  assert.equal(ladders[0].x + ladders[0].dx, 3);
+  assert.equal(ladders[0].z + ladders[0].dz, 2);
   assert.ok(
-    deriveStructures(w).some(
-      (s) => s.kind === "stairs" && s.x === 2 && s.z === 2,
-    ),
+    Math.abs(floorHeight(w, 2.499, 2)! - floorHeight(w, 2.501, 2)!) < 0.007,
   );
-  assert.ok(
-    Math.abs(floorHeight(w, 2.499, 2)! - floorHeight(w, 2.501, 2)!) < 0.004,
-  );
-  w.terrain.tiles[2 * w.size + 3].surface = "rough";
-  assert.ok(
-    !deriveStructures(w).some(
-      (s) => s.kind === "stairs" && s.x === 2 && s.z === 2,
-    ),
-  );
+  w.terrain.tiles[2 * w.size + 3].surface = "slick";
+  assert.ok(!deriveStructures(w).some(s => s.kind === "stairs"));
   for (const [x, z] of [
     [1, 1],
     [3, 1],
@@ -497,6 +524,47 @@ test("stairs join same-surface levels continuously and four corners create a can
   );
   assert.deepEqual(w.terrain, before);
 });
+test("symbol colors stay saturated and unique at the full asset limit", async () => {
+  const { withSymbolColors, randomSymbolColor } = await import("../lib/symbol-color.ts");
+  const world = starterWorld(); world.objects = []; world.rules = [];
+  world.assets = Array.from({ length: 250 }, (_, i) => ({ ...world.assets[0], id: `symbol-${i}`, text: `기호 ${i}` }));
+  const colored = withSymbolColors(world);
+  const colors = colored.assets.map(asset => asset.glyphColor!);
+  assert.equal(new Set(colors).size, 250);
+  for (const color of colors) {
+    const channels = [1, 3, 5].map(offset => parseInt(color.slice(offset, offset + 2), 16));
+    assert.equal(Math.max(...channels), 255);
+    assert.equal(Math.min(...channels), 0);
+  }
+  assert.ok(world.assets.every(asset => asset.glyphColor === undefined));
+  assert.equal(withSymbolColors(colored), colored);
+  assert.throws(() => validateWorld(JSON.parse(JSON.stringify(colored))), /20개/);
+  const allowed = { ...colored, assets: colored.assets.slice(0, 20) };
+  assert.deepEqual(validateWorld(JSON.parse(JSON.stringify(allowed))).assets, allowed.assets);
+  const first = randomSymbolColor([], () => 0);
+  assert.notEqual(randomSymbolColor([first], () => 0), first);
+  assert.notEqual(randomSymbolColor([], () => .9), first);
+});
+
+test("existing symbol colors survive edits while imported duplicate colors are repaired", async () => {
+  const { withSymbolColors } = await import("../lib/symbol-color.ts");
+  const world = starterWorld(); world.objects = []; world.rules = [];
+  world.assets = [
+    { ...world.assets[0], id: "first", text: "첫째", glyphColor: "#FF00AA" },
+    { ...world.assets[0], id: "duplicate", text: "둘째", glyphColor: "#ff00aa" },
+    { ...world.assets[0], id: "legacy", text: "셋째" },
+    { ...world.assets[0], id: "reserved", text: "넷째", glyphColor: "#00ff85" },
+  ];
+  const colored = withSymbolColors(world);
+  assert.equal(colored.assets[0].glyphColor, "#FF00AA");
+  assert.equal(colored.assets[3].glyphColor, "#00ff85");
+  assert.equal(new Set(colored.assets.map(asset => asset.glyphColor!.toLowerCase())).size, 4);
+  colored.assets[0].text = "수정한 내용";
+  assert.equal(withSymbolColors(colored), colored);
+  const broken = clone(colored); broken.assets[0].glyphColor = "red";
+  assert.throws(() => validateWorld(broken));
+});
+
 test("terrain survives serialization and legacy worlds stay flat; malformed terrain is rejected", async () => {
   const { generateTerrain, floorHeight } = await import("../lib/terrain.ts");
   const w = starterWorld();
@@ -537,7 +605,7 @@ test("3D terrain is a shared seamless surface and natural slopes stay continuous
   w.terrain.tiles[5 * w.size + 5] = { height: 2, surface: "soft" };
   assert.equal(
     deriveStructures(w).filter((s) => s.kind === "stairs").length,
-    0,
+    1,
   );
   let previous = floorHeight(w, 4, 5)!;
   for (let x = 4.01; x <= 6; x += 0.01) {
@@ -661,12 +729,13 @@ test("run and crouch change speed without changing turning sensitivity", () => {
 
 test("text objects retain editable content and size across world sharing", () => {
   const world = starterWorld();
-  world.assets[0].text = "안녕\nWhistle";
+  const content = "  안녕\nWhistle 😀\n".repeat(700).slice(0, 10_000);
+  world.assets[0].text = content;
   world.assets[0].defaultScale = 3;
   const restored = validateWorld(JSON.parse(JSON.stringify(world)));
-  assert.equal(restored.assets[0].text, "안녕\nWhistle");
+  assert.equal(restored.assets[0].text, content);
   assert.equal(restored.assets[0].defaultScale, 3);
-  for (const invalid of [" ", "a".repeat(501), 42]) {
+  for (const invalid of [" ", "a".repeat(10_001), 42]) {
     const malformed = JSON.parse(JSON.stringify(world));
     malformed.assets[0].text = invalid;
     assert.throws(() => validateWorld(malformed));
@@ -760,4 +829,111 @@ test("terrain permits one-level routes but blocks steep edges in either directio
   const bridge = {kind: "bridge" as const, x:2,z:3,height:1,dx:1,dz:0,key:"bridge:2:3"};
   w.terrain.tiles[3*w.size+2].hole = true;
   assert.equal(blocksTerrainStep(w, {x:1.49,z:3}, {x:1.51,z:3}, [bridge]), false);
+});
+
+test("ladders along one cliff stay three tiles apart and removed routes block walking", async () => {
+  const { flatTerrain, deriveStructures } = await import("../lib/terrain.ts");
+  const { blocksWalkingStep } = await import("../lib/navigation.ts");
+  for (const axis of ["x", "z"] as const) {
+    const world = starterWorld(); world.objects = []; world.terrain = flatTerrain(world.size);
+    for (let z = 0; z < world.size; z++) for (let x = 0; x < world.size; x++)
+      world.terrain.tiles[z * world.size + x].height = (axis === "x" ? x : z) >= 4 ? 2 : 0;
+    const structures = deriveStructures(world);
+    const ladders = structures.filter(s => s.kind === "stairs");
+    assert.equal(ladders.length, Math.ceil(world.size / 3));
+    for (let i = 0; i < ladders.length; i++) for (let j = i + 1; j < ladders.length; j++)
+      assert.ok(Math.hypot(ladders[i].x - ladders[j].x, ladders[i].z - ladders[j].z) >= 3);
+    const point = (along: number) => axis === "x" ? {x: along, z: 1} : {x: 1, z: along};
+    assert.equal(blocksWalkingStep(world, point(3.49), point(3.51), structures), true);
+    assert.deepEqual(deriveStructures(world), structures);
+  }
+});
+
+test("nearby disconnected upper and lower regions each retain ladder access", async () => {
+  const { flatTerrain, deriveStructures } = await import("../lib/terrain.ts");
+  for (const isolatedHeight of [0, 2]) {
+    const world = starterWorld(); world.objects = []; world.terrain = flatTerrain(world.size);
+    for (const tile of world.terrain.tiles) tile.height = 2 - isolatedHeight;
+    for (const x of [2, 4]) world.terrain.tiles[3 * world.size + x].height = isolatedHeight;
+    const ladders = deriveStructures(world).filter(s => s.kind === "stairs");
+    assert.equal(ladders.length, 2);
+    for (const x of [2, 4]) assert.ok(ladders.some(s => isolatedHeight === 0
+      ? s.x === x && s.z === 3
+      : s.x + s.dx === x && s.z + s.dz === 3));
+  }
+});
+
+test("adjacent ladders to different terrain levels remain climbable", async () => {
+  const { flatTerrain, deriveStructures } = await import("../lib/terrain.ts");
+  const { blocksWalkingStep } = await import("../lib/navigation.ts");
+  const world = starterWorld(); world.objects = []; world.terrain = flatTerrain(world.size);
+  for (let z = 0; z < world.size; z++) for (let x = 0; x < world.size; x++)
+    world.terrain.tiles[z * world.size + x].height = x >= 4 ? 4 : x >= 3 ? 2 : 0;
+  const structures = deriveStructures(world);
+  for (const x of [2, 3]) {
+    assert.ok(structures.some(s => s.kind === "stairs" && s.x === x && s.z === 0));
+    assert.equal(blocksWalkingStep(world, {x: x + .49, z: 0}, {x: x + .51, z: 0}, structures), false);
+  }
+});
+
+test("high edges require the narrow ladder route, including maximum rise and descent", async () => {
+  const {blocksWalkingStep} = await import("../lib/navigation.ts");
+  const {flatTerrain,deriveStructures} = await import("../lib/terrain.ts");
+  for (const rise of [1,2,6]) for (const axis of ["x","z"] as const) {
+    const world=starterWorld(); world.objects=[]; world.terrain=flatTerrain(world.size);
+    for(let z=0;z<world.size;z++) for(let x=0;x<world.size;x++)
+      world.terrain.tiles[z*world.size+x].height=(axis === "x" ? x : z)>=4 ? rise : 0;
+    const structures=deriveStructures(world);
+    assert.equal(structures.some(s=>s.kind === "stairs"),rise>=2);
+    const point=(along:number,across=3)=>axis === "x" ? {x:along,z:across} : {x:across,z:along};
+    for(let i=0;i<100;i++) {
+      const from=point(3+i/100),to=point(3+(i+1)/100);
+      assert.equal(blocksWalkingStep(world,from,to,structures),false,`rise ${rise}, ${axis}, step ${i}`);
+      assert.equal(blocksWalkingStep(world,to,from,structures),false);
+    }
+    assert.equal(blocksWalkingStep(world,point(3.49,3.32),point(3.51,3.32),structures),rise>=2);
+    assert.equal(blocksWalkingStep(world,point(3.49),point(3.51),[]),rise>=2);
+    world.terrain.patterns.stairs=false;
+    assert.equal(deriveStructures(world).some(s=>s.kind === "stairs"),false);
+  }
+});
+
+test("updrafts turn a full circle in 90 seconds and stop turning on release or landing", async () => {
+  const { environmentalFlight, stepEnvironmentalFlight } = await import("../lib/environment-motion.ts");
+  const conditions = { lift: .65, liftCeiling: 2, glideHeld: false, crouching: false };
+  for (const fps of [30, 60, 120]) {
+    let flight = environmentalFlight("float", 2), yaw = 0;
+    for (let i = 0; i < fps * 90; i++) {
+      const result = stepEnvironmentalFlight(flight, 1 / fps, null, conditions);
+      flight = result.flight;
+      yaw += result.yawDelta;
+      assert.equal(result.missed || result.landed, false);
+    }
+    assert.ok(Math.abs(yaw - Math.PI * 2) < 1e-10);
+    assert.ok(Math.abs(flight.y - 2) < .001);
+    assert.equal(stepEnvironmentalFlight(flight, 1 / fps, null, { ...conditions, lift: 0 }).yawDelta, 0);
+    assert.equal(stepEnvironmentalFlight(flight, 1 / fps, null, { ...conditions, crouching: true }).yawDelta, 0);
+    assert.equal(stepEnvironmentalFlight(flight, 1 / fps, 2, conditions).yawDelta, 0);
+  }
+});
+
+test("environment flights prioritize lift, release gliding and land without chaining states", async () => {
+  const { environmentalFlight, stepEnvironmentalFlight } = await import("../lib/environment-motion.ts");
+  const normal = { lift: 0, liftCeiling: 0, glideHeld: false, crouching: false };
+  const bounce = environmentalFlight("bounce", 0);
+  let state = bounce, landed = false;
+  for (let i = 0; i < 180; i++) {
+    const result = stepEnvironmentalFlight(state, 1 / 60, 0, normal);
+    state = result.flight;
+    if (result.landed) { landed = true; break; }
+  }
+  assert.equal(landed, true); assert.equal(state.y, 0);
+  const glide = environmentalFlight("glide", 3, 0, 2, -2);
+  assert.ok(stepEnvironmentalFlight(glide, .1, null, { ...normal, glideHeld: true }).flight.vy >= -.7);
+  assert.ok(stepEnvironmentalFlight(glide, .1, null, normal).flight.vy < -2);
+  state = environmentalFlight("glide", 1, 0, 0, -1);
+  for (let i = 0; i < 300; i++) state = stepEnvironmentalFlight(state, 1 / 60, null, { ...normal, lift: .65, liftCeiling: 2 }).flight;
+  assert.equal(state.mode, "float"); assert.ok(Math.abs(state.y - 2) < .03);
+  const released = stepEnvironmentalFlight(state, .1, null, { ...normal, lift: .65, liftCeiling: 2, crouching: true });
+  assert.ok(released.flight.y < state.y);
 });

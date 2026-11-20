@@ -1,20 +1,29 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clone, uid, type World } from "@/lib/world";
-import { editTile, type TerrainTool } from "@/lib/tile";
-import { flatTerrain, type Surface } from "@/lib/terrain";
+import { editTile, MIN_HEIGHT, MAX_HEIGHT, type TerrainTool } from "@/lib/tile";
+import { flatTerrain, LEVEL, type Surface } from "@/lib/terrain";
+import { WATER_INSET } from "@/lib/water";
 import { createWorldDeriver, samePlacement } from "@/lib/world-derivation";
 import { placementChanges, type PlacementFeedback } from "@/lib/placement-feedback";
+import { withSymbolColors } from "@/lib/symbol-color";
+import { contentKind, MAX_CONTENT_COUNT } from "@/lib/content-limits";
+
+function copyDocument(world: World): World {
+  return { ...clone({ ...world, assets: [] }), assets: world.assets.map(asset => ({
+    ...asset, ...(asset.sound ? { sound: { ...asset.sound } } : {}),
+  })) };
+}
 
 type PaintOptions = {
   layer: "tiles" | "symbols";
+  assetId?: string;
   surface: Surface;
   terrainTool: TerrainTool;
-  selectedAsset: string;
 };
 
 export function useWorldDocument(initialWorld: World, onChange: (world: World) => void) {
-  const [world, setWorld] = useState(initialWorld);
+  const [world, setWorld] = useState(() => withSymbolColors(initialWorld));
   const worldRef = useRef(world);
   const history = useRef<World[]>([]);
   const future = useRef<World[]>([]);
@@ -30,6 +39,7 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
 
   const getWorld = useCallback(() => worldRef.current, []);
   const applyWorld = useCallback((next: World) => {
+    next = withSymbolColors(next);
     setWorld(next);
     worldRef.current = next;
     onChange(next);
@@ -45,20 +55,20 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
 
   const commit = useCallback((next: World) => {
     revealChanges(next);
-    history.current.push(clone(worldRef.current));
+    history.current.push(copyDocument(worldRef.current));
     if (history.current.length > 40) history.current.shift();
     future.current = [];
     applyWorld(next);
   }, [applyWorld, revealChanges]);
 
   const edit = useCallback((change: (world: World) => void) => {
-    const next = clone(worldRef.current);
+    const next = copyDocument(worldRef.current);
     change(next);
     commit(next);
   }, [commit]);
 
   const load = useCallback((next: World, beforeUpgrade: World) => {
-    history.current = next !== beforeUpgrade ? [clone(beforeUpgrade)] : [];
+    history.current = next !== beforeUpgrade ? [copyDocument(beforeUpgrade)] : [];
     if (history.current[0]?.terrain) history.current[0].terrain.generatorVersion = 2;
     future.current = [];
     applyWorld(next);
@@ -67,7 +77,7 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
   const undo = useCallback(() => {
     const previous = history.current.pop();
     if (!previous) return false;
-    future.current.push(clone(worldRef.current));
+    future.current.push(copyDocument(worldRef.current));
     revealChanges(previous);
     applyWorld(previous);
     return true;
@@ -76,41 +86,47 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
   const redo = useCallback(() => {
     const next = future.current.pop();
     if (!next) return false;
-    history.current.push(clone(worldRef.current));
+    history.current.push(copyDocument(worldRef.current));
     revealChanges(next);
     applyWorld(next);
     return true;
   }, [applyWorld, revealChanges]);
 
   const paint = useCallback((cells: number[], erase: boolean, options: PaintOptions) => {
-    const { layer, surface, terrainTool, selectedAsset } = options;
+    const { layer, assetId, surface, terrainTool } = options;
+    if (layer === "symbols" && !worldRef.current.assets.some(asset => asset.id === assetId)) return;
     const first = !strokeBase.current;
-    if (first) strokeBase.current = clone(worldRef.current);
-    const next = clone(strokeBase.current!);
+    if (first) strokeBase.current = copyDocument(worldRef.current);
+    const next = copyDocument(strokeBase.current!);
     if (layer === "tiles") {
       next.terrain ??= flatTerrain(next.size);
+      const waterEdits = new Set<number>();
+      if (terrainTool === "raise" || terrainTool === "lower") {
+        for (const pond of deriveWorld(strokeBase.current!).environment.ponds) {
+          if (!pond.cells.some(i => cells.includes(i))) continue;
+          const height = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT,
+            Math.round((pond.level + WATER_INSET) / LEVEL) + (terrainTool === "raise" ? 1 : -1)));
+          for (const i of pond.cells) {
+            waterEdits.add(i);
+            if (next.terrain.tiles[i].surface === "slick") next.terrain.tiles[i] = { ...next.terrain.tiles[i], height, hole: false };
+          }
+        }
+      }
       for (const i of cells) {
+        if (waterEdits.has(i)) continue;
         if (terrainTool === "hole" && i === next.start.z * next.size + next.start.x)
           continue;
         next.terrain.tiles[i] = editTile(next.terrain.tiles[i], terrainTool, surface);
       }
-    } else {
-      const asset = next.assets.find((a) => a.id === selectedAsset);
-      if (!asset) return;
+    }
+    if (layer === "symbols") {
+      const asset = next.assets.find(asset => asset.id === assetId)!;
       for (const i of cells) {
-        const x = i % next.size,
-          z = Math.floor(i / next.size);
-        if (erase)
-          next.objects = next.objects.filter((o) => o.x !== x || o.z !== z);
-        else if (
-          next.objects.length < 250 &&
-          !next.objects.some((o) => o.x === x && o.z === z) &&
-          !(asset.solid && x === next.start.x && z === next.start.z)
-        )
-          next.objects.push({
-            id: uid(), asset: asset.id, x, z,
-            rotation: 0, scale: asset.defaultScale ?? 1,
-          });
+        const x = i % next.size, z = Math.floor(i / next.size);
+        if (erase) next.objects = next.objects.filter(object => object.x !== x || object.z !== z || object.asset !== asset.id);
+        else if ((!contentKind(asset) || next.objects.filter(object => contentKind(next.assets.find(a => a.id === object.asset)) === contentKind(asset)).length < MAX_CONTENT_COUNT) &&
+          !next.objects.some(object => object.x === x && object.z === z && object.asset === asset.id))
+          next.objects.push({ id: uid(), asset: asset.id, x, z, rotation: 0, scale: asset.defaultScale ?? 1 });
       }
     }
     if (samePlacement(worldRef.current, next)) {

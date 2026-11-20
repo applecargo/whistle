@@ -1,15 +1,24 @@
 "use client";
+import { contentImage } from "../../lib/text-image.ts";
+import { environmentPresentation } from "../../lib/environment-presentation";
+import { makeContentPresentation } from "./ContentPresentation";
 import { useLanguage } from "./Language";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { Asset, World, Simulation, Player } from "@/lib/world";
 import { softenEdges } from "./Atmosphere";
 import { makeTerrain } from "./TerrainScene";
+import { makeSurfaceImage } from "./SurfaceImage";
+import { makeWaterReflection } from "./WaterReflection";
+import { applyPixelMaterials, makePixelRenderer } from "./PixelGraphics";
+import { horizonTone } from "./PixelPalette";
 import { addSymbolVisuals, makeSymbolExperience } from "./SymbolExperience";
-import { floorHeight, tileAt, terrainSample, SURFACES } from "@/lib/terrain";
+import { floorHeight, tileAt, terrainSample, ladderAt, LEVEL, SURFACES } from "@/lib/terrain";
 import type { PlayerAudioFrame } from "@/lib/audio/game-parameters";
 import type { WorldDerivation } from "@/lib/world-derivation";
 import { environmentAt } from "@/lib/environment";
+import { environmentalDrift, environmentalFlight, stepEnvironmentalFlight, type EnvironmentalFlight } from "@/lib/environment-motion";
 import { makeWeather } from "./WeatherScene";
 import { WEATHER } from "@/lib/weather";
 import { daylightAt } from "@/lib/daylight";
@@ -26,8 +35,7 @@ import {
   followHeading,
   movementKey,
   fallFrame,
-  blocksGroundStep,
-  blocksTerrainStep,
+  blocksWalkingStep,
 } from "@/lib/navigation";
 import {
   feedbackRegions,
@@ -75,8 +83,9 @@ function makeObject(asset: Asset): THREE.Group {
   const g = new THREE.Group();
 
   if (!asset.image) return g;
-  const texture = new THREE.TextureLoader().load(asset.image);
+  const texture = new THREE.TextureLoader().load(contentImage(asset)!);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = asset.text ? 16 : 1;
   const picture = mesh(
     new THREE.PlaneGeometry(1.5, 1.5),
     new THREE.MeshBasicMaterial({
@@ -154,7 +163,7 @@ export default function Scene({
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({
-        antialias: true,
+        antialias: false,
         alpha: false,
         powerPreference: "low-power",
       });
@@ -163,32 +172,31 @@ export default function Scene({
       return;
     }
     const scene = new THREE.Scene();
+    const waterReflection = makeWaterReflection();
     const weatherScene = makeWeather(world.size);
     scene.add(weatherScene.group);
     const weatherSky = new THREE.Color();
-    let targetDay = daylightAt(clockRef.current());
+    let lastTimeOfDay = worldRef.current.timeOfDay ?? "auto";
+    let targetDay = daylightAt(clockRef.current(), lastTimeOfDay);
     const currentDay = { ...targetDay };
+    const graphicsDaylight = { value: currentDay.daylight };
     let lastClockSample = -Infinity;
-    const white = new THREE.Color("#ffffff");
-    const nightSky = new THREE.Color("#11151c");
-    const nightMist = new THREE.Color("#525c6b");
-    const sky = new THREE.Color()
-      .copy(nightSky)
-      .lerp(white, currentDay.daylight);
+    const sky = new THREE.Color("#000000");
     const mistColor = new THREE.Color();
     scene.background = sky;
     const baseFog = mode === "play" ? 0.055 : 0.018;
     const atmosphere = new THREE.FogExp2(sky, baseFog * currentDay.fog);
     scene.fog = atmosphere;
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.7));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1,2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.setClearColor("#ffffff");
+    renderer.setClearColor("#000000");
+    const pixelRenderer = makePixelRenderer(renderer,graphicsDaylight);
     el.appendChild(renderer.domElement);
     const ambient = new THREE.HemisphereLight(
       "#ffffff",
-      "#ffffff",
+      "#111111",
       currentDay.ambient,
     );
     scene.add(ambient);
@@ -210,22 +218,24 @@ export default function Scene({
 
     const horizon = new THREE.Mesh(
       new THREE.PlaneGeometry(240, 240),
-      material("#ffffff"),
+      material("#000000"),
     );
     horizon.rotation.x = -Math.PI / 2;
+    horizon.name = "world-horizon";
     horizon.position.y = -18.01;
     horizon.receiveShadow = true;
     softenEdges(horizon, world.size);
     scene.add(horizon);
     let structures = derivationRef.current.structures;
     let terrain = makeTerrain(world, structures, derivationRef.current.environment);
+    applyPixelMaterials(terrain.group, graphicsDaylight);
     softenEdges(terrain.group, world.size);
     scene.add(terrain.group);
     let terrainSignature = derivationRef.current.key;
     const camera =
       mode === "play"
-        ? new THREE.PerspectiveCamera(66, 1, 0.08, 80)
-        : new THREE.OrthographicCamera(-15, 15, 15, -15, 0.1, 100);
+        ? new THREE.PerspectiveCamera(66, 1, 0.08, 300)
+        : new THREE.OrthographicCamera(-15, 15, 15, -15, 0.1, 400);
     if (mode === "overview") {
       camera.position.set(20, 24, 25);
       camera.lookAt(0, 0, 0);
@@ -253,15 +263,46 @@ export default function Scene({
     const reducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
+    const previewOrbit = mode === "overview" ? new OrbitControls(camera, renderer.domElement) : null;
+    if (previewOrbit) {
+      previewOrbit.enablePan = false;
+      previewOrbit.enableZoom = false;
+      previewOrbit.enableDamping = !reducedMotion;
+      previewOrbit.dampingFactor = .1;
+      previewOrbit.rotateSpeed = .65;
+      previewOrbit.minPolarAngle = .2;
+      previewOrbit.maxPolarAngle = Math.PI * .47;
+      renderer.domElement.tabIndex = 0;
+      previewOrbit.addEventListener("start", () => { renderer.domElement.dataset.dragging = "true"; });
+      previewOrbit.addEventListener("end", () => { delete renderer.domElement.dataset.dragging; });
+    }
+    const rotatePreview = (event: KeyboardEvent) => {
+      if (!previewOrbit || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const offset = camera.position.clone().sub(previewOrbit.target);
+      const spherical = new THREE.Spherical().setFromVector3(offset);
+      if (event.key === "ArrowLeft") spherical.theta -= .15;
+      if (event.key === "ArrowRight") spherical.theta += .15;
+      if (event.key === "ArrowUp") spherical.phi -= .1;
+      if (event.key === "ArrowDown") spherical.phi += .1;
+      spherical.phi = THREE.MathUtils.clamp(spherical.phi, previewOrbit.minPolarAngle, previewOrbit.maxPolarAngle);
+      camera.position.copy(previewOrbit.target).add(offset.setFromSpherical(spherical));
+      previewOrbit.update();
+    };
+    renderer.domElement.addEventListener("keydown", rotatePreview);
     const clearPulses = () => {
       disposeGroup(pulses);
       pulses.clear();
     };
     const player: Player = { ...world.start, yaw: 0 };
     const symbolExperience = makeSymbolExperience();
+    const contentPresentation = makeContentPresentation();
     let pointerStart: {id: number; x: number; y: number; time: number; moved: boolean} | null = null;
     let falling: { originY: number; elapsed: number } | null = null;
     let jump: ReturnType<typeof launchJump> | null = null;
+    let air: EnvironmentalFlight | null = null;
+    let glideEligible = false, bounceCooldown = 0;
     let jumpBuffer = 0;
     let groundAge = 0;
     let lastGround = floorHeight(world, player.x, player.z, structures) ?? 0;
@@ -315,17 +356,23 @@ export default function Scene({
         scene.remove(terrain.group);
         disposeGroup(terrain.group);
         terrain = makeTerrain(worldRef.current, structures, nextDerivation.environment);
+        applyPixelMaterials(terrain.group, graphicsDaylight);
         softenEdges(terrain.group, world.size);
         scene.add(terrain.group);
       }
+      const treeImages = terrain.setSurfaceImages(actors.current, worldRef.current.assets);
+      const presentationAssets = new Map<string, typeof world.assets[number]>();
       for (const a of actors.current) {
+        const source = worldRef.current.assets.find((s) => s.id === a.asset);
+        if (!source || (!source.image && !source.text?.trim())) continue;
+        const asset = { ...source, ...environmentPresentation(worldRef.current, a, terrain.environment) };
+        presentationAssets.set(a.id, asset);
+        const signature = JSON.stringify(asset) + (asset.placement === "surface" || asset.placement === "field"
+          ? JSON.stringify([terrainSignature, a.x, a.z, a.scale, a.rotation, treeImages.has(a.id)]) : "");
         let model = models.current.get(a.id);
         if (
           model &&
-          model.userData.signature !==
-            JSON.stringify(
-              worldRef.current.assets.find((s) => s.id === a.asset),
-            )
+          model.userData.signature !== signature
         ) {
           scene.remove(model);
           disposeGroup(model);
@@ -333,18 +380,23 @@ export default function Scene({
           model = undefined;
         }
         if (!model) {
-          const asset = worldRef.current.assets.find((s) => s.id === a.asset);
-          if (!asset) continue;
-          model = makeObject(asset);
+          model = (asset.placement === "surface" || asset.placement === "field") && !(a.site && floorHeight(worldRef.current, a.x, a.z, structures) === null)
+            ? makeSurfaceImage(asset, a, worldRef.current, terrain.group, treeImages.has(a.id))
+            : makeObject(asset);
           softenEdges(model, world.size);
           model.userData.asset = a.asset;
-          model.userData.signature = JSON.stringify(asset);
+          model.userData.placementId = a.id;
+          model.userData.environmentPresentation = true;
+          model.userData.presentation = { placement: asset.placement ?? "upright", display: asset.display };
+          model.userData.signature = signature;
           models.current.set(a.id, model);
           scene.add(model);
         }
+        model.visible = !a.removed;
+        if (model.userData.surface) continue;
         model.position.set(
           toScene(a.x),
-          floorHeight(worldRef.current, a.x, a.z, structures) ?? -0.4,
+          Math.max(floorHeight(worldRef.current, a.x, a.z, structures) ?? a.site?.height ?? 0, environmentAt(terrain.environment, a.x, a.z).water ?? -Infinity),
           toScene(a.z),
         );
         model.scale.setScalar(a.scale);
@@ -358,7 +410,7 @@ export default function Scene({
           spark.rotation.y = performance.now() * 0.001;
         }
       }
-      const ids = new Set(actors.current.map((a) => a.id));
+      const ids = new Set(actors.current.filter(a => { const asset = worldRef.current.assets.find(asset => asset.id === a.asset); return asset?.image || asset?.text?.trim(); }).map(a => a.id));
       for (const [id, m] of models.current) {
         if (!ids.has(id)) {
           scene.remove(m);
@@ -366,12 +418,13 @@ export default function Scene({
           models.current.delete(id);
         }
       }
+      contentPresentation.sync(actors.current, presentationAssets, models.current, terrain.group);
     };
     const resize = () => {
       const w = el.clientWidth,
         h = el.clientHeight;
       if (!w || !h) return;
-      renderer.setSize(w, h);
+      pixelRenderer.resize(w, h);
       if (camera instanceof THREE.PerspectiveCamera) camera.aspect = w / h;
       else {
         const size = world.size * 1.22;
@@ -386,18 +439,12 @@ export default function Scene({
     ro.observe(el);
     resize();
     const blocked = (x: number, z: number) =>
-      blocksTerrainStep(worldRef.current, player, {x, z}, structures) ||
-      (jump
-        ? blocksAirStep(jumpFrame(jump.origin, jump.elapsed).y,
+      ((!jump && !air) && blocksWalkingStep(worldRef.current, player, {x, z}, structures)) ||
+      (jump || air
+        ? blocksAirStep(air ? air.y : jumpFrame(jump!.origin, jump!.elapsed).y,
             floorHeight(worldRef.current, x, z, structures))
-        : blocksGroundStep(
-            floorHeight(worldRef.current, player.x, player.z, structures),
-            floorHeight(worldRef.current, x, z, structures),
-            Math.hypot(x - player.x, z - player.z),
-          )) ||
-      terrain.environment.trees.some(
-        (tree) => Math.hypot(tree.x - x, tree.z - z) < 0.18,
-      ) ||
+        : false) ||
+      terrain.environment.trees.some(tree => Math.hypot(tree.x - x, tree.z - z) < .18) ||
       actors.current.some(
         (a) =>
           !a.removed &&
@@ -419,6 +466,7 @@ export default function Scene({
         return;
       if (e.code === "Space" || e.key === " ") {
         e.preventDefault();
+        keys.add("jump-held");
         if (!e.repeat) jumpBuffer = JUMP_BUFFER_SECONDS;
         return;
       }
@@ -429,6 +477,7 @@ export default function Scene({
       }
     };
     const keyup = (e: KeyboardEvent) => {
+      if (e.code === "Space" || e.key === " ") keys.delete("jump-held");
       const key = movementKey(e);
       if (key) keys.delete(key);
     };
@@ -498,11 +547,14 @@ export default function Scene({
       const dt = Math.min((time - last) / 1000, 0.05);
       last = time;
 
-      if (time - lastClockSample >= 1000) {
-        targetDay = daylightAt(clockRef.current());
+      const timeOfDay = worldRef.current.timeOfDay ?? "auto";
+      const changedTimeOfDay = timeOfDay !== lastTimeOfDay;
+      if (changedTimeOfDay || time - lastClockSample >= 1000) {
+        targetDay = daylightAt(clockRef.current(), timeOfDay);
+        lastTimeOfDay = timeOfDay;
         lastClockSample = time;
       }
-      const blend = 1 - Math.exp(-dt * 0.8);
+      const blend = changedTimeOfDay && reducedMotion ? 1 : 1 - Math.exp(-dt * (timeOfDay === "auto" ? .8 : 2.4));
       for (const key of [
         "daylight",
         "ambient",
@@ -515,19 +567,22 @@ export default function Scene({
       ] as const)
         currentDay[key] += (targetDay[key] - currentDay[key]) * blend;
       const weather = worldRef.current.weather ?? "clear";
+      graphicsDaylight.value = currentDay.daylight;
       const climate = WEATHER[weather];
       weatherSky.set(climate.sky);
-      sky.copy(nightSky).lerp(weatherSky, currentDay.daylight);
-      atmosphere.color.copy(sky);
+      const skyLight = weatherSky.r * .2126 + weatherSky.g * .7152 + weatherSky.b * .0722;
+      sky.setScalar(.002 + skyLight * currentDay.daylight * .48);
+      atmosphere.color.setScalar(horizonTone(currentDay.daylight)).convertSRGBToLinear();
       atmosphere.density = baseFog * currentDay.fog * climate.fog;
-      mistColor.copy(nightMist).lerp(weatherSky, currentDay.daylight);
-      ambient.intensity = currentDay.ambient * climate.ambient;
-      sun.intensity = currentDay.sun * climate.sun;
+      mistColor.copy(sky).multiplyScalar(.88).addScalar(.072);
+      ambient.intensity = (.5 + currentDay.daylight * .22) * climate.ambient;
+      sun.intensity = currentDay.sun * climate.sun * 1.3;
       sun.position.set(currentDay.sunX, currentDay.sunY, currentDay.sunZ);
-      moon.intensity = currentDay.moon;
+      moon.intensity = currentDay.moon * 3;
       updateModels();
       updateTrackingMarker();
-      terrain.update(time, camera, mistColor);
+      previewOrbit?.update();
+      terrain.update(time, camera, mistColor, reducedMotion, weather, currentDay.daylight);
       if (mode === "overview") {
         const reaction = feedbackRef.current;
         if (reaction && reaction.id !== pulseId) {
@@ -576,22 +631,22 @@ export default function Scene({
               ring.userData.radius * (reducedMotion ? 1 : 0.9 + age * 0.3),
             );
             ring.material.opacity = reducedMotion ? 0.5 : 0.7 * (1 - age);
-            ring.material.color.setScalar(1 - currentDay.daylight);
+            ring.material.color.setScalar(1);
           }
       }
       for (const a of actors.current) {
         const model = models.current.get(a.id);
-        if (!model || a.removed) continue;
+        if (!model || a.removed || model.userData.surface) continue;
         const c = environmentAt(terrain.environment, a.x, a.z);
         const base =
-          floorHeight(worldRef.current, a.x, a.z, structures) ?? -0.4;
+          floorHeight(worldRef.current, a.x, a.z, structures) ?? a.site?.height ?? -0.4;
         model.position.y =
           Math.max(base, c.water ?? -Infinity) +
           (c.water !== null && c.water > base
             ? Math.sin(time * 0.0012 + a.x) * 0.035
             : 0);
-        model.rotation.z = Math.sin(time * 0.0015 + a.z) * c.windX * 0.07;
-        model.rotation.x = Math.sin(time * 0.0015 + a.x) * c.windZ * 0.07;
+        model.rotation.z = 0;
+        model.rotation.x = 0;
         if (mode === "overview") {
           const picture = model.getObjectByName("symbol-content") as THREE.Mesh<THREE.PlaneGeometry,THREE.MeshBasicMaterial> | undefined;
           if (picture) picture.material.opacity = 1;
@@ -623,6 +678,7 @@ export default function Scene({
             );
             falling = null;
             jump = null;
+            air = null;
             groundAge = 0;
             lastGround = floorHeight(worldRef.current, player.x, player.z, structures) ?? 0;
             respawnFade = 1;
@@ -636,22 +692,42 @@ export default function Scene({
             keys.has(key) || controls?.current.has(key);
           const profile = movementProfile(!!active("run"), !!active("crouch"));
           const ground = floorHeight(worldRef.current, player.x, player.z, structures);
-          if (ground !== null && !jump) {
+          bounceCooldown = Math.max(0, bounceCooldown - dt);
+          const localEffects = environmentAt(terrain.environment, player.x, player.z);
+          if (ground !== null && !jump && !air) {
             lastGround = ground;
             groundAge = 0;
           } else groundAge += dt;
           if (controls?.current.delete("jump")) jumpBuffer = JUMP_BUFFER_SECONDS;
           else jumpBuffer = Math.max(0, jumpBuffer - dt);
-          if (jumpBuffer > 0 && !jump && groundAge <= COYOTE_SECONDS) {
+          if (jumpBuffer > 0 && !jump && !air && groundAge <= COYOTE_SECONDS) {
             const input = Number(!!(active("forward") || active("w") || active("arrowup")))
               - Number(!!(active("backward") || active("s") || active("arrowdown")));
             const direction = input || (Math.abs(velocity) > .1 ? Math.sign(velocity) : Math.sign(stepRemaining));
             jump = launchJump(lastGround, player.yaw, direction, 1.5 * profile.speed);
+            glideEligible = localEffects.glide > .5;
             jumpBuffer = 0;
             groundAge = Infinity;
             stepRemaining = 0;
           }
           if (jump) jump.elapsed += dt;
+          const crouching = !!active("crouch");
+          if (jump && glideEligible && active("jump-held") && !crouching && jumpFrame(jump.origin, jump.elapsed).descending) {
+            air = environmentalFlight("glide", jumpFrame(jump.origin, jump.elapsed).y, jump.vx, jump.vz, 4.8 - jump.elapsed * 10);
+            jump = null;
+          }
+          if (!air && ground === null && localEffects.lift > .12 && !crouching) {
+            const feet = jump ? jumpFrame(jump.origin, jump.elapsed).y : eyeY - profile.eyeHeight;
+            if (feet < localEffects.liftCeiling + 1.5) {
+              air = environmentalFlight("float", feet, jump?.vx ?? 0, jump?.vz ?? 0);
+              jump = null;
+            }
+          }
+          if (!air && !jump && ground !== null && localEffects.bounce > .1 && !crouching &&
+              localEffects.water === null && Math.abs(velocity) > .15 && bounceCooldown === 0) {
+            air = environmentalFlight("bounce", ground, Math.sin(player.yaw) * velocity, -Math.cos(player.yaw) * velocity, 5 + localEffects.bounce * 2);
+            bounceCooldown = 1.4;
+          }
           for (const [command, turn] of [
             ["turn-left", -Math.PI / 12],
             ["turn-right", Math.PI / 12],
@@ -691,6 +767,7 @@ export default function Scene({
               Math.min(dt * 1.5, Math.abs(stepRemaining));
             stepRemaining -= distance;
           }
+          const airInput = dt > 0 ? distance / (dt * 1.5) : 0;
           const surface =
             tileAt(worldRef.current, player.x, player.z)?.surface ?? "plain";
           const conditions = environmentAt(
@@ -703,15 +780,24 @@ export default function Scene({
             conditions.water >
               (floorHeight(worldRef.current, player.x, player.z, structures) ??
                 0);
+          const ladder = !jump && !air ? ladderAt(structures,player.x,player.z) : undefined;
+          const rise = ladder ? ((tileAt(worldRef.current,ladder.x+ladder.dx,ladder.z+ladder.dz)?.height ?? ladder.height)-ladder.height)*LEVEL : 0;
+          const climbSpeed = ladder ? Math.min(1,1.2/Math.max(rise,1))/profile.speed : 1;
           const speed =
-            SURFACES.find((s) => s.id === surface)!.speed * (wet ? 0.55 : 1) * profile.speed;
+            SURFACES.find((s) => s.id === surface)!.speed * (wet ? 0.55 : 1) * profile.speed * climbSpeed;
           const desired = dt ? (distance / dt) * speed : 0;
           velocity +=
             (desired - velocity) *
             (surface === "slick" ? 1 - Math.exp(-3 * dt) : 1);
           distance = velocity * dt;
-          const dx = jump ? jump.vx * dt : Math.sin(player.yaw) * distance,
-            dz = jump ? jump.vz * dt : -Math.cos(player.yaw) * distance;
+          if (air && air.mode !== "bounce") {
+            const steering = airInput * (air.mode === "glide" ? 2.1 : 1.2);
+            air.vx += (Math.sin(player.yaw) * steering - air.vx) * (1 - Math.exp(-3 * dt));
+            air.vz += (-Math.cos(player.yaw) * steering - air.vz) * (1 - Math.exp(-3 * dt));
+          }
+          const drift = environmentalDrift(conditions, time / 1000, !!(jump || air), crouching);
+          const dx = (air ? air.vx * dt : jump ? jump.vx * dt : Math.sin(player.yaw) * distance) + drift.x * dt,
+            dz = (air ? air.vz * dt : jump ? jump.vz * dt : -Math.cos(player.yaw) * distance) + drift.z * dt;
           if (!blocked(player.x + dx, player.z)) player.x += dx;
           if (!blocked(player.x, player.z + dz)) player.z += dz;
           const floor = floorHeight(
@@ -721,7 +807,19 @@ export default function Scene({
             structures,
           );
           let feet = floor;
-          if (jump) {
+          if (air) {
+            const effects = environmentAt(terrain.environment, player.x, player.z);
+            const result = stepEnvironmentalFlight(air, dt, floor, {
+              lift: effects.lift, liftCeiling: effects.liftCeiling,
+              glideHeld: !!active("jump-held"), crouching,
+            });
+            if (!reducedMotion) {
+              player.yaw += result.yawDelta;
+              targetYaw += result.yawDelta;
+            }
+            air = result.landed || result.missed ? null : result.flight;
+            feet = result.missed ? null : result.flight.y;
+          } else if (jump) {
             const landing = resolveJump(jump, floor);
             feet = landing.feet;
             if (landing.landed || landing.missed) jump = null;
@@ -744,7 +842,7 @@ export default function Scene({
           }
         }
         const traveled = Math.hypot(player.x - previousX, player.z - previousZ) * 2;
-        const grounded = !falling && !jump && respawnFade === 0 && !reducedMotion;
+        const grounded = !falling && !jump && !air && respawnFade === 0 && !reducedMotion;
         if (grounded) walkedDistance += traveled;
         const underfoot = environmentAt(terrain.environment, player.x, player.z);
         const ground = floorHeight(worldRef.current, player.x, player.z, structures);
@@ -752,7 +850,7 @@ export default function Scene({
         const roughness = grounded && dry && ground !== null
           ? terrainSample(worldRef.current, player.x, player.z).weights.rough : 0;
         if (audioCallback.current) {
-          const onGround = !falling && !jump && respawnFade === 0 && ground !== null;
+          const onGround = !falling && !jump && !air && respawnFade === 0 && ground !== null;
           if (time - audioReport > 80) {
             audioCallback.current({
               x: player.x, y: audioFeet ?? ground ?? eyeY - EYE_HEIGHT, z: player.z,
@@ -775,6 +873,7 @@ export default function Scene({
         camera.rotation.x = pitch;
         camera.rotation.z = groundRoll;
         if (time - report > 80) {
+          renderer.domElement.dataset.motion = air?.mode ?? (jump ? "jump" : falling ? "fall" : underfoot.water !== null ? "swim" : "walk");
           callback.current?.({ ...player, pitch, falling: falling !== null });
           report = time;
         }
@@ -783,9 +882,10 @@ export default function Scene({
         world: worldRef.current, actors: actors.current, models: models.current, camera,
         environment: terrain.environment, structures, terrain: terrain.group, player,
         feet: floorHeight(worldRef.current,player.x,player.z,structures) ?? eyeY - EYE_HEIGHT,
-        grounded: !falling && !jump && respawnFade === 0,
+        grounded: !falling && !jump && !air && respawnFade === 0,
         dt: document.hidden ? 0 : dt, time, reducedMotion, daylight: currentDay.daylight,
       });
+      contentPresentation.update(camera, worldRef.current.size, time, mode === "overview", reducedMotion);
       weatherScene.update(time, worldRef.current.weather ?? "clear", camera, currentDay.daylight, mode === "overview");
       for(let i=fadingMist.length-1;i>=0;i--) {
         const fog=fadingMist[i],fade=Math.min(1,(time-fog.started)/650);
@@ -794,7 +894,8 @@ export default function Scene({
         fog.mesh.material.color.copy(sky);
         if(fade>=1) {scene.remove(fog.mesh);disposeGroup(fog.mesh);fadingMist.splice(i,1);}
       }
-      renderer.render(scene, camera);
+      waterReflection.update(renderer, scene, camera, terrain.group, time);
+      pixelRenderer.render(scene, camera);
       frame = requestAnimationFrame(render);
     };
     frame = requestAnimationFrame(render);
@@ -813,6 +914,10 @@ export default function Scene({
       window.removeEventListener("focusin", focusInput);
       renderer.domElement.removeEventListener("webglcontextlost", contextLost);
       clear();
+      previewOrbit?.dispose();
+      renderer.domElement.removeEventListener("keydown", rotatePreview);
+      waterReflection.dispose();
+      pixelRenderer.dispose();
       disposeGroup(scene);
       renderer.dispose();
       renderer.domElement.remove();
@@ -825,15 +930,13 @@ export default function Scene({
       ref={host}
       role="img"
       aria-label={t(
-        mode === "play" ? "1인칭으로 탐험하는 세계" : "세계의 3D 미리보기",
+        mode === "play" ? "플레이 화면" : "3D 미리보기",
       )}
     >
       <div ref={fallVeil} className="fall-veil" aria-hidden="true" />
       {failed && (
         <div className="scene-error">
-          {t("3D 화면을 시작하지 못했어요.")}
-          <br />
-          {t("WebGL을 지원하는 브라우저에서 다시 열어 주세요.")}
+          {t("3D 화면을 시작할 수 없습니다.")}
         </div>
       )}
     </div>

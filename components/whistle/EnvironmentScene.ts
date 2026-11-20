@@ -1,21 +1,43 @@
 import * as THREE from "three";
-import { makeTrees } from "./Trees.ts";
+import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 import { makeWaterSurface } from "./WaterSurface.ts";
-import { makeDrainFlow } from "./DrainFlow.ts";
 import { fogPatches } from "../../lib/environment-effects.ts";
-import { waterWeights } from "../../lib/water.ts";
-import type { World } from "../../lib/world.ts";
+import { waterWeights, waterSupport, WATER_INSET } from "../../lib/water.ts";
+import { makeTileAtmosphere } from "./TileAtmosphere.ts";
+import type { World, Weather } from "../../lib/world.ts";
 import { randomSequence, terrainSample } from "../../lib/terrain.ts";
-import { type Environment } from "../../lib/environment.ts";
+import { environmentAt, type Environment } from "../../lib/environment.ts";
+import { makeTreeSurfaces } from "./TreeSurfaces.ts";
 
 export function makeEnvironment(
   world: World,
   env: Environment,
   clock: { value: number },
+  ground: THREE.BufferGeometry,
 ) {
   const group = new THREE.Group();
   group.name = "generated-environment";
+  const trees = makeTreeSurfaces(world, env, clock);
+  group.add(trees.group);
+  const effects = makeTileAtmosphere(world, env, clock);
+  group.add(effects.group);
+  const waters: ReturnType<typeof makeWaterSurface>[] = [];
   const sceneCoord = (n: number) => n * 2 - world.size + 1;
+  let floodGround: THREE.BufferGeometry | undefined;
+  const neighbours: number[][] = [];
+  if (env.ponds.some(pond => pond.level > 0)) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", ground.getAttribute("position").clone());
+    geometry.setIndex(ground.index!.clone());
+    floodGround = mergeVertices(geometry, .0001);
+    geometry.dispose();
+    for (let i = 0; i < floodGround.getAttribute("position").count; i++) neighbours.push([]);
+    const indices = floodGround.index!;
+    for (let i = 0; i < indices.count; i += 3) {
+      const a = indices.getX(i), b = indices.getX(i+1), c = indices.getX(i+2);
+      neighbours[a].push(b,c); neighbours[b].push(a,c); neighbours[c].push(a,b);
+    }
+  }
 
   for (const pond of [...env.ponds].sort(
     (a, b) => b.cells.length - a.cells.length,
@@ -30,28 +52,50 @@ export function makeEnvironment(
       indices: number[] = [],
       signed: number[] = [],
       constraints: number[][] = [];
-    const nx = Math.ceil((maxX - minX) * 12),
-      nz = Math.ceil((maxZ - minZ) * 12);
-    for (let z = 0; z <= nz; z++)
-      for (let x = 0; x <= nx; x++) {
-        const gx = minX + ((maxX - minX) * x) / nx,
-          gz = minZ + ((maxZ - minZ) * z) / nz,
-          s = terrainSample(world, gx, gz);
-        const depth = pond.level - s.height;
-        positions.push(sceneCoord(gx), pond.level, sceneCoord(gz));
-        depths.push(Math.max(0, depth));
-        const wetWeight =
-          waterWeights(env.size, gx, gz, (i) => env.cells[i].water, (i) => env.cells[i].hole).get(
-            pond.level,
-          ) ?? 0;
-        const edge = [
-          depth - 0.002,
-          (wetWeight - 0.72) * 0.2,
-          s.coverage - 0.5,
-        ];
-        constraints.push(edge);
-        signed.push(Math.min(...edge));
+    const surfaceGround = pond.level > 0 ? floodGround! : ground;
+    const groundPositions = surfaceGround.getAttribute("position");
+    const flooded = new Uint8Array(groundPositions.count);
+    if (pond.level > 0) {
+      const members = new Set(pond.cells);
+      const sources = new Set(pond.cells.filter(i => world.terrain?.tiles[i].surface === "slick"));
+      const reachable = new Uint8Array(groundPositions.count);
+      const pending: number[] = [];
+      for (let i = 0; i < groundPositions.count; i++) {
+        const x = (groundPositions.getX(i) + world.size - 1) / 2;
+        const z = (groundPositions.getZ(i) + world.size - 1) / 2;
+        const edgeX = Math.max(0, Math.min(world.size-1, Math.round(x)));
+        const edgeZ = Math.max(0, Math.min(world.size-1, Math.round(z)));
+        const outside = x < -.5 || z < -.5 || x > world.size-.5 || z > world.size-.5;
+        if ((!outside || members.has(edgeZ*world.size+edgeX)) && groundPositions.getY(i) < pond.level-.002) reachable[i] = 1;
+        if (x < 0 || z < 0 || x >= world.size || z >= world.size) continue;
+        if (Math.abs(x-Math.round(x)) > .1 || Math.abs(z-Math.round(z)) > .1) continue;
+        if (!sources.has(Math.round(z)*world.size+Math.round(x)) || groundPositions.getY(i) >= pond.level-.002) continue;
+        flooded[i] = 1; pending.push(i);
       }
+      for (let cursor = 0; cursor < pending.length; cursor++) for (const n of neighbours[pending[cursor]]) {
+        if (flooded[n] || !reachable[n]) continue;
+        flooded[n] = 1; pending.push(n);
+      }
+    }
+    const vertices = new Map<number, number>();
+    const vertex = (source: number) => {
+      const found = vertices.get(source);
+      if (found !== undefined) return found;
+      const sx = groundPositions.getX(source), sz = groundPositions.getZ(source);
+      const gx = (sx + world.size - 1) / 2, gz = (sz + world.size - 1) / 2;
+      const depth = pond.level - groundPositions.getY(source), index = depths.length;
+      positions.push(sx, pond.level, sz); depths.push(Math.max(0, depth));
+      const edge = [depth - .002];
+      if (pond.level > 0) {
+        if (!flooded[source]) edge[0] = Math.min(edge[0], -.002);
+      } else {
+        const natural = terrainSample(world, gx, gz, false).height;
+        const weight = waterWeights(env.size, gx, gz, i => env.cells[i].water, i => env.cells[i].hole).get(pond.level) ?? 0;
+        edge.push((weight * waterSupport(natural, pond.level + WATER_INSET) - .25) * .2);
+      }
+      constraints.push(edge); signed.push(Math.min(...edge)); vertices.set(source, index);
+      return index;
+    };
     const cuts = new Map<string, number>();
     const cut = (a: number, b: number) => {
       const key = a < b ? `${a}:${b}` : `${b}:${a}`,
@@ -92,12 +136,15 @@ export function makeEnvironment(
       for (let k = 1; k < out.length - 1; k++)
         indices.push(out[0], out[k], out[k + 1]);
     };
-    for (let z = 0; z < nz; z++)
-      for (let x = 0; x < nx; x++) {
-        const a = z * (nx + 1) + x;
-        triangle(a, a + nx + 1, a + 1);
-        triangle(a + 1, a + nx + 1, a + nx + 2);
-      }
+    const groundIndices = surfaceGround.index!;
+    for (let n = 0; n < groundIndices.count; n += 3) {
+      const ids = [groundIndices.getX(n), groundIndices.getX(n + 1), groundIndices.getX(n + 2)];
+      if (pond.level > 0) {
+        if (!ids.some(i => flooded[i])) continue;
+      } else if (ids.every(i => groundPositions.getX(i) < sceneCoord(minX)) || ids.every(i => groundPositions.getX(i) > sceneCoord(maxX)) ||
+        ids.every(i => groundPositions.getZ(i) < sceneCoord(minZ)) || ids.every(i => groundPositions.getZ(i) > sceneCoord(maxZ))) continue;
+      triangle(vertex(ids[0]), vertex(ids[1]), vertex(ids[2]));
+    }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute(
       "position",
@@ -109,17 +156,21 @@ export function makeEnvironment(
     );
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
+    const waterPositions = geometry.getAttribute("position"), currents = new Float32Array(waterPositions.count * 2);
+    for (let i = 0; i < waterPositions.count; i++) {
+      const cell = environmentAt(env, (waterPositions.getX(i) + world.size - 1) / 2, (waterPositions.getZ(i) + world.size - 1) / 2);
+      currents[i * 2] = cell.windX + cell.flowX; currents[i * 2 + 1] = cell.windZ + cell.flowZ;
+    }
+    geometry.setAttribute("surfaceCurrent", new THREE.Float32BufferAttribute(currents, 2));
     const water = makeWaterSurface(
       geometry,
       pond.level,
       clock,
     );
+    waters.push(water);
     group.add(water);
   }
-  group.add(makeTrees(world, env, clock));
-  const flows=makeDrainFlow(world,env,clock);
-  if(flows.userData.count) group.add(flows);
-  else { flows.geometry.dispose(); flows.material.dispose(); }
+  floodGround?.dispose();
 
   const mist: {
     mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
@@ -159,7 +210,16 @@ export function makeEnvironment(
   let firstTime: number | undefined;
   return {
     group,
-    update: (time: number, camera?: THREE.Camera, mistColor?: THREE.Color) => {
+    setSurfaceImages: trees.setSurfaceImages,
+    update: (time: number, camera?: THREE.Camera, mistColor?: THREE.Color, reducedMotion = false, weather: Weather = "clear", daylight = 1) => {
+      effects.update(time, reducedMotion, daylight);
+      for (const water of waters) {
+        const rain = weather === "rain" ? 1 : 0;
+        water.material.uniforms.rainPower.value = reducedMotion ? 0 : rain;
+        water.material.uniforms.waveStrength.value = reducedMotion ? 1 : 1 + rain * .5;
+        water.material.uniforms.waterMotion.value = reducedMotion ? 0 : 1;
+      }
+      trees.update(time, reducedMotion);
       firstTime ??= time;
       const appear = Math.min(1,(time-firstTime)/650);
       for (const fog of mist) {
