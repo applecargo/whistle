@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { toScene, forwardOf, terrainSources, nearbyTiles, diffActive, tileSourceId, DEFAULT_NEARBY } from "../lib/audio/terrain-sources.ts";
-import { LEVEL, flatTerrain } from "../lib/terrain.ts";
+import { toScene, forwardOf, terrainRegions, nearbyRegions, diffActive, DEFAULT_NEARBY } from "../lib/audio/terrain-sources.ts";
+import { LEVEL, flatTerrain, type Surface, type Tile } from "../lib/terrain.ts";
 
-const close = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-9, `${a} ≈ ${b}`);
-const all = (size: number) => new Set(Array.from({ length: size * size }, (_, i) => i));
+const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
+
+/** 문자 지도로 지형을 만든다. p=plain r=rough s=slick o=soft .=구멍 */
+function map(rows: string[]): { tiles: Tile[]; size: number } {
+  const kinds: Record<string, Surface> = { p: "plain", r: "rough", s: "slick", o: "soft" };
+  const size = rows.length;
+  const tiles = rows.join("").split("").map((c): Tile =>
+    c === "." ? { height: 0, surface: "plain", hole: true } : { height: 0, surface: kinds[c] });
+  return { tiles, size };
+}
 
 test("격자 → 장면 좌표: 타일 한 칸 2m, 가운데가 원점", () => {
   assert.equal(toScene(0, 24), -23);
@@ -20,63 +28,93 @@ test("yaw → 바라보는 방향: Scene.tsx의 이동 방향과 같다", () => 
   close(right.x, 1); close(right.z, 0);
 });
 
-test("타일마다 소스 하나, 장면 좌표와 높이, 구멍은 제외", () => {
-  const terrain = flatTerrain(3);
-  terrain.tiles[4] = { height: 2, surface: "rough" };
-  terrain.tiles[0] = { height: 0, surface: "plain", hole: true };
-  terrain.tiles[1] = { height: -1, surface: "plain" }; // 예전 형식의 구멍
-  const sources = terrainSources(terrain.tiles, 3);
-  assert.equal(sources.length, 7);
-  assert.ok(!sources.some((s) => s.id === tileSourceId(1)));
-  const center = sources.find((s) => s.id === tileSourceId(4))!;
-  assert.deepEqual(center.position, { x: 0, y: 2 * LEVEL, z: 0 });
-  assert.equal(center.patch, "terrain_clock");
-  assert.ok(!sources.some((s) => s.id === tileSourceId(0)));
-  assert.deepEqual(sources.find((s) => s.id === tileSourceId(8))!.position, { x: 2, y: 0, z: 2 });
+test("영역: 같은 종류끼리 상하좌우로 이어진 것만 한 영역", () => {
+  const { tiles, size } = map([
+    "rrpp",
+    "rppr",
+    "pppr",
+    "rprr",
+  ]);
+  const { list } = terrainRegions(tiles, size);
+  const summary = list.map((r) => `${r.surface}:${r.tiles.join(",")}`);
+  assert.deepEqual(summary, [
+    "rough:0,1,4",
+    "plain:2,3,5,6,8,9,10,13",
+    "rough:7,11,14,15",
+    "rough:12",
+  ]);
+  assert.equal(list[0].id, "region-0");
+  assert.equal(list[0].patch, "terrain_clock");
 });
 
-test("근처 타일: 반경 3 안에서 가까운 순 최대 10개", () => {
-  const near = nearbyTiles({ x: 10, z: 10 }, 24, all(24), new Set());
-  assert.equal(near.size, 10);
-  assert.ok(near.has(tileSourceId(10 * 24 + 10)), "발밑 타일 포함");
-  for (const id of near) {
-    const i = Number(id.slice(5));
-    assert.ok(Math.hypot(i % 24 - 10, Math.floor(i / 24) - 10) <= 3);
-  }
+test("영역: 대각선으로만 닿으면 다른 영역, 구멍은 영역을 끊고 영역에 들지 않는다", () => {
+  const diagonal = terrainRegions(map(["rp", "pr"]).tiles, 2).list;
+  assert.equal(diagonal.filter((r) => r.surface === "rough").length, 2);
+  const { list, regionOf } = terrainRegions(map(["p.p", "p.p", "p.p"]).tiles, 3);
+  assert.equal(list.length, 2);
+  assert.equal(regionOf[1], -1);
+  // 예전 형식의 구멍(height −1)
+  const legacy = flatTerrain(3).tiles.map((t, i) => (i === 4 ? { ...t, height: -1 } : t));
+  assert.ok(terrainRegions(legacy, 3).list.every((r) => !r.tiles.includes(4)));
 });
 
-test("근처 타일: 맵 가장자리와 후보가 없는 타일", () => {
-  const near = nearbyTiles({ x: 0, z: 0 }, 24, all(24), new Set(), { ...DEFAULT_NEARBY, max: 100 });
-  // 반경 3의 1/4 원(경계 포함): x,z ≥ 0
-  let expected = 0;
-  for (let z = 0; z <= 3; z++) for (let x = 0; x <= 3; x++) if (Math.hypot(x, z) <= 3) expected++;
-  assert.equal(near.size, expected);
-  assert.equal(nearbyTiles({ x: 5, z: 5 }, 24, new Set(), new Set()).size, 0);
+test("근처 영역: 같은 종류라도 떨어진 두 섬은 각각 켜진다", () => {
+  const { tiles, size } = map([
+    "ppppppp",
+    "rrppprr",
+    "rrppprr",
+    "rrppprr",
+    "ppppppp",
+    "ppppppp",
+    "ppppppp",
+  ]);
+  const regions = terrainRegions(tiles, size);
+  const near = nearbyRegions({ x: 3, z: 2 }, regions, new Set());
+  const rough = near.filter((r) => regions.list.find((l) => l.id === r.id)!.surface === "rough");
+  assert.equal(rough.length, 2);
+  // 왼쪽 섬은 플레이어 왼쪽(−x), 오른쪽 섬은 오른쪽(+x)
+  const [left, right] = [...rough].sort((a, b) => a.position.x - b.position.x);
+  assert.ok(left.position.x < toScene(3, size) && right.position.x > toScene(3, size));
+  close(left.gain, right.gain, 1e-9);
 });
 
-test("근처 타일: 이미 켜진 것은 반경 + 0.5까지 유지(경계 깜빡임 방지)", () => {
-  const id = tileSourceId(0 * 24 + 13); // (13, 0)
-  const options = { ...DEFAULT_NEARBY, max: 100 };
-  // 플레이어 (9.7, 0): 거리 3.3 → 새로 켜지지는 않지만 켜져 있으면 유지
-  assert.ok(!nearbyTiles({ x: 9.7, z: 0 }, 24, all(24), new Set(), options).has(id));
-  assert.ok(nearbyTiles({ x: 9.7, z: 0 }, 24, all(24), new Set([id]), options).has(id));
-  // 거리 3.6 → 꺼짐
-  assert.ok(!nearbyTiles({ x: 9.4, z: 0 }, 24, all(24), new Set([id]), options).has(id));
+test("근처 영역: 위치는 반경 안 타일의 가중 중심, 음량은 반경 안 비중", () => {
+  const terrain = flatTerrain(24);
+  terrain.tiles.forEach((t, i) => (t.height = i % 24 >= 12 ? 2 : 0));
+  const regions = terrainRegions(terrain.tiles, 24);
+  assert.equal(regions.list.length, 1); // 높이는 영역을 나누지 않는다
+  const [only] = nearbyRegions({ x: 5, z: 5 }, regions, new Set());
+  // 모두 같은 영역 안 → 비중 1, 중심은 플레이어 위치, 높이 0(반경 안은 모두 x<12)
+  close(only.gain, 1);
+  close(only.position.x, toScene(5, 24), 1e-9);
+  close(only.position.z, toScene(5, 24), 1e-9);
+  close(only.position.y, 0);
+  // 높이 경계 위에 서면 중심 높이가 그 사이
+  const [edge] = nearbyRegions({ x: 11.5, z: 5 }, regions, new Set());
+  assert.ok(edge.position.y > 0 && edge.position.y < 2 * LEVEL);
 });
 
-test("근처 타일: 최대 개수 경계에서도 조금 움직였다고 바뀌지 않고, 충분히 가까워지면 바뀐다", () => {
-  const first = nearbyTiles({ x: 10, z: 10 }, 24, all(24), new Set());
-  const nudged = nearbyTiles({ x: 10.05, z: 10 }, 24, all(24), first);
-  assert.deepEqual([...nudged].sort(), [...first].sort());
-  const moved = nearbyTiles({ x: 11, z: 10 }, 24, all(24), first);
-  assert.notDeepEqual([...moved].sort(), [...first].sort());
-  assert.ok(moved.has(tileSourceId(10 * 24 + 11)), "새 발밑 타일은 켜진다");
+test("근처 영역: 반경 밖 영역은 켜지지 않고, 켜진 영역은 반경 + 0.5까지 유지", () => {
+  const { tiles, size } = map(["ppppppppr", ...Array(8).fill("ppppppppp")]);
+  const regions = terrainRegions(tiles, size);
+  const rough = regions.list.find((r) => r.surface === "rough")!; // (8, 0)
+  const at = (x: number, ids: string[]) => nearbyRegions({ x, z: 0 }, regions, new Set(ids)).some((r) => r.id === rough.id);
+  assert.ok(!at(4.7, []), "거리 3.3: 새로 켜지지 않음");
+  assert.ok(at(4.7, [rough.id]), "거리 3.3: 켜져 있으면 유지");
+  assert.ok(!at(4.4, [rough.id]), "거리 3.6: 꺼짐");
+  assert.ok(at(5, []), "거리 3: 켜짐");
 });
 
-test("근처 타일: 같은 입력이면 같은 결과(거리가 같을 때 순서 고정)", () => {
-  const a = [...nearbyTiles({ x: 10, z: 10 }, 24, all(24), new Set())];
-  const b = [...nearbyTiles({ x: 10, z: 10 }, 24, all(24), new Set())];
-  assert.deepEqual(a, b);
+test("근처 영역: 최대 개수를 넘으면 비중이 큰 순, 켜진 것은 우대", () => {
+  // 체스판: 모든 타일이 각자 영역
+  const rows = Array.from({ length: 9 }, (_, z) => Array.from({ length: 9 }, (_, x) => ((x + z) % 2 ? "r" : "p")).join(""));
+  const regions = terrainRegions(map(rows).tiles, 9);
+  const near = nearbyRegions({ x: 4, z: 4 }, regions, new Set());
+  assert.equal(near.length, DEFAULT_NEARBY.max);
+  assert.equal(near[0].id, `region-${4 * 9 + 4}`, "발밑 타일이 가장 크다");
+  for (let i = 1; i < near.length; i++) assert.ok(near[i - 1].gain >= near[i].gain);
+  const again = nearbyRegions({ x: 4.05, z: 4 }, regions, new Set(near.map((r) => r.id)));
+  assert.deepEqual(again.map((r) => r.id).sort(), near.map((r) => r.id).sort());
 });
 
 test("켤 것·끌 것 비교", () => {

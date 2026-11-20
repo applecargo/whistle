@@ -19,7 +19,7 @@ const MASTER_FADE = 0.05;
 /**
  * AudioContext 1개:
  *   상호작용 패치(edit·player·event) ─┐
- *   지형 사운드스케이프(타일 패치들) ──┼─→ 마스터 게인(음소거 fade) → 리미터 → 출력
+ *   지형 사운드스케이프(영역 패치들) ──┼─→ 마스터 게인(음소거 fade) → 리미터 → 출력
  *   배치한 녹음 사운드 ───────────────┘
  */
 async function createGameMix() {
