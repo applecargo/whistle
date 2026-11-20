@@ -12,8 +12,8 @@
 3D 이동 상태 ── 연속 값 ─────┘
 ```
 
-하나의 AudioContext와 오디오 세션을 사용하고, 패치 안에서 편집용 소리와
-플레이용 소리를 나눈다. 최종 패치가 여러 파일이면 상위 패치에서 합성한다.
+하나의 AudioContext에서 여러 패치(named patch)를 실행한다. 상호작용 패치(`uwb-player.pd`)가
+편집용 소리와 플레이용 소리를 나누고, 지형 사운드스케이프 패치(`terrain_clock.pd` 등)는 공간에 배치한다. 최종 패치가 여러 파일이면 상위 패치에서 합성한다.
 현재 테스트는 단일 .pd 파일이다. 샘플 파일·외부 오브젝트·서브패치는 아직 검증하지 않았다.
 
 ## 게임 연결
@@ -46,7 +46,7 @@
 
 - 원본: `audio/patches/uwb-player.pd` (`player3.pd`를 불러옴)
 - WebPd: `1.0.0-alpha.14` 고정, 개발 의존성. `.pd`를 WASM으로 사전 컴파일한다.
-- 브리지: `lib/audio/webpd-session.ts`
+- 브리지: `lib/audio/webpd-runtime.ts`(패치 로드) · `lib/audio/webpd-session.ts`(상호작용 패치의 버스 인터페이스)
 - 게임 연결: `components/whistle/useGameAudio.ts`, `lib/audio/game-audio.ts`, `lib/audio/game-parameters.ts`
 - 수동 테스트: `audio-lab/index.html`
 - 다중 패치 실험: `audio-lab/soundscape.html`, 회귀 테스트 `tests/browser/soundscape-lab.spec.ts`
@@ -70,7 +70,7 @@
 현재 패치는 뒤의 문맥 값을 수신·반환하며 음색 합성에는 기본 값만 사용한다.
 
 UWB 테스트의 보드 높이는 현실 바닥 기준 미터 값이며, 가상 지면/발 높이 `y`와 별개다.
-`PdSession.boardHeight()`로 별도 버스에 보내며 유한하지 않거나 0~10m 범위 밖이면 거부한다.
+`InteractionSession.boardHeight()`로 별도 버스에 보내며 유한하지 않거나 0~10m 범위 밖이면 거부한다.
 UWB 페이지에서 숫자 또는 JSON의 `boardHeight`로 시험한다. 높이만 바뀌어도 시험음에 반영된다.
 일반 게임은 이 버스를 보내지 않으므로 기존 시험음과 동작을 유지한다.
 
@@ -88,6 +88,21 @@ JS는 컴파일 결과 메타데이터에서 해당 노드 ID를 찾아 사용�
 `whistle-ready`를 받은 후에만 입력을 허용한다. 오디오는 클릭으로 시작하고,
 시작 실패·종료 시 AudioContext와 노드를 정리한다. 재시작도 가능하다.
 테스트 페이지가 숨겨지면 음소거하며 사용자가 해제한다. 마이크 입력은 사용하지 않는다.
+
+## 예전 엔진에서 옮기기
+
+예전 `createPdSession(baseUrl, receive)`(단일 `patch.wasm`, 세션마다 AudioContext 생성)는 삭제했다.
+같은 메서드(`edit`·`player`·`stopPlayer`·`event`·`mute`·`boardHeight`·`close`, `context`, `node`)를 가진
+`createInteractionSession(baseUrl, receive, shared?)`로 바꾼다. 내부에서는 `startPatch`로
+`uwb-player` named patch를 로드하고 `whistle-ready`를 받은 뒤에 돌려준다.
+
+- `shared` 없이 부르면 예전처럼 AudioContext를 새로 만들고 `close()` 때 닫는다.
+  실험 페이지(`audio-lab/index.html`, `uwb-lab`)는 이 방식으로 옮겼다(이름만 변경).
+- 게임처럼 다른 패치와 함께 쓰려면 `shared: { context, output }`으로 AudioContext를 공유한다.
+  이때 `close()`는 패치만 정리하고 컨텍스트는 닫지 않는다.
+- 브라우저 테스트에서 패치 로드를 가로챌 때는 `**/audio-test/patches/uwb-player.wasm`을 쓴다.
+- 새 패치를 추가할 때는 `audio/patch-targets.json`에 등재하고 `startPatch(context, baseUrl, 이름)`으로 로드한다.
+  외부 메시지는 최상위 `[send 이름]`이 있어야 manifest의 `inputs`에 나타난다(위 참고).
 
 ## 실행
 
@@ -144,8 +159,8 @@ npm run build
   해시가 같고 wasm이 있으면 건너뛴다. 하위 패치만 고쳐도 다시 컴파일된다.
 - 목록에서 빠진 패치의 이전 결과물은 빌드 때 지운다.
 - WebPd 런타임(`webpd-runtime.js`)은 모든 패치가 공유하며 패키지에서 그대로 복사한다.
-- 기존 단일 패치(`uwb-player.pd` → `patch.wasm`) 빌드는 새 엔진으로 교체할 때까지 유지한다.
-  같은 방식으로 해시 캐시를 적용한다(`.legacy-hash`).
+- 예전 단일 패치 빌드(`patch.wasm`, `io.json`)는 폐기했다. `uwb-player.pd`도 다른 패치와 같이
+  목록에 등재해 `patches/uwb-player.wasm`으로 빌드한다. 예전 결과물이 남아 있으면 빌드가 지운다.
 - 컴파일하는 패치마다 시작·완료 시간을 출력한다. 큰 패치는 1분 이상 걸릴 수 있다.
 
 게임 화면(`/whistle/`)에서는 격자를 편집하거나 플레이를 시작하면 연결된다.

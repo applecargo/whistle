@@ -40,6 +40,8 @@ async function open(page: Page, query = "") {
   await page.goto(`audio-lab/soundscape.html${query}`);
   await page.getByRole("button", { name: "오디오 시작" }).click();
   await expect(page.locator("#status")).toContainText("running");
+  // 메시지 없이도 소리가 나는 패치로 시험한다(uwb-player는 입력이 있어야 소리가 남).
+  await page.locator("#patch").selectOption("terrain_clock");
   return errors;
 }
 

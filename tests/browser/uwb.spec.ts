@@ -84,19 +84,19 @@ test("two world menus show the existing world without a popup or overwriting sto
 });
 
 test("audio loading failure can retry and cancellation does not start a late session", async ({ page }) => {
-  await page.route("**/audio-test/patch.wasm", (route) => route.fulfill({ status: 503, body: "unavailable" }));
+  await page.route("**/audio-test/patches/uwb-player.wasm", (route) => route.fulfill({ status: 503, body: "unavailable" }));
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
   await expect(page.locator("#audio-status")).toContainText("불러오지 못했습니다");
-  await page.unroute("**/audio-test/patch.wasm");
+  await page.unroute("**/audio-test/patches/uwb-player.wasm");
   let release!: () => void;
   const hold = new Promise<void>((resolve) => { release = resolve; });
-  await page.route("**/audio-test/patch.wasm", async (route) => { await hold; await route.continue(); });
+  await page.route("**/audio-test/patches/uwb-player.wasm", async (route) => { await hold; await route.continue(); });
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
   await expect(page.locator("#audio-status")).toHaveText("패치 준비 중");
   await page.getByRole("button", { name: "오디오 종료", exact: true }).click();
   release();
   await expect(page.locator("#audio-status")).toHaveText("오디오 꺼짐");
-  await page.unroute("**/audio-test/patch.wasm");
+  await page.unroute("**/audio-test/patches/uwb-player.wasm");
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
   await expect(page.locator("#audio-status")).toHaveText("오디오 실행 중");
 });

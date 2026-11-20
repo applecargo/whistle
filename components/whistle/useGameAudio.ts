@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef } from "react";
-import { createPdSession, type EditSound } from "@/lib/audio/webpd-session";
+import { createInteractionSession, type EditSound } from "@/lib/audio/webpd-session";
 import { createGameAudio } from "@/lib/audio/game-audio";
 import { playerSound, type PlayerAudioFrame } from "@/lib/audio/game-parameters";
 import { createPlacedSounds } from "@/lib/audio/placed-sounds";
@@ -15,7 +15,7 @@ export function useGameAudio() {
   const api = useMemo(() => {
     const get = () => controller.current ??= createGameAudio(
       async () => {
-        const session = await createPdSession(`${import.meta.env.BASE_URL}audio-test/`, () => {});
+        const session = await createInteractionSession(`${import.meta.env.BASE_URL}audio-test/`, () => {});
         recordings.current = createPlacedSounds(session.context, () => {});
         return session;
       },

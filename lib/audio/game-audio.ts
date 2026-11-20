@@ -1,6 +1,6 @@
-import type { EditSound, PlayerSound, PdSession } from "./webpd-session.ts";
+import type { EditSound, PlayerSound, InteractionSession } from "./webpd-session.ts";
 
-type Session = Pick<PdSession, "context" | "edit" | "player" | "stopPlayer" | "event" | "mute" | "close">;
+type Session = Pick<InteractionSession, "context" | "edit" | "player" | "stopPlayer" | "event" | "mute" | "close">;
 export function createGameAudio(load: () => Promise<Session>, onError: (error: unknown) => void) {
   let session: Session | undefined;
   let loading: Promise<void> | undefined;

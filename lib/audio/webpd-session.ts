@@ -1,32 +1,11 @@
-export type PdMessage = (string | number)[];
-type Port = { nodeId: string; portletId: string };
-type Manifest = { inputs: Record<string, Port>; outputs: Record<string, Port> };
-type PdNode = AudioWorkletNode & { destroy(): void };
-type Runtime = {
-  initialize(context: AudioContext): Promise<void>;
-  run(context: AudioContext, patch: ArrayBuffer, settings: {
-    messageHandler(node: PdNode, event: MessageEvent): void;
-  }): Promise<PdNode>;
-};
+// 상호작용 패치(uwb-player.pd)의 버스 인터페이스.
+// 에디터 편집음(whistle-edit), 3D 이동(whistle-player), 규칙 이벤트(whistle-event),
+// 음소거(whistle-gate), UWB 보드 높이(whistle-board-height)를 보낸다.
+// 패치는 패치별 빌드(named patch)로 로드한다: webpd-runtime의 startPatch.
+import { startPatch, type PdMessage } from "./webpd-runtime.ts";
 
-declare global {
-  interface Window { WebPdRuntime: Runtime }
-}
-
-let runtimeLoading: Promise<void> | undefined;
-function loadRuntime(url: string) {
-  return runtimeLoading ??= new Promise<void>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = url;
-    script.onload = () => resolve();
-    script.onerror = () => {
-      script.remove();
-      runtimeLoading = undefined;
-      reject(new Error("WebPd 런타임을 불러오지 못했습니다."));
-    };
-    document.head.append(script);
-  });
-}
+export type { PdMessage };
+export const INTERACTION_PATCH = "uwb-player";
 
 export type EditSound = {
   x: number; z: number; overlap: number;
@@ -49,92 +28,64 @@ const bounded = (value: number, min: number, max: number) => {
   return Math.max(min, Math.min(max, value));
 };
 
-export async function createPdSession(
+type Sender = { send(bus: string, message: PdMessage): void };
+
+/** 상호작용 패치의 버스별 메시지를 값 검사와 함께 보낸다. */
+export function interactionMessages(patch: Sender) {
+  const send = patch.send.bind(patch);
+  return {
+    edit({ x, z, overlap, asset, action, surface }: EditSound) {
+      send("whistle-edit", [bounded(x, 0, 1), bounded(z, 0, 1), bounded(overlap, 0, 1),
+        ...(asset === undefined ? [] : [asset, action ?? "paint", surface ?? "plain"])]);
+    },
+    player({ x, y, z, grass, rough, grounded, falling, yaw, water }: PlayerSound) {
+      send("whistle-player", [
+        bounded(x, 0, 1), bounded(y, -1000, 1000), bounded(z, 0, 1),
+        bounded(grass, 0, 1), bounded(rough, 0, 1),
+        ...(grounded === undefined ? [] : [Number(grounded), Number(!!falling),
+          bounded(yaw ?? 0, -1e6, 1e6), bounded(water ?? 0, 0, 1)]),
+      ]);
+    },
+    stopPlayer() { send("whistle-player-stop", ["bang"]); },
+    boardHeight(height: number) { send("whistle-board-height", [validateBoardHeight(height)]); },
+    event(frequency: number, gain: number, pan: number) {
+      send("whistle-event", [bounded(frequency, 20, 20000), bounded(gain, 0, 0.12), bounded(pan, -1, 1)]);
+    },
+    mute(muted: boolean) { send("whistle-gate", [muted ? 0 : 1]); },
+  };
+}
+
+/**
+ * 상호작용 패치를 시작한다. context를 주면 그 AudioContext를 공유하고(닫지 않음),
+ * 주지 않으면 새로 만들고 close() 때 닫는다. output을 주면 거기로, 아니면 destination으로 연결한다.
+ */
+export async function createInteractionSession(
   baseUrl: string,
   receive: (bus: string, message: PdMessage) => void,
+  shared?: { context: AudioContext; output?: AudioNode },
 ) {
-  const context = new AudioContext();
-  let node: PdNode | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  const context = shared?.context ?? new AudioContext();
+  const owned = !shared;
   try {
     await context.resume();
-    const [patchResponse, ioResponse] = await Promise.all([
-      fetch(`${baseUrl}patch.wasm`), fetch(`${baseUrl}io.json`),
-    ]);
-    if (!patchResponse.ok || !ioResponse.ok) throw new Error("Pd 패치를 불러오지 못했습니다.");
-    const [patch, manifest]: [ArrayBuffer, Manifest] = await Promise.all([
-      patchResponse.arrayBuffer(), ioResponse.json(),
-    ]);
-    await loadRuntime(`${baseUrl}webpd-runtime.js`);
-    await window.WebPdRuntime.initialize(context);
-    let markReady!: () => void;
-    let failReady!: (error: Error) => void;
-    const ready = new Promise<void>((resolve, reject) => {
-      markReady = resolve;
-      failReady = reject;
-      timer = setTimeout(() => reject(new Error("Pd 패치 시작 응답이 없습니다.")), 8000);
-    });
-    node = await window.WebPdRuntime.run(context, patch, {
-      messageHandler(_node, event) {
-        if (event.data.type !== "io:messageSender") return;
-        const { nodeId, portletId, message } = event.data.payload;
-        const bus = Object.keys(manifest.outputs).find((name) => {
-          const port = manifest.outputs[name];
-          return port.nodeId === nodeId && port.portletId === portletId;
-        });
-        if (bus === "whistle-ready") markReady();
-        if (bus) receive(bus, message);
-      },
-    });
-    node.onprocessorerror = () => failReady(new Error("Pd 오디오 프로세서 오류"));
-    node.connect(context.destination);
-    await ready;
-    clearTimeout(timer);
+    const patch = await startPatch(context, baseUrl, INTERACTION_PATCH, receive, { ready: "whistle-ready" });
+    patch.node.connect(shared?.output ?? context.destination);
     let closed = false;
-    const send = (bus: string, message: PdMessage) => {
-      if (closed) throw new Error("종료된 오디오 세션입니다.");
-      const port = manifest.inputs[bus];
-      if (!port) throw new Error(`Pd 수신 포트가 없습니다: ${bus}`);
-      node!.port.postMessage({ type: "io:messageReceiver", payload: { ...port, message } });
-    };
     return {
       context,
-      node,
-      edit({ x, z, overlap, asset, action, surface }: EditSound) {
-        send("whistle-edit", [bounded(x, 0, 1), bounded(z, 0, 1), bounded(overlap, 0, 1),
-          ...(asset === undefined ? [] : [asset, action ?? "paint", surface ?? "plain"])]);
-      },
-      player({ x, y, z, grass, rough, grounded, falling, yaw, water }: PlayerSound) {
-        send("whistle-player", [
-          bounded(x, 0, 1), bounded(y, -1000, 1000), bounded(z, 0, 1),
-          bounded(grass, 0, 1), bounded(rough, 0, 1),
-          ...(grounded === undefined ? [] : [Number(grounded), Number(!!falling),
-            bounded(yaw ?? 0, -1e6, 1e6), bounded(water ?? 0, 0, 1)]),
-        ]);
-      },
-      stopPlayer() { send("whistle-player-stop", ["bang"]); },
-      boardHeight(height: number) { send("whistle-board-height", [validateBoardHeight(height)]); },
-      event(frequency: number, gain: number, pan: number) {
-        send("whistle-event", [bounded(frequency, 20, 20000), bounded(gain, 0, 0.12), bounded(pan, -1, 1)]);
-      },
-      mute(muted: boolean) { send("whistle-gate", [muted ? 0 : 1]); },
+      node: patch.node,
+      ...interactionMessages(patch),
       async close() {
         if (closed) return;
         closed = true;
-        node!.destroy();
-        node!.disconnect();
-        node!.port.close();
-        await context.close();
+        patch.destroy();
+        if (owned) await context.close();
       },
     };
   } catch (error) {
-    clearTimeout(timer);
-    node?.destroy();
-    node?.disconnect();
-    node?.port.close();
-    await context.close();
+    if (owned) await context.close();
     throw error;
   }
 }
 
-export type PdSession = Awaited<ReturnType<typeof createPdSession>>;
+export type InteractionSession = Awaited<ReturnType<typeof createInteractionSession>>;

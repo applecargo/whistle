@@ -5,7 +5,7 @@ import { editSound, playerSound } from "../lib/audio/game-parameters.ts";
 import { createWorldDeriver } from "../lib/world-derivation.ts";
 import { starterWorld } from "../lib/world.ts";
 import { flatTerrain } from "../lib/terrain.ts";
-import type { PdSession, PlayerSound } from "../lib/audio/webpd-session.ts";
+import type { InteractionSession, PlayerSound } from "../lib/audio/webpd-session.ts";
 import { validateBoardHeight } from "../lib/audio/webpd-session.ts";
 
 test("board height accepts metres within the test range and rejects invalid measurements", () => {
@@ -29,7 +29,7 @@ function session() {
       event: (...values: number[]) => events.push(values),
       mute: (value: boolean) => gates.push(value),
       close: async () => { closed++; },
-    } as Pick<PdSession, "context" | "edit" | "player" | "stopPlayer" | "event" | "mute" | "close">,
+    } as Pick<InteractionSession, "context" | "edit" | "player" | "stopPlayer" | "event" | "mute" | "close">,
   };
 }
 const sound = { x: 0.5, z: 0.5, overlap: 0 };

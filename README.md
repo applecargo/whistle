@@ -13,13 +13,13 @@ npm run dev  # Pd 자동 컴파일 · 서버 시작
 ```
 
 - 종료: `Ctrl+C`
-- 접속: [게임](http://127.0.0.1:5173/whistle/) · [오디오 테스트](http://127.0.0.1:5173/whistle/audio-lab/index.html) · [UWB 테스트](http://127.0.0.1:5173/whistle/uwb-lab/index.html)
+- 접속: [게임](http://127.0.0.1:5173/whistle/) · [오디오 테스트](http://127.0.0.1:5173/whistle/audio-lab/index.html) · [사운드스케이프 테스트](http://127.0.0.1:5173/whistle/audio-lab/soundscape.html) · [UWB 테스트](http://127.0.0.1:5173/whistle/uwb-lab/index.html)
 - 포트 변경 시 터미널 주소 확인
 
 ## 사운드 수정
 
 - `audio/patches/player3.pd` 및 하위 패치: 음색·리듬·볼륨 수정
-- `audio/patches/uwb-player.pd`: 원본 패치 로드 · 앱/UWB 입력 연결. 사운드만 수정할 때 유지
+- `audio/patches/uwb-player.pd`: 원본 패치 로드 · 앱/UWB 입력 연결(상호작용 named patch). 사운드만 수정할 때 유지
 - 적용: Pd 저장 → `npm run audio:build` → 페이지 새로고침 → 오디오 시작
 - 서버 재시작 시에도 자동 컴파일
 - 입력 파라미터 변경 시 연결 패치·앱 코드 확인

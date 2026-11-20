@@ -1,4 +1,4 @@
-import { createPdSession, type PdSession } from "../lib/audio/webpd-session";
+import { createInteractionSession, type InteractionSession } from "../lib/audio/webpd-session";
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const start = element<HTMLButtonElement>("start");
@@ -8,7 +8,7 @@ const status = element("status");
 const meter = element("meter");
 const messages = element("messages");
 const number = (id: string) => element<HTMLInputElement>(id).valueAsNumber;
-let session: PdSession | undefined;
+let session: InteractionSession | undefined;
 let muted = false;
 let frame = 0;
 let disconnectMeter = () => {};
@@ -20,7 +20,7 @@ function enable(enabled: boolean) {
   element<HTMLFieldSetElement>("player-controls").disabled = !enabled;
 }
 
-function measure(current: PdSession) {
+function measure(current: InteractionSession) {
   const splitter = current.context.createChannelSplitter(2);
   const analysers = [0, 1].map((channel) => {
     const analyser = current.context.createAnalyser();
@@ -57,7 +57,7 @@ start.onclick = async () => {
   start.disabled = true;
   status.textContent = "패치 준비 중";
   try {
-    session = await createPdSession(`${import.meta.env.BASE_URL}audio-test/`, (bus, message) => {
+    session = await createInteractionSession(`${import.meta.env.BASE_URL}audio-test/`, (bus, message) => {
       received[bus] = message;
       messages.textContent = JSON.stringify(received, null, 2);
     });

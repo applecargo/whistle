@@ -27,28 +27,8 @@ for (const name of ["COPYING", "COPYING.LESSER"]) await copyFile(join(webpd, nam
 
 const temporary = await mkdtemp(join(tmpdir(), "whistle-webpd-"));
 try {
-  // --- 기존 단일 패치(uwb-player) 빌드: 새 엔진으로 교체할 때 삭제 예정 ---
-  const legacyHashFile = join(output, ".legacy-hash");
-  const legacyHash = await patchHash(patchDir, "uwb-player", webpdVersion);
-  const legacyCached = await readFile(legacyHashFile, "utf8").catch(() => "") === legacyHash
-    && await access(join(output, "patch.wasm")).then(() => true, () => false)
-    && await access(join(output, "io.json")).then(() => true, () => false);
-  if (legacyCached) {
-    console.log("WebPd: uwb-player.pd up to date (patch.wasm)");
-  } else {
-    const legacyWasm = join(temporary, "patch.wasm");
-    compile("uwb-player", legacyWasm);
-    const wasm = await readFile(legacyWasm);
-    const io = busPorts(await readMetadata("assemblyscript", wasm));
-    for (const name of ["whistle-edit", "whistle-player", "whistle-gate", "whistle-event", "whistle-player-stop", "whistle-board-height"]) {
-      if (!io.inputs[name] || !io.outputs[name]) throw new Error(`Missing Pd bus: ${name}`);
-    }
-    if (!io.outputs["whistle-ready"]) throw new Error("Missing Pd ready signal");
-    await writeFile(join(output, "patch.wasm"), wasm);
-    await writeFile(join(output, "io.json"), JSON.stringify(io, null, 2) + "\n");
-    await writeFile(legacyHashFile, legacyHash);
-    console.log(`WebPd patch compiled: ${wasm.byteLength} bytes`);
-  }
+  // 예전 단일 패치 빌드(patch.wasm/io.json)의 결과물이 남아 있으면 지운다.
+  await Promise.all(["patch.wasm", "io.json", ".legacy-hash"].map(f => rm(join(output, f), { force: true })));
 
   // --- 패치별 빌드: audio/patch-targets.json에 등재된 패치만 <이름>.wasm으로 ---
   const patchOutput = join(output, "patches");
