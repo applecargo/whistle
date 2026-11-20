@@ -28,6 +28,9 @@ export type Asset = {
   originalImage?: string;
 
   text?: string;
+  audio?: string;
+  audioName?: string;
+  audioFilter?: string;
   defaultScale?: number;
   solid: boolean;
 };
@@ -474,6 +477,13 @@ export function validateWorld(input: unknown): World {
       (a.defaultScale !== undefined &&
         ![0.5, 1, 2, 3].includes(a.defaultScale)) ||
       (a.text !== undefined && (!text(a.text, 500) || !a.text.trim())) ||
+      (a.audio !== undefined &&
+        (!text(a.audio, 8000000) ||
+          !/^data:audio\/(wav|mp3|mpeg|ogg|webm|aac|m4a|x-m4a);base64,[a-zA-Z0-9+/=]+$/.test(
+            a.audio,
+          ))) ||
+      (a.audioName !== undefined && !text(a.audioName, 120)) ||
+      (a.audioFilter !== undefined && !text(a.audioFilter, 50)) ||
       [a.image, a.originalImage].some(
         (image) =>
           image !== undefined &&

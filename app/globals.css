@@ -2044,3 +2044,78 @@ p {
   .weather-mobile { display: flex; margin: 16px 0 12px; gap: 18px; }
   .weather-mobile button { width: 44px; height: 44px; padding: 10px; }
 }
+
+.audio-object-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  height: 256px;
+  padding: 24px;
+  border: 1px solid #ddd;
+  background: #fafafa;
+  justify-content: center;
+  align-items: center;
+}
+.audio-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+.audio-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.audio-icon {
+  font-size: 36px;
+}
+.audio-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.audio-filename {
+  font-size: 15px;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.audio-details small {
+  color: #777;
+  font-size: 11px;
+}
+.audio-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.audio-actions button {
+  border: 1px solid #111;
+  padding: 6px 14px;
+  font-size: 12px;
+  background: #fff;
+  color: #111;
+}
+.audio-actions button:hover {
+  background: #111;
+  color: #fff;
+}
+.audio-filter-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #555;
+  margin-top: 4px;
+}
+.audio-filter-field select {
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  background: #fff;
+  font-size: 12px;
+}

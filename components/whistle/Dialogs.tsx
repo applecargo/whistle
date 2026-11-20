@@ -12,6 +12,7 @@ import { encodeWorld, downloadWorld } from "@/lib/sharing";
 import { ImageEditor, type ImageEditorHandle } from "./ImageEditor";
 import { ObjectArt } from "./Art";
 import { textImage } from "@/lib/text-image";
+import { audioImage } from "@/lib/audio-image";
 export function Dialog({
   title,
   heading,
@@ -90,12 +91,88 @@ export function AssetMaker({
     existing?.shape === "image" ? "sphere" : (existing?.shape ?? "sphere"),
   );
   const [name, setName] = useState(existing?.name ?? "");
-  const [mediaType, setMediaType] = useState<"image" | "text">(existing?.text !== undefined ? "text" : "image");
+  const [mediaType, setMediaType] = useState<"image" | "text" | "audio">(
+    existing?.audio !== undefined
+      ? "audio"
+      : existing?.text !== undefined
+        ? "text"
+        : "image",
+  );
   const [text, setText] = useState(existing?.text ?? "");
+  const [audioData, setAudioData] = useState<string | undefined>(existing?.audio);
+  const [audioName, setAudioName] = useState<string>(existing?.audioName ?? "");
+  const [audioFilter, setAudioFilter] = useState<string>(existing?.audioFilter ?? "bypass");
+  const [audioPlaying, setAudioPlaying] = useState<boolean>(false);
   const [scale, setScale] = useState(existing?.defaultScale ?? 1);
   const [loading, setLoading] = useState(false),
     [error, setError] = useState("");
   const editor = useRef<ImageEditorHandle>(null);
+  const audioInput = useRef<HTMLInputElement>(null);
+  const previewAudio = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (previewAudio.current) {
+        previewAudio.current.pause();
+        previewAudio.current = null;
+      }
+    };
+  }, []);
+
+  const togglePreview = () => {
+    if (!audioData) return;
+    if (!previewAudio.current) {
+      previewAudio.current = new Audio(audioData);
+      previewAudio.current.onended = () => setAudioPlaying(false);
+    } else if (previewAudio.current.src !== audioData) {
+      previewAudio.current.src = audioData;
+    }
+    if (audioPlaying) {
+      previewAudio.current.pause();
+      setAudioPlaying(false);
+    } else {
+      previewAudio.current
+        .play()
+        .then(() => setAudioPlaying(true))
+        .catch(() => setAudioPlaying(false));
+    }
+  };
+
+  const handleAudioUpload = (file?: File) => {
+    if (!file) return;
+    if (
+      !file.type.startsWith("audio/") &&
+      !/\.(mp3|wav|ogg|aac|m4a|webm|flac)$/i.test(file.name)
+    ) {
+      setError(t("MP3, OGG, WAV, AAC 파일만 가능합니다."));
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setError(t("최대 8MB"));
+      return;
+    }
+    setLoading(true);
+    setError("");
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setAudioData(dataUrl);
+      setAudioName(file.name);
+      if (!name) setName(file.name.replace(/\.[^.]+$/, ""));
+      if (previewAudio.current) {
+        previewAudio.current.pause();
+        previewAudio.current = null;
+        setAudioPlaying(false);
+      }
+      setLoading(false);
+    };
+    reader.onerror = () => {
+      setError(t("오디오를 읽을 수 없습니다."));
+      setLoading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const asset: Asset = {
     id: existing?.id ?? "preview",
     name: name || shapeNames[shape] || "무제",
@@ -106,14 +183,28 @@ export function AssetMaker({
   };
   const save = () => {
     try {
-      const media = mediaType === "text"
-        ? { text: text.trim(), image: textImage(text) }
-        : editor.current?.export();
+      let media;
+      if (mediaType === "text") {
+        media = { text: text.trim(), image: textImage(text) };
+      } else if (mediaType === "audio") {
+        if (!audioData) throw Error(t("오디오 파일을 추가하세요."));
+        media = {
+          audio: audioData,
+          audioName: audioName || name || "audio",
+          audioFilter,
+          image: audioImage(audioName || name, audioFilter),
+        };
+      } else {
+        media = editor.current?.export();
+      }
       if (!media) return;
       onSave({
         ...asset,
         id: existing?.id ?? uid(),
-        name: name.trim() || shapeNames[shape] || "무제",
+        name:
+          name.trim() ||
+          (audioName ? audioName.replace(/\.[^.]+$/, "") : shapeNames[shape]) ||
+          "무제",
         ...media,
       });
     } catch (e) {
@@ -121,15 +212,46 @@ export function AssetMaker({
     }
   };
   return (
-    <Dialog title={t(mediaType === "image" ? "이미지" : "텍스트")} onClose={onClose}
-      heading={<div className="media-tabs" role="group" aria-label={t("이미지 또는 텍스트")}>
-        {(["image", "text"] as const).map((kind) => <button key={kind}
-          aria-pressed={mediaType === kind}
-          onClick={() => { setMediaType(kind); setError(""); }}>
-          {t(kind === "image" ? "이미지" : "텍스트")}
-        </button>)}
-      </div>}>
-
+    <Dialog
+      title={t(
+        mediaType === "image"
+          ? "이미지"
+          : mediaType === "text"
+            ? "텍스트"
+            : "오디오",
+      )}
+      onClose={onClose}
+      heading={
+        <div
+          className="media-tabs"
+          role="group"
+          aria-label={t("이미지, 텍스트 또는 오디오")}
+        >
+          {(["image", "text", "audio"] as const).map((kind) => (
+            <button
+              key={kind}
+              aria-pressed={mediaType === kind}
+              onClick={() => {
+                setMediaType(kind);
+                setError("");
+                if (previewAudio.current) {
+                  previewAudio.current.pause();
+                  setAudioPlaying(false);
+                }
+              }}
+            >
+              {t(
+                kind === "image"
+                  ? "이미지"
+                  : kind === "text"
+                    ? "텍스트"
+                    : "오디오",
+              )}
+            </button>
+          ))}
+        </div>
+      }
+    >
       <div className="shape-options" role="group" aria-label={t("기호")}>
         {(["sphere", "box", "cone", "diamond", "ring", "bar"] as Shape[]).map(
           (s) => (
@@ -146,18 +268,77 @@ export function AssetMaker({
         )}
       </div>
       <div hidden={mediaType !== "image"}>
-      <ImageEditor
-        ref={editor}
-        image={existing?.image}
-        originalImage={existing?.originalImage}
-        onName={setName}
-        onBusy={setLoading}
-      />
+        <ImageEditor
+          ref={editor}
+          image={existing?.image}
+          originalImage={existing?.originalImage}
+          onName={setName}
+          onBusy={setLoading}
+        />
       </div>
-      {mediaType === "text" && <textarea className="text-object-input"
-        aria-label={t("텍스트 입력")} placeholder={t("텍스트 입력")}
-        value={text} maxLength={500}
-        onChange={(e) => setText(e.target.value)} />}
+      {mediaType === "text" && (
+        <textarea
+          className="text-object-input"
+          aria-label={t("텍스트 입력")}
+          placeholder={t("텍스트 입력")}
+          value={text}
+          maxLength={500}
+          onChange={(e) => setText(e.target.value)}
+        />
+      )}
+      {mediaType === "audio" && (
+        <div className="audio-object-editor">
+          <input
+            ref={audioInput}
+            type="file"
+            accept="audio/*,.mp3,.wav,.ogg,.aac,.m4a,.webm"
+            hidden
+            onChange={(e) => void handleAudioUpload(e.target.files?.[0])}
+          />
+          <div className="audio-card">
+            <div className="audio-header">
+              <span className="audio-icon">🎵</span>
+              <div className="audio-details">
+                <strong className="audio-filename">
+                  {audioName || t("오디오 파일 선택")}
+                </strong>
+                <small>
+                  {audioData
+                    ? "준비 완료"
+                    : t("MP3, OGG, WAV, AAC 파일만 가능합니다.")}
+                </small>
+              </div>
+            </div>
+            <div className="audio-actions">
+              <button
+                type="button"
+                onClick={() => audioInput.current?.click()}
+              >
+                {t("오디오 불러오기")}
+              </button>
+              {audioData && (
+                <button type="button" onClick={togglePreview}>
+                  {audioPlaying ? t("정지") : t("미리듣기")}
+                </button>
+              )}
+            </div>
+          </div>
+          {audioData && (
+            <label className="audio-filter-field">
+              <span>{t("필터 모드")}</span>
+              <select
+                value={audioFilter}
+                onChange={(e) => setAudioFilter(e.target.value)}
+              >
+                <option value="bypass">{t("원음 (Bypass)")}</option>
+                <option value="underwater">{t("수중 필터")}</option>
+                <option value="radio">{t("라디오 필터")}</option>
+                <option value="reverb">{t("공간 울림")}</option>
+              </select>
+            </label>
+          )}
+        </div>
+      )}
       <SizeOptions compact value={scale} onChange={setScale} />
       {error && (
         <p className="error" role="alert">
@@ -165,7 +346,17 @@ export function AssetMaker({
         </p>
       )}
       <div className="dialog-footer">
-        <button className="primary" disabled={mediaType === "image" ? loading : !text.trim()} onClick={save}>
+        <button
+          className="primary"
+          disabled={
+            mediaType === "image"
+              ? loading
+              : mediaType === "text"
+                ? !text.trim()
+                : !audioData || loading
+          }
+          onClick={save}
+        >
           {t("저장")}
         </button>
       </div>

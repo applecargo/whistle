@@ -115,6 +115,13 @@ export default function Home() {
       setPlacingStart(false);
     }
   }, [world.assets, selectedAsset]);
+  useEffect(() => {
+    for (const a of world.assets) {
+      if (a.audio) {
+        void audio.loadClip(a.id, a.audio);
+      }
+    }
+  }, [world.assets, audio]);
   const handleLoad = useCallback((incoming: World, beforeUpgrade: World) => {
     audio.stop();
     loadDocument(incoming, beforeUpgrade);
@@ -150,7 +157,16 @@ export default function Home() {
     setSimulation(next);
     if (next.events.length) {
       setLog((prev) => [...next.events, ...prev].slice(0, 12));
-      next.events.filter((e) => e.action === "sound").forEach((event) => audio.event(event, player.current));
+      next.events.filter((e) => e.action === "sound").forEach((event) => {
+        const customAsset = getWorld().assets.find((a) => a.id === event.asset);
+        if (customAsset?.audio) {
+          audio.playSpatialClip(customAsset.id, {
+            position: [event.x, 1, event.z],
+            filter: customAsset.audioFilter ?? "bypass",
+          });
+        }
+        audio.event(event, player.current);
+      });
     }
   }, [audio, getWorld]);
   useEffect(() => {
