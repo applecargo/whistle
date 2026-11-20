@@ -4,10 +4,10 @@ import { createPdSession, type EditSound } from "@/lib/audio/webpd-session";
 import { createGameAudio } from "@/lib/audio/game-audio";
 import { playerSound, type PlayerAudioFrame } from "@/lib/audio/game-parameters";
 import { createPlacedSounds } from "@/lib/audio/placed-sounds";
-import type { Actor, Environment } from "@/lib/environment";
+import type { Environment } from "@/lib/environment";
 import type { SpatialSoundOptions, PlayerAudioState } from "@/lib/audio/types";
 import type { SoundscapePatchDescriptor } from "@/lib/audio/soundscape-manager";
-import type { Event, Player } from "@/lib/world";
+import type { World, Actor, Event, Player } from "@/lib/world";
 
 export function useGameAudio() {
   const controller = useRef<ReturnType<typeof createGameAudio> | null>(null);

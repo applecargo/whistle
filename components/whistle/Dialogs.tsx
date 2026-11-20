@@ -18,11 +18,13 @@ export function Dialog({
   heading,
   children,
   onClose,
+  className = "",
 }: {
   title: string;
   heading?: ReactNode;
   children: ReactNode;
   onClose: () => void;
+  className?: string;
 }) {
   const { t } = useLanguage();
   const ref = useRef<HTMLDialogElement>(null);
@@ -34,7 +36,7 @@ export function Dialog({
   return (
     <dialog
       ref={ref}
-      className="dialog"
+      className={`dialog ${className}`}
       aria-label={title}
       onCancel={onClose}
       onClick={(e) => {
@@ -77,14 +79,32 @@ const shapeNames: Partial<Record<Shape, string>> = {
   ring: "고리",
   bar: "선",
 };
+export function MakerActions({ onSave, disabled, onDelete, deleteLabel }: {
+  onSave: () => void;
+  disabled: boolean;
+  onDelete?: () => void;
+  deleteLabel: string;
+}) {
+  const { t } = useLanguage();
+  return <div className="dialog-footer">
+    {onDelete && <button type="button" onClick={onDelete}>{t(deleteLabel)}</button>}
+    <button type="button" className="primary" disabled={disabled} onClick={onSave}>{t("저장")}</button>
+  </div>;
+}
 export function AssetMaker({
   asset: existing,
+  contentType,
   onSave,
   onClose,
+  onDelete,
+  placement,
 }: {
   asset?: Asset;
+  contentType?: "image" | "text" | "sound" | "audio";
   onSave: (a: Asset) => void;
   onClose: () => void;
+  onDelete?: () => void;
+  placement?: boolean;
 }) {
   const { t } = useLanguage();
   const [shape, setShape] = useState<Shape>(

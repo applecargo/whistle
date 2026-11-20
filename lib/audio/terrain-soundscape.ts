@@ -3,26 +3,25 @@ import type { Terrain, Surface } from "../terrain.ts";
 import { SoundscapeManager } from "./soundscape-manager.ts";
 
 /**
- * 지형 표면(Surface) 및 환경 조건에 따라 적절한 컴파일된 WASM 패치 이름을 결정합니다.
- * 예: 풀밭(grass) -> bell01.wasm, 물(water) -> noise_mod.wasm, 암석(stone/rough) -> stone_knock.wasm
+ * 지형 표면(Surface)에 따라 적절한 컴파일된 WASM 패치 이름을 결정합니다.
  */
-export function getPatchForSurface(surface: Surface, waterLevel: number, groundHeight: number): string {
-  if (waterLevel > groundHeight) {
-    return "noise_mod"; // 물 위/수면 타일: 물결/노이즈 패치
-  }
+export function getPatchForSurface(surface: Surface): string {
   switch (surface) {
-    case "grass":
-      return "bell01"; // 풀밭 타일: 벨/풀 사운드 패치
-    case "rough":
     case "plain":
-      return "stone_knock"; // 돌/일반 지면 타일: 스톤 콕 패치
+      return "bell01";
+    case "rough":
+      return "stone_knock";
+    case "slick":
+      return "noise_mod";
+    case "soft":
+      return "simplesine";
     default:
       return "simplesine";
   }
 }
 
 /**
- * 월드 지형(Terrain)의 각 타일을 순회하며 표면 타입(Grass, Water, Stone 등)에 맞는
+ * 월드 지형(Terrain)의 각 타일을 순회하며 표면 타입에 맞는
  * 고유 WASM 패치를 결정하고, SoundscapeManager에 3D 위치 및 거리 컬링 정책과 함께 등록합니다.
  */
 export async function registerWorldTerrainSoundscapes(
@@ -42,17 +41,14 @@ export async function registerWorldTerrainSoundscapes(
     const worldX = toScene(xIndex);
     const worldZ = toScene(zIndex);
     const groundY = tile.height;
-    const waterY = tile.water ?? -1;
 
-    // 표면 타입 및 환경 조건에 따른 WASM 패치 선택
-    const patchName = getPatchForSurface(tile.surface, waterY, groundY);
+    const patchName = getPatchForSurface(tile.surface);
     const patchId = `tile-${xIndex}-${zIndex}-${patchName}`;
 
-    // SoundscapeManager에 등록 (거리 컬링 16m 기본 적용)
     await manager.registerPatch({
       id: patchId,
       patchName,
-      position: { x: worldX, y: Math.max(groundY, waterY), z: worldZ },
+      position: { x: worldX, y: groundY, z: worldZ },
       policy: { type: "distance", radius: cullingRadius },
       initialGain: 0.6,
     });

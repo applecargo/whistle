@@ -227,6 +227,10 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   );
 }
 export const useLanguage = () => useContext(LanguageContext);
+export function userErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  return fallback;
+}
 export function SceneLoading() {
   const { t } = useLanguage();
   return <div className="scene scene-loading" aria-label={t("불러오는 중")} />;
