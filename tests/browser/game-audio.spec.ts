@@ -52,7 +52,7 @@ async function openWorld(page: Page, world: World) {
     ` });
   });
   await page.goto(".");
-  await expect(page.getByRole("button", { name: "공유", exact: true }))
+  await expect(page.getByRole("button", { name: "파일 저장", exact: true }))
     .toHaveAttribute("aria-description", "이 브라우저에 저장됨");
 }
 const probe = (page: Page) => page.evaluate(() => {
@@ -67,24 +67,27 @@ test.afterEach(async ({ page }, info) => {
   }
 });
 
-test("real grid edits reach Pd once with material context; no-op, undo and loading stay silent", async ({ page }) => {
+test("real grid edits reach Pd once with material context; no-op and undo stay silent", async ({ page }) => {
   const world = terrainFixtures().flat;
-  for (const i of [0, 1, 2]) world.terrain!.tiles[i].surface = "soft";
+  for (const i of [1, 2]) world.terrain!.tiles[i].surface = "soft";
+  world.terrain!.tiles[5].height = 6;
   await openWorld(page, world);
   expect((await probe(page)).contexts).toEqual([]);
-  await page.locator('[data-cell="5"]').click();
+  await page.getByRole("button", { name: "높이기", exact: true }).click();
+  await page.locator('[data-cell="5"]').click({ position: { x: 2, y: 2 } });
   expect((await probe(page)).contexts).toEqual([]);
-  await page.getByRole("button", { name: "기호", exact: true }).click();
+  await page.getByRole("button", { name: "번짐", exact: true }).click();
   await page.locator('[data-cell="0"]').click();
   await expect.poll(async () => (await messages(page, "whistle-edit")).length).toBe(1);
-  expect((await messages(page, "whistle-edit"))[0]).toEqual([0.5 / 12, 0.5 / 12, 1, "circle", "add", "soft"]);
+  expect((await messages(page, "whistle-edit"))[0]).toEqual([0.5 / 12, 0.5 / 12, 1, "terrain", "paint", "soft"]);
   await expect.poll(async () => (await probe(page)).peak).toBeGreaterThan(0.005);
-  await page.locator('[data-cell="5"]').click();
+  await page.locator('[data-cell="0"]').click();
   await expect.poll(async () => (await messages(page, "whistle-edit")).length).toBe(2);
   expect((await messages(page, "whistle-edit"))[1][2]).toBe(0);
-  await page.locator('[data-cell="0"]').click();
+  await page.getByRole("button", { name: "거침", exact: true }).click();
+  await page.locator('[data-cell="4"]').click();
   await expect.poll(async () => (await messages(page, "whistle-edit")).length).toBe(3);
-  expect((await messages(page, "whistle-edit"))[2][4]).toBe("remove");
+  expect((await messages(page, "whistle-edit"))[2][5]).toBe("rough");
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
   await expect.poll(async () => (await probe(page)).rms).toBeLessThan(0.0001);
   expect((await messages(page, "whistle-edit")).length).toBe(3);

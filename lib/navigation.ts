@@ -1,6 +1,6 @@
 import type { World } from "./world.ts";
-import type { Structure } from "./terrain.ts";
-import { isHole } from "./tile.ts";
+import { floorHeight, ladderAt, type Structure } from "./terrain.ts";
+import { groundTileHeight, isHole } from "./tile.ts";
 
 export function blocksTerrainStep(
   world: Pick<World, "size" | "terrain">,
@@ -13,11 +13,18 @@ export function blocksTerrainStep(
     const bridge = structures.find(s => s.kind === "bridge" && s.x === x && s.z === z);
     if (bridge) return bridge.height;
     const tile = world.terrain?.tiles[z * world.size + x];
-    return isHole(tile) ? null : tile?.height ?? 0;
+    return isHole(tile) ? null : groundTileHeight(tile);
   };
   const steep = (ax: number, az: number, bx: number, bz: number) => {
     const a = height(ax, az), b = height(bx, bz);
-    return a !== null && b !== null && Math.abs(a - b) > 1;
+    if (a === null || b === null || Math.abs(a-b) <= 1) return false;
+    if (Math.abs(ax-bx)+Math.abs(az-bz) !== 1) return true;
+    const t = ax !== bx ? ((ax+bx)/2-from.x)/(to.x-from.x) : ((az+bz)/2-from.z)/(to.z-from.z);
+    const crossing = ladderAt(structures,from.x+(to.x-from.x)*t,from.z+(to.z-from.z)*t);
+    return !crossing || !(
+      (crossing.x === ax && crossing.z === az && crossing.x+crossing.dx === bx && crossing.z+crossing.dz === bz) ||
+      (crossing.x === bx && crossing.z === bz && crossing.x+crossing.dx === ax && crossing.z+crossing.dz === az)
+    );
   };
   const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.z - from.z) * 10));
   let x = cell(from.x), z = cell(from.z);
@@ -32,6 +39,13 @@ export function blocksTerrainStep(
     z = nz;
   }
   return false;
+}
+
+export function blocksWalkingStep(world: World, from: {x: number; z: number}, to: {x: number; z: number}, structures: Structure[]) {
+  if (blocksTerrainStep(world,from,to,structures)) return true;
+  const ladder = ladderAt(structures,from.x,from.z);
+  if (ladder && ladderAt(structures,to.x,to.z) === ladder) return false;
+  return blocksGroundStep(floorHeight(world,from.x,from.z,structures),floorHeight(world,to.x,to.z,structures),Math.hypot(to.x-from.x,to.z-from.z));
 }
 
 

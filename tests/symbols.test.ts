@@ -142,7 +142,11 @@ test("discovery lights stay above grass and water and never require a ground mar
   f.tick(.1);assert.ok(f.light.getWorldPosition(new f.THREE.Vector3()).y>=1.7);
   assert.equal(f.model.getObjectByName("mark"),undefined);
   f.frame.environment.cells[i].grass=0;
-  f.frame.environment.cells[i].water=2;
+  for (let z = 8; z <= 10; z++) for (let x = 5; x <= 7; x++)
+    f.world.terrain!.tiles[z*f.world.size+x] = { height: 3, surface: "plain" };
+  f.world.terrain!.tiles[i] = { height: 2, surface: "slick" };
+  const { deriveEnvironment } = await import("../lib/environment.ts");
+  f.frame.environment = deriveEnvironment(f.world);
   f.tick(.1);assert.ok(f.light.getWorldPosition(new f.THREE.Vector3()).y>3);
 });
 test("screen-center tapping reaches the nearby touch content and toggles its rendered size",async()=>{
@@ -151,4 +155,109 @@ test("screen-center tapping reaches the nearby touch content and toggles its ren
   f.experience.tap(100,100,bounds);f.tick(.5);assert.ok(f.picture.scale.x>1.3);
   f.experience.tap(100,100,bounds);f.tick(.5);assert.ok(f.picture.scale.x<1.02);
   f.frame.grounded=false;f.tick(.1);f.experience.tap(100,100,bounds);f.tick(.5);assert.ok(f.picture.scale.x<1.02);
+});
+
+test("six-cell clusters generate symbols while smaller patches stay sparse", async () => {
+  const { deriveSymbolSites } = await import("../lib/symbol-sites.ts");
+  const { flatTerrain } = await import("../lib/terrain.ts");
+  const { deriveEnvironment } = await import("../lib/environment.ts");
+  const world = starterWorld(); world.objects = []; world.terrain = flatTerrain(world.size);
+  for (const i of [13, 14, 15, 49, 50, 51]) world.terrain.tiles[i].surface = "soft";
+  assert.equal(deriveSymbolSites(world, deriveEnvironment(world)).length, 0);
+  world.terrain.tiles.forEach(tile => { tile.surface = "plain"; });
+  for (let z = 1; z <= 2; z++) for (let x = 1; x <= 3; x++) world.terrain.tiles[z * world.size + x].surface = "soft";
+  const sites = deriveSymbolSites(world, deriveEnvironment(world));
+  assert.equal(sites.filter(s => s.kind === "cluster").length, 1);
+  assert.deepEqual(sites, deriveSymbolSites(world, deriveEnvironment(world)));
+  world.terrain.tiles[9 * world.size + 9].height = 1;
+  assert.equal(deriveSymbolSites(world, deriveEnvironment(world)).filter(s => s.kind === "peak").length, 0);
+  world.terrain.tiles[9 * world.size + 9].height = 2;
+  const both = deriveSymbolSites(world, deriveEnvironment(world));
+  assert.equal(both.filter(s => s.kind === "peak").length, 1);
+  assert.ok(both.length <= 3);
+  for (const a of both) for (const b of both) if (a !== b) assert.ok(Math.hypot(a.x - b.x, a.z - b.z) >= 3);
+});
+
+test("filled sites retain their coordinates and content through expansion, removal and serialization", async () => {
+  const { deriveSymbolSites, siteAsset, SITE_TYPES } = await import("../lib/symbol-sites.ts");
+  const { flatTerrain } = await import("../lib/terrain.ts");
+  const { deriveEnvironment } = await import("../lib/environment.ts");
+  const { validateWorld } = await import("../lib/world.ts");
+  const world = starterWorld(); world.objects = []; world.terrain = flatTerrain(world.size);
+  for (let z = 2; z <= 4; z++) for (let x = 2; x <= 4; x++) world.terrain.tiles[z * world.size + x].surface = "soft";
+  const site = deriveSymbolSites(world, deriveEnvironment(world))[0];
+  const asset = { ...siteAsset(site, "saved-site"), image: "data:image/png;base64,YQ==" };
+  world.assets.push(asset);
+  world.objects.push({ id: "filled", asset: asset.id, x: site.x, z: site.z, scale: 1, rotation: 0,
+    site: { kind: site.kind, cells: site.cells, height: 0 } });
+  const original = structuredClone(world.objects[0]);
+  for (let z = 1; z <= 5; z++) for (let x = 1; x <= 5; x++) world.terrain.tiles[z * world.size + x].surface = "soft";
+  assert.equal(deriveSymbolSites(world, deriveEnvironment(world)).filter(s => s.kind === "cluster").length, 0);
+  world.terrain.tiles.forEach(tile => { tile.surface = "plain"; });
+  assert.deepEqual(validateWorld(JSON.parse(JSON.stringify(world))).objects[0], original);
+  assert.equal(world.assets.find(a => a.id === asset.id)?.image, asset.image);
+  assert.equal(SITE_TYPES.cluster.media, "image");
+  assert.equal(SITE_TYPES.peak.media, "text");
+  assert.equal(SITE_TYPES.boundary.media, "text");
+  const invalid = structuredClone(world); invalid.objects[0].site!.cells = [9999];
+  assert.throws(() => validateWorld(invalid));
+});
+
+import { contentOpacity, floatingPose } from "../lib/content-display.ts";
+test("content fades with distance or a slow cycle, with a steady reduced-motion fallback", () => {
+  assert.equal(contentOpacity("nearby", 10, 0, 0), 0);
+  assert.equal(contentOpacity("nearby", 3, 0, 0), 1);
+  assert.equal(contentOpacity("nearby", 6.5, 0, 0), .5);
+  assert.equal(contentOpacity("pulse", 0, 2.5, 0), 1);
+  assert.equal(contentOpacity("pulse", 0, 7.5, 0), 0);
+  assert.equal(contentOpacity("pulse", 0, 7.5, 0, true), 1);
+  assert.equal(contentOpacity("steady", 100, 0, 0), 1);
+});
+
+import * as THREE from "three";
+import { makeContentPresentation } from "../components/whistle/ContentPresentation.ts";
+test("surface fading changes the coating and decal while leaving terrain geometry opaque", () => {
+  const world = starterWorld();
+  const actor = createSimulation(world).actors[0];
+  const asset = { ...world.assets.find(a => a.id === actor.asset)!, display: "nearby" as const, placement: "surface" as const };
+  const model = new THREE.Group(), terrain = new THREE.Group();
+  const decal = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial({ transparent: true }));
+  model.userData.surface = true; model.add(decal);
+  const grass = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshStandardMaterial());
+  grass.userData.placementId = actor.id;
+  grass.material.userData.surfaceProjection = { opacity: { value: 1 } };
+  terrain.add(grass);
+  const presentation = makeContentPresentation(), camera = new THREE.PerspectiveCamera();
+  presentation.sync([actor], new Map([[actor.id, asset]]), new Map([[actor.id, model]]), terrain);
+  camera.position.set(100, 2, 100);
+  presentation.update(camera, world.size, 0, false, false);
+  assert.equal(decal.material.opacity, 0);
+  assert.equal(grass.material.userData.surfaceProjection.opacity.value, 0);
+  assert.equal(grass.material.opacity, 1);
+  presentation.update(camera, world.size, 0, true, false);
+  assert.equal(decal.material.opacity, 1);
+  assert.equal(grass.material.userData.surfaceProjection.opacity.value, 1);
+  decal.geometry.dispose(); decal.material.dispose(); grass.geometry.dispose(); grass.material.dispose();
+});
+
+test("floating content stays higher and drifts gently without movement under reduced motion", () => {
+  const poses = Array.from({ length: 120 }, (_, i) => floatingPose(i / 4, 1.2));
+  assert.ok(poses.every(pose => pose.y >= 2.55 && pose.y <= 3.25 && Math.abs(pose.x) <= .16));
+  assert.ok(Math.max(...poses.map(pose => pose.y)) - Math.min(...poses.map(pose => pose.y)) > .45);
+  assert.deepEqual(floatingPose(0, 1.2, true), floatingPose(7, 1.2, true));
+  assert.equal(floatingPose(0, 0, true).y, 2.9);
+});
+
+test("short interfaces do not create a boundary; extended interfaces do, until filled slots reach the cap", async () => {
+  const { deriveSymbolSites } = await import("../lib/symbol-sites.ts");
+  const { flatTerrain } = await import("../lib/terrain.ts");
+  const { deriveEnvironment } = await import("../lib/environment.ts");
+  const world = starterWorld(); world.objects = []; world.terrain = flatTerrain(world.size);
+  for (let z = 1; z <= 3; z++) for (let x = 1; x <= 10; x++) world.terrain.tiles[z * world.size + x].surface = x <= 5 ? "soft" : "rough";
+  assert.ok(!deriveSymbolSites(world, deriveEnvironment(world)).some(site => site.kind === "boundary"));
+  for (let z = 4; z <= 4; z++) for (let x = 1; x <= 10; x++) world.terrain.tiles[z * world.size + x].surface = x <= 5 ? "soft" : "rough";
+  assert.ok(deriveSymbolSites(world, deriveEnvironment(world)).some(site => site.kind === "boundary"));
+  world.assets[0].image = "data:image/png;base64,YQ==";
+  world.objects = [1, 5, 9].map(x => ({ id: `filled-${x}`, asset: world.assets[0].id, x, z: 10, scale: 1, rotation: 0 }));
+  assert.deepEqual(deriveSymbolSites(world, deriveEnvironment(world)), []);
 });

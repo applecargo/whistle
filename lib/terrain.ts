@@ -1,4 +1,4 @@
-import { isHole } from "./tile.ts";
+import { groundTileHeight, isHole } from "./tile.ts";
 import type { World, Placed } from "./world.ts";
 import { carveWaterBed } from "./water.ts";
 export type Surface = "plain" | "rough" | "slick" | "soft";
@@ -24,10 +24,10 @@ export const SURFACES: {
   color: string;
   speed: number;
 }[] = [
-  { id: "plain", name: "단단한 바닥", color: "#ffffff", speed: 1 },
-  { id: "rough", name: "거친 바닥", color: "#ffffff", speed: 0.72 },
-  { id: "slick", name: "미끄러운 바닥", color: "#ffffff", speed: 1.2 },
-  { id: "soft", name: "부드러운 바닥", color: "#ffffff", speed: 0.62 },
+  { id: "plain", name: "빈 타일", color: "#ffffff", speed: 1 },
+  { id: "rough", name: "거침", color: "#ffffff", speed: 0.72 },
+  { id: "slick", name: "흐름", color: "#ffffff", speed: 1.2 },
+  { id: "soft", name: "번짐", color: "#ffffff", speed: 0.62 },
 ];
 export const LEVEL = 1.05;
 export function randomSequence(seed: number) {
@@ -48,7 +48,7 @@ export function flatTerrain(size: number): Terrain {
     patterns: { stairs: true, bridge: true, canopy: true },
   };
 }
-export function generateTerrain(size: number, seed: number): Terrain {
+function generateTerrainBase(size: number, seed: number): Terrain {
   const random = randomSequence(seed),
     terrain = flatTerrain(size);
   terrain.seed = seed;
@@ -80,13 +80,28 @@ export function generateTerrain(size: number, seed: number): Terrain {
   return terrain;
 }
 
+export function generateTerrain(size: number, seed: number): Terrain {
+  const terrain = generateTerrainBase(size, seed);
+  for (let i = 0; i < terrain.tiles.length; i++) {
+    if (terrain.tiles[i].surface !== "slick") continue;
+    const x = i % size, z = Math.floor(i / size);
+    for (let dz = -1; dz <= 1; dz++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const xx = x + dx, zz = z + dz;
+        if (xx >= 0 && zz >= 0 && xx < size && zz < size)
+          terrain.tiles[zz * size + xx].height = 0;
+      }
+  }
+  return terrain;
+}
+
 export function upgradeTerrain(world: World): World {
   const terrain = world.terrain;
   if (!terrain || terrain.generatorVersion === 2) return world;
   const next = structuredClone(world),
     t = next.terrain!;
   t.generatorVersion = 2;
-  const baseline = generateTerrain(world.size, terrain.seed);
+  const baseline = generateTerrainBase(world.size, terrain.seed);
   const x = Math.floor(world.size / 2),
     crossing = Math.floor(world.size / 2) - 1;
   const strip = Array.from(
@@ -151,29 +166,51 @@ export function deriveStructures(
     if (!structures.some((s) => s.key === key))
       structures.push({ kind, x, z, height, dx, dz, key });
   };
-  if (patterns.stairs)
+  if (patterns.stairs) {
+    const directions = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    const regions = new Int32Array(world.size * world.size).fill(-1);
+    for (let start = 0; start < regions.length; start++) {
+      const tile = tileAt(world, start % world.size, Math.floor(start / world.size))!;
+      if (regions[start] !== -1 || isHole(tile) || tile.surface === "slick") continue;
+      regions[start] = start;
+      const pending = [start];
+      for (let i = 0; i < pending.length; i++) {
+        const x = pending[i] % world.size, z = Math.floor(pending[i] / world.size);
+        for (const [dx, dz] of directions) {
+          const next = tileAt(world, x + dx, z + dz);
+          const index = (z + dz) * world.size + x + dx;
+          if (!next || isHole(next) || next.surface === "slick" ||
+              next.height !== tile.height || regions[index] !== -1) continue;
+          regions[index] = start;
+          pending.push(index);
+        }
+      }
+    }
+    const routes = new Map<string, { x: number; z: number }[]>();
     for (let z = 0; z < world.size; z++)
       for (let x = 0; x < world.size; x++) {
         const tile = tileAt(world, x, z)!;
-        if (isHole(tile) || tile.surface !== "plain") continue;
-        for (const [dx, dz] of [
-          [0, -1],
-          [1, 0],
-          [0, 1],
-          [-1, 0],
-        ]) {
+        if (isHole(tile) || tile.surface === "slick") continue;
+        for (const [dx, dz] of directions) {
           const next = tileAt(world, x + dx, z + dz);
           if (
             next && !isHole(next) &&
-            next.height === tile.height + 1 &&
-            next.surface === tile.surface
+            next.height >= tile.height + 2 &&
+            next.surface !== "slick"
           ) {
+            const route = `${regions[z * world.size + x]}:${regions[(z + dz) * world.size + x + dx]}`;
+            const nearby = routes.get(route) ?? [];
+            const center = { x: x + dx / 2, z: z + dz / 2 };
+            if (nearby.some(s => Math.hypot(s.x - center.x, s.z - center.z) < 3)) continue;
             add("stairs", x, z, tile.height, dx, dz);
+            nearby.push(center);
+            routes.set(route, nearby);
             break;
           }
         }
       }
-  const active = objects.filter((o) => !o.removed),
+  }
+  const active = objects.filter((o) => !o.removed && !world.assets.find(a => a.id === o.asset)?.sound),
     byCell = new Map(active.map((o) => [`${o.x},${o.z}`, o]));
   for (const a of active) {
     const tile = tileAt(world, a.x, a.z);
@@ -226,6 +263,7 @@ export function terrainSample(
   world: Pick<World, "size" | "terrain">,
   x: number,
   z: number,
+  carve = true,
 ) {
   const smooth = (t: number) => t * t * (3 - 2 * t);
   const fx = Math.floor(x),
@@ -264,7 +302,7 @@ export function terrainSample(
       voidAmount += w * rim;
       continue;
     }
-    elevation += tile.height * LEVEL * w;
+    elevation += groundTileHeight(tile) * LEVEL * w;
     coverage += w;
     weights[tile.surface] += w;
   }
@@ -276,19 +314,22 @@ export function terrainSample(
   const variation =
     Math.sin(x * 2.31 + z * 1.17) * Math.sin(z * 3.13 - x * 0.73);
   elevation += variation * 0.045 * (weights.soft + weights.rough);
-  elevation = carveWaterBed(world, x, z, elevation, LEVEL);
+  let naturalHeight = elevation;
+  if (carve) elevation = carveWaterBed(world, x, z, elevation, LEVEL);
 
 
   const outside = Math.max(0, -0.5 - x, -0.5 - z, x - (world.size - 0.5), z - (world.size - 0.5));
   if (outside > 0) {
     const reach = 5.5 + 1.2 * Math.sin(x * .43 + z * .31);
     const fade = smooth(Math.min(1, outside / reach));
-    elevation = elevation * (1 - fade)
-      + Math.sin(x * .61 + z * .27) * Math.cos(z * .49 - x * .19) * .45 * fade * (1 - fade);
+    const relief = Math.sin(x * .61 + z * .27) * Math.cos(z * .49 - x * .19) * .45 * fade * (1 - fade);
+    elevation = elevation * (1 - fade) + relief;
+    naturalHeight = naturalHeight * (1 - fade) + relief;
     voidAmount *= 1 - smooth(Math.min(1, outside / 1.5));
   }
   return {
     height: elevation,
+    naturalHeight,
     coverage: Math.max(0, Math.min(1, 1 - voidAmount)),
     weights,
   };
@@ -320,4 +361,13 @@ export function floorHeight(
   if (bridge) return bridge.height * LEVEL;
   const sample = terrainSample(world, x, z);
   return sample.coverage >= 0.5 ? sample.height : null;
+}
+
+export function ladderAt(structures: Structure[], x: number, z: number) {
+  return structures.find(s => {
+    if (s.kind !== "stairs") return false;
+    const along = (x-s.x)*s.dx+(z-s.z)*s.dz;
+    const across = (x-s.x)*s.dz-(z-s.z)*s.dx;
+    return along >= 0 && along <= 1 && Math.abs(across) <= .15;
+  });
 }

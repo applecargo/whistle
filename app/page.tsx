@@ -10,7 +10,6 @@ import {
   uid,
   type World,
   type Asset,
-  type Placed,
   type Player,
   type Event,
   type Simulation,
@@ -19,25 +18,23 @@ import { isHole, type TerrainTool } from "@/lib/tile";
 import { downloadWorld } from "@/lib/sharing";
 import { createTerrainWorld } from "@/lib/create-world";
 import { useWorldDocument } from "@/components/whistle/useWorldDocument";
+import { SoundMaker } from "@/components/whistle/SoundMaker";
+import { contentKind, contentLimitMessage, MAX_CONTENT_COUNT, validateContentCounts } from "@/lib/content-limits";
 import { useGameAudio } from "@/components/whistle/useGameAudio";
 import { editSound } from "@/lib/audio/game-parameters";
 import { useWorldPersistence } from "@/components/whistle/useWorldPersistence";
-import { WeatherControls } from "@/components/whistle/WeatherControls";
+import { useLiveWorldPublisher } from "@/components/whistle/useLiveWorldPublisher";
 import { EditorToolbar } from "@/components/whistle/EditorToolbar";
 import { EditorPalette } from "@/components/whistle/EditorPalette";
 import { EditorBoard } from "@/components/whistle/EditorBoard";
 import { PlayControls } from "@/components/whistle/PlayControls";
 import {
-  generateTerrain,
   tileAt,
   type Surface,
 } from "@/lib/terrain";
-import { ObjectArt } from "@/components/whistle/Art";
 import {
   Dialog,
   AssetMaker,
-  ShareDialog,
-  SizeOptions,
 } from "@/components/whistle/Dialogs";
 const LazyScene = lazy(() => import("@/components/whistle/Scene"));
 function Scene(props: ComponentProps<typeof LazyScene>) {
@@ -46,8 +43,9 @@ function Scene(props: ComponentProps<typeof LazyScene>) {
 export default function Home() {
   const { t } = useLanguage();
   const initialWorld = useMemo(starterWorld, []);
-  const [selectedAsset, setSelectedAsset] = useState("circle"),
-    [selected, setSelected] = useState<string | null>(null),
+  const [selected, setSelected] = useState<string | null>(null),
+    [placingAsset, setPlacingAsset] = useState<string | null>(null),
+    [contentType, setContentType] = useState<"image" | "text" | "sound">("image"),
     [placingStart, setPlacingStart] = useState(false);
   const [simulation, setSimulation] = useState<Simulation>(() =>
       createSimulation(initialWorld),
@@ -57,7 +55,6 @@ export default function Home() {
     [toast, setToast] = useState(""),
     [showMaker, setShowMaker] = useState(false),
     [editingAsset, setEditingAsset] = useState<Asset | undefined>(),
-    [share, setShare] = useState(false),
     [newDialog, setNewDialog] = useState(false),
     [playKey, setPlayKey] = useState(0);
   const makeButton = useRef<HTMLButtonElement>(null);
@@ -76,8 +73,7 @@ export default function Home() {
     };
   }, [playing]);
   const [movementMode, setMovementMode] = useState<"walk" | "crouch">("walk");
-  const [layer, setLayer] = useState<"tiles" | "symbols">("tiles"),
-    [surface, setSurface] = useState<Surface>("plain"),
+  const [surface, setSurface] = useState<Surface>("soft"),
     [terrainTool, setTerrainTool] = useState<TerrainTool>("surface");
   const simulationRef = useRef(simulation),
     player = useRef<Player>({ ...initialWorld.start, yaw: 0 }),
@@ -91,7 +87,7 @@ export default function Home() {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(""), 4200);
   }, []);
-  const audio = useGameAudio(notify);
+  const audio = useGameAudio();
   const resetSimulation = useCallback((w: World) => {
     audio.reset();
     const next = createSimulation(w);
@@ -109,27 +105,42 @@ export default function Home() {
     () => deriveWorld(world, simulation.actors),
     [deriveWorld, world, simulation.actors],
   );
-  useEffect(() => {
-    if (!world.assets.some((a) => a.id === selectedAsset)) {
-      setSelectedAsset(world.assets[0]?.id ?? "");
-      setPlacingStart(false);
+  const symbols = world.assets.filter(asset => asset.image || asset.text?.trim() || asset.sound);
+  const nextSoundName = String(Math.max(0, ...world.assets.filter(a => a.sound && /^[1-9]\d{0,5}$/.test(a.name)).map(a => Number(a.name))) + 1);
+  const activeAsset = symbols.find(asset => asset.id === placingAsset)?.id ?? null;
+  const createSymbol = (type: "image" | "text" | "sound") => {
+    if (world.assets.filter(asset => contentKind(asset) === type).length >= MAX_CONTENT_COUNT) {
+      notify(contentLimitMessage[type]); return;
     }
-  }, [world.assets, selectedAsset]);
+    setPlacingStart(false); setSelected(null); setEditingAsset(undefined);
+    setContentType(type); setShowMaker(true);
+  };
+  const editSymbol = (asset: Asset, objectId: string | null = null) => {
+    setPlacingStart(false); setSelected(objectId);
+    const shared = objectId && world.objects.some(object => object.id !== objectId && object.asset === asset.id);
+    setEditingAsset({ ...asset, id: shared ? uid() : asset.id, ...(shared && asset.sound ? { name: "" } : {}) });
+    setContentType(asset.sound ? "sound" : asset.text !== undefined ? "text" : "image");
+    setShowMaker(true);
+  };
+  const openSymbolAt = (i: number, objectId?: string) => {
+    const object = world.objects.filter(object => object.x === i % world.size && object.z === Math.floor(i / world.size) && (!objectId || object.id === objectId)).at(-1);
+    const asset = world.assets.find(asset => asset.id === object?.asset);
+    if (object && asset && (asset.image || asset.text?.trim() || asset.sound)) editSymbol(asset, object.id);
+  };
   const handleLoad = useCallback((incoming: World, beforeUpgrade: World) => {
     audio.stop();
     loadDocument(incoming, beforeUpgrade);
-    setSelectedAsset(incoming.assets[0].id);
-    setSelected(null);
+    setSelected(null); setPlacingAsset(null); setShowMaker(false);
     setPlaying(false);
   }, [audio, loadDocument]);
   const handleImport = useCallback((imported: World) => {
     updateWorld(imported);
-    setSelectedAsset(imported.assets[0].id);
-    setSelected(null);
+    setSelected(null); setPlacingAsset(null); setShowMaker(false);
   }, [updateWorld]);
-  const { saveStatus, resumeAutosave, importFile: loadFile } = useWorldPersistence({
+  const { ready, saveStatus, resumeAutosave, importFile: loadFile } = useWorldPersistence({
     world, onLoad: handleLoad, onImport: handleImport, notify,
   });
+  useLiveWorldPublisher(world, ready);
   const reset = useCallback((w: World = getWorld()) => {
     resetSimulation(w);
   }, [getWorld, resetSimulation]);
@@ -191,7 +202,7 @@ export default function Home() {
     const existing = world.objects.find((o) => o.x === x && o.z === z);
     if (placingStart) {
       if (!tileAt(world, x, z) || isHole(tileAt(world, x, z))) {
-        notify("시작점에는 바닥이 필요해요.");
+        notify("시작점에는 바닥이 필요합니다.");
         return;
       }
       if (
@@ -207,33 +218,6 @@ export default function Home() {
       setPlacingStart(false);
       return;
     }
-    if (existing) {
-      change((w) => {
-        w.objects = w.objects.filter((o) => o.id !== existing.id);
-      });
-      setSelected(null);
-      return;
-    }
-    const asset = world.assets.find((a) => a.id === selectedAsset);
-    if (!asset) return;
-    if (world.objects.length >= 250) {
-      notify("최대 250개");
-      return;
-    }
-    if (asset.solid && x === world.start.x && z === world.start.z) {
-      notify("시작점이 막혀 있습니다.");
-      return;
-    }
-    change((w) => {
-      w.objects.push({
-        id: uid(),
-        asset: asset.id,
-        x,
-        z,
-        rotation: 0,
-        scale: asset.defaultScale ?? 1,
-      });
-    });
   };
   const paint = (cells: number[], erase: boolean) => {
     if (placingStart) {
@@ -242,54 +226,52 @@ export default function Home() {
       return;
     }
     const before = getWorld();
-    paintDocument(cells, erase, { layer, surface, terrainTool, selectedAsset });
+    const kind = contentKind(before.assets.find(a => a.id === activeAsset));
+    if (!erase && kind) {
+      const count = before.objects.filter(o => contentKind(before.assets.find(a => a.id === o.asset)) === kind).length;
+      const added = cells.filter(i => !before.objects.some(o => o.asset === activeAsset && o.x === i % before.size && o.z === Math.floor(i / before.size))).length;
+      if (count + added > MAX_CONTENT_COUNT) notify(contentLimitMessage[kind]);
+    }
+    paintDocument(cells, erase, { layer: activeAsset ? "symbols" : "tiles", assetId: activeAsset ?? undefined, surface, terrainTool });
     const after = getWorld();
     if (before !== after) {
       const sound = editSound(before, after, cells, deriveWorld(after));
       if (sound) audio.edit(sound);
     }
   };
-  const reroll = () =>
-    change((w) => {
-      w.terrain = generateTerrain(
-        w.size,
-        crypto.getRandomValues(new Uint32Array(1))[0],
-      );
-      w.terrain.tiles[w.start.z * w.size + w.start.x] = {
-        height: 0,
-        surface: "plain",
-      };
-    });
-  const selectedObject = world.objects.find((o) => o.id === selected),
-    chosenAsset = world.assets.find((a) => a.id === selectedObject?.asset);
-  const patchObject = (patch: Partial<Placed>) =>
-    change((w) => {
-      const o = w.objects.find((o) => o.id === selected);
-      if (o) Object.assign(o, patch);
-    });
   const saveAsset = (asset: Asset) => {
-    if (!editingAsset && world.assets.length >= 40) {
-      notify("첫 버전에서는 사물을 40종류까지 만들 수 있어요.");
-      return;
+    if ((!asset.image && !asset.sound) || (contentType === "text" && !asset.text?.trim())) return;
+    if (asset.sound) {
+      asset = { ...asset, name: asset.name.trim().slice(0, 12) || nextSoundName };
     }
-    change((w) => {
-      const index = w.assets.findIndex((a) => a.id === asset.id);
-      if (
-        index >= 0 &&
-        (w.assets[index].defaultScale ?? 1) !== (asset.defaultScale ?? 1)
-      ) {
-        for (const object of w.objects) {
-          if (object.asset === asset.id) object.scale = asset.defaultScale ?? 1;
-        }
+    change(w => {
+      const index = w.assets.findIndex(a => a.id === asset.id);
+      if (index >= 0) w.assets[index] = { ...asset, glyphColor: w.assets[index].glyphColor };
+      else w.assets.push({ ...asset, glyphColor: undefined });
+      const object = w.objects.find(o => o.id === selected);
+      if (object) { object.asset = asset.id; object.scale = asset.defaultScale ?? 1; }
+      else if (editingAsset) {
+        for (const placed of w.objects) if (placed.asset === asset.id) placed.scale = asset.defaultScale ?? 1;
       }
-      if (index >= 0) w.assets[index] = asset;
-      else w.assets.push(asset);
+      validateContentCounts(w);
     });
-    setSelectedAsset(asset.id);
-    setLayer("symbols");
-    setPlacingStart(false);
-    setShowMaker(false);
-    setEditingAsset(undefined);
+    setShowMaker(false); setEditingAsset(undefined); setSelected(null); setPlacingAsset(asset.id);
+  };
+  const saveFile = () => {
+    try { downloadWorld(world); }
+    catch { notify("저장할 수 없습니다."); }
+  };
+  const deleteSymbol = () => {
+    if (!editingAsset) return;
+    change(w => {
+      if (selected) w.objects = w.objects.filter(o => o.id !== selected);
+      else {
+        w.objects = w.objects.filter(o => o.asset !== editingAsset.id);
+        w.assets = w.assets.filter(a => a.id !== editingAsset.id);
+        w.rules = w.rules.filter(r => ![r.subject, r.source, r.replacement].includes(editingAsset.id));
+      }
+    });
+    setShowMaker(false); setEditingAsset(undefined); setSelected(null); setPlacingAsset(null);
   };
   const importFile = async (f?: File) => {
     if (!f) return;
@@ -303,8 +285,7 @@ export default function Home() {
     const next = createTerrainWorld();
     updateWorld(next);
     resumeAutosave();
-    setSelected(null);
-    setSelectedAsset(next.assets[0].id);
+    setSelected(null); setPlacingAsset(null); setPlacingStart(false);
     setNewDialog(false);
   };
   return (
@@ -317,7 +298,7 @@ export default function Home() {
         onExit={exit}
         onNew={() => setNewDialog(true)}
         onImport={() => file.current?.click()}
-        onShare={() => setShare(true)}
+        onSave={saveFile}
       />
       {playing && (
         <section className="play-shell">
@@ -328,12 +309,12 @@ export default function Home() {
             derivation={derivation}
             mode="play"
             onPlayer={(p) => (player.current = p)}
-            onAudioFrame={audio.movement}
+            onAudioFrame={frame => audio.movement(frame, getWorld(), simulationRef.current.actors, derivation.environment)}
             controls={controls}
             onControlsReset={() => setMovementMode("walk")}
           />
           <button className="play-return" aria-label={t("만들기로 돌아가기")} onClick={exit}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle className="return-outline" cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="8" /></svg>
           </button>
           <div className="crosshair" />
           <PlayControls
@@ -350,60 +331,34 @@ export default function Home() {
       )}
         <div className="workspace" hidden={playing}>
           <EditorPalette
-            assets={world.assets}
-            weather={world.weather}
-            layer={layer}
-            surface={surface}
-            terrainTool={terrainTool}
-            selectedAsset={selectedAsset}
-            placingStart={placingStart}
-            onSelectLayer={(next) => {
-              setLayer(next);
-              setPlacingStart(false);
-            }}
-            onSelectSurface={(next) => {
-              setLayer("tiles");
-              setPlacingStart(false);
-              setSurface(next);
-              setTerrainTool("surface");
-            }}
-            onSelectTerrainTool={(next) => {
-              setLayer("tiles");
-              setPlacingStart(false);
-              setTerrainTool(next);
-            }}
-            onReroll={reroll}
-            onWeatherChange={(weather) => change((w) => { w.weather = weather; })}
-            onEditAsset={(asset) => {
-              setLayer("symbols");
-              setSelectedAsset(asset.id);
-              setSelected(null);
-              setPlacingStart(false);
-              setEditingAsset(asset);
-              setShowMaker(true);
-            }}
-            onToggleStart={() => {
-              setLayer("symbols");
-              setPlacingStart(!placingStart);
-            }}
+            weather={world.weather} timeOfDay={world.timeOfDay} surface={surface} terrainTool={terrainTool} placingStart={placingStart}
+            symbols={symbols} selectedSymbol={activeAsset ?? undefined}
+            onSelectSurface={next => { setPlacingStart(false); setPlacingAsset(null); setSurface(next); setTerrainTool("surface"); }}
+            onSelectTerrainTool={next => { setPlacingStart(false); setPlacingAsset(null); setTerrainTool(next); }}
+            onTimeOfDayChange={timeOfDay => change(w => { w.timeOfDay = timeOfDay; })}
+            onWeatherChange={weather => change(w => { w.weather = weather; })}
+            onCreateSymbol={createSymbol}
+            onSelectSymbol={id => { setPlacingStart(false); setPlacingAsset(activeAsset === id ? null : id); }}
+            onEditSymbol={id => { const asset = world.assets.find(asset => asset.id === id); if (asset) editSymbol(asset); }}
+            onToggleStart={() => { setPlacingAsset(null); setPlacingStart(!placingStart); }}
           />
           <EditorBoard
             world={world}
             actors={simulation.actors}
             derivation={derivation}
             feedback={feedback}
-            canHold={layer === "symbols" && !placingStart}
+            placingAsset={activeAsset}
+            onOpenSymbol={openSymbolAt}
+            placingStart={placingStart}
+            canHold={!placingStart}
             canUndo={canUndo}
             canRedo={canRedo}
             onPaint={paint}
             onEnd={endStroke}
-            onSelectObject={setSelected}
             onUndo={undo}
             onRedo={redo}
           />
           <aside className="preview-panel" aria-label={t("배치 결과")}>
-            <WeatherControls className="weather-mobile" value={world.weather}
-              onChange={(weather) => change((w) => { w.weather = weather; })} />
             <div className="live-preview">
               {!playing && <Scene
                 world={world}
@@ -412,7 +367,7 @@ export default function Home() {
                 mode="overview"
                 feedback={feedback}
               />}
-              <button onClick={enter} aria-label={t("세계에 들어가기")}>
+              <button onClick={enter} aria-label={t("들어가기")}>
                 <span aria-hidden="true">↗</span>
               </button>
             </div>
@@ -425,60 +380,30 @@ export default function Home() {
         hidden
         onChange={(e) => void importFile(e.target.files?.[0])}
       />
-      {selectedObject && chosenAsset && !showMaker && (
-        <Dialog title={chosenAsset.name} onClose={() => setSelected(null)}>
-          <div className="placement-settings">
-            <button
-              className="asset-link"
-              onClick={() => {
-                setEditingAsset(chosenAsset);
-                setShowMaker(true);
-              }}
-            >
-              {chosenAsset.image ? (
-                <img src={chosenAsset.image} alt="" />
-              ) : (
-                <ObjectArt asset={chosenAsset} />
-              )}
-              {t("이미지")}
-            </button>
-            <button
-              aria-label={t("회전")}
-              onClick={() =>
-                patchObject({ rotation: (selectedObject.rotation + 90) % 360 })
-              }
-            >
-              ↻ {selectedObject.rotation}°
-            </button>
-            <SizeOptions
-              value={selectedObject.scale}
-              onChange={(scale) => patchObject({ scale })}
-            />
-          </div>
-        </Dialog>
-      )}
-      {showMaker && (
+      {showMaker && contentType === "sound" && <SoundMaker
+        asset={editingAsset} defaultName={nextSoundName} onSave={saveAsset}
+        placement={!!selected}
+        onDelete={editingAsset ? deleteSymbol : undefined}
+        onClose={() => { setShowMaker(false); setEditingAsset(undefined); setSelected(null); }}
+      />}
+      {showMaker && contentType !== "sound" && (
         <AssetMaker
           asset={editingAsset}
+          contentType={contentType}
           onSave={saveAsset}
+          placement={!!selected}
+          onDelete={editingAsset ? deleteSymbol : undefined}
           onClose={() => {
             setShowMaker(false);
-            setEditingAsset(undefined);
+            setEditingAsset(undefined); setSelected(null);
           }}
-        />
-      )}
-      {share && (
-        <ShareDialog
-          world={world}
-          onClose={() => setShare(false)}
-          onToast={notify}
         />
       )}
       {newDialog && (
         <Dialog title={t("다시 시작")} onClose={() => setNewDialog(false)}>
-          <p>{t("지금 만든 세계를 지우고 새로 시작할까요?")}</p>
+          <p>{t("현재 작업이 삭제됩니다.")}</p>
           <div className="new-actions">
-            <button onClick={() => downloadWorld(world)}>
+            <button onClick={saveFile}>
               {t("현재 파일 저장")}
             </button>
             <button className="primary" onClick={newWorld}>
@@ -489,8 +414,8 @@ export default function Home() {
       )}
       {saveStatus.includes("부족") && (
         <div className="save-error" role="alert">
-          {t("저장 공간 부족")}{" "}
-          <button onClick={() => downloadWorld(world)}>{t("파일 저장")}</button>
+          {t("저장 공간이 부족합니다.")}{" "}
+          <button onClick={saveFile}>{t("파일 저장")}</button>
         </div>
       )}
       {toast && (

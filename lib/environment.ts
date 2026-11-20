@@ -1,4 +1,6 @@
-import { isHole } from "./tile.ts";
+import { limitEffectAreas } from "./effect-limits.ts";
+import { applyTileEffects, tileEffectDefaults } from "./tile-effects.ts";
+import { groundTileHeight, isHole } from "./tile.ts";
 import type { World } from "./world.ts";
 import { isWaterTile, WATER_INSET, waterLevelAt } from "./water.ts";
 import {
@@ -8,7 +10,7 @@ import {
   type Structure,
 } from "./terrain.ts";
 
-export type EnvironmentCell = {
+export type EnvironmentCell = typeof tileEffectDefaults & {
   hole: boolean;
   growth: number;
   grass: number;
@@ -20,7 +22,10 @@ export type EnvironmentCell = {
   fog: number;
   tree: boolean;
 };
+export type EnvironmentRegion = { kind: "soft" | "slick" | "rough" | "hole"; cells: number[]; strength: number };
 export type Environment = {
+  terrain?: World["terrain"];
+  regions: EnvironmentRegion[];
   size: number;
   cells: EnvironmentCell[];
   trees: { x: number; z: number; height: number }[];
@@ -49,9 +54,10 @@ export function deriveEnvironment(
       .filter((n) => n >= 0);
   const height = (x: number, z: number) => {
     const tile = tiles[index(x, z)];
-    return !tile || isHole(tile) ? -Infinity : tile.height;
+    return !tile || isHole(tile) ? -Infinity : groundTileHeight(tile);
   };
   const cells: EnvironmentCell[] = tiles.map((tile) => ({
+    ...tileEffectDefaults,
     hole: isHole(tile),
     growth: 0,
     grass: 0,
@@ -82,22 +88,45 @@ export function deriveEnvironment(
     return result;
   };
   const ponds: Environment["ponds"] = [];
-
-  for (const elevation of new Set(
-    tiles.filter((t) => !isHole(t) && t.height <= 0).map((t) => t.height),
-  )) {
-    for (const group of components(
-      (i) =>
-        tiles[i].height === elevation &&
-        isWaterTile(world, i % size, Math.floor(i / size)),
-    )) {
-      const level = elevation * LEVEL - WATER_INSET;
-      for (const i of group) {
-        cells[i].water = level;
-        cells[i].moisture = 1;
-      }
-      ponds.push({ cells: group, level });
+  const spill = new Float64Array(count).fill(Infinity);
+  const outlets: { index: number; height: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    const x = i % size, z = Math.floor(i / size);
+    if (x !== 0 && z !== 0 && x !== size-1 && z !== size-1 && !isHole(tiles[i])) continue;
+    spill[i] = isHole(tiles[i]) ? -Infinity : groundTileHeight(tiles[i]);
+    outlets.push({ index: i, height: spill[i] });
+  }
+  while (outlets.length) {
+    outlets.sort((a,b) => b.height-a.height);
+    const outlet = outlets.pop()!;
+    if (outlet.height !== spill[outlet.index]) continue;
+    for (const n of adjacent(outlet.index)) {
+      const height = Math.max(outlet.height, groundTileHeight(tiles[n]));
+      if (height >= spill[n]) continue;
+      spill[n] = height;
+      outlets.push({ index: n, height });
     }
+  }
+
+  const sources = tiles.map((_, i) => i)
+    .filter(i => isWaterTile(world, i % size, Math.floor(i / size)))
+    .sort((a, b) => tiles[b].height - tiles[a].height);
+  for (const source of sources) {
+    if (cells[source].water !== null) continue;
+    const elevation = Math.min(tiles[source].height, spill[source]), level = elevation * LEVEL - WATER_INSET;
+    const group = [source];
+    cells[source].water = level;
+    for (let cursor = 0; cursor < group.length; cursor++) {
+      const i = group[cursor];
+      cells[i].moisture = 1;
+      for (const n of adjacent(i)) {
+        if (isHole(tiles[n]) || cells[n].water !== null) continue;
+        if (!isWaterTile(world, n % size, Math.floor(n / size)) && groundTileHeight(tiles[n]) * LEVEL >= level) continue;
+        cells[n].water = level;
+        group.push(n);
+      }
+    }
+    ponds.push({ cells: group, level });
   }
 
   for (let i = 0; i < count; i++) {
@@ -178,6 +207,7 @@ export function deriveEnvironment(
         }
       }
   }
+  limitEffectAreas(size, cells, ["wind"]);
   const trees: Environment["trees"] = [];
   for (const group of components(
     (i) =>
@@ -185,10 +215,9 @@ export function deriveEnvironment(
       !isHole(tiles[i]) &&
       cells[i].water === null,
   )) {
-    if (group.length < 3) continue;
     for (const i of group) if (cells[i].light > 0.2) {
-      cells[i].grass = 1;
-      cells[i].growth = Math.min(1, (group.length - 3) / 21);
+      cells[i].grass = group.length === 1 ? .12 : group.length === 2 ? .2 : 1;
+      cells[i].growth = Math.max(0, Math.min(1, (group.length - 3) / 21));
     }
     if (group.length < 6) continue;
 
@@ -225,7 +254,9 @@ export function deriveEnvironment(
     if (c.moisture >= 0.8 && c.light < 0.72 && breeze < 0.5)
       c.fog = Math.min(1, (0.72 - c.light) * 2.4) * (1 - breeze);
   }
-  return { size, cells, trees, ponds };
+  const environment: Environment = { size, terrain: world.terrain ? { ...world.terrain, tiles: world.terrain.tiles.map(tile => ({ ...tile })) } : undefined, cells, trees, ponds, regions: [] };
+  applyTileEffects(world, environment);
+  return environment;
 }
 export function environmentAt(
   env: Environment,
@@ -233,6 +264,7 @@ export function environmentAt(
   z: number,
 ): EnvironmentCell {
   const empty: EnvironmentCell = {
+    ...tileEffectDefaults,
     hole: false,
     growth: 0,
     grass: 0,
@@ -244,8 +276,9 @@ export function environmentAt(
     fog: 0,
     tree: false,
   };
+  const ground = env.terrain ? terrainSample({ size: env.size, terrain: env.terrain }, x, z, false).height : undefined;
   if (x < -0.5 || z < -0.5 || x > env.size - 0.5 || z > env.size - 0.5)
-    return { ...empty, water: waterLevelAt(env.size, x, z, (i) => env.cells[i].water, (i) => env.cells[i].hole) };
+    return { ...empty, water: waterLevelAt(env.size, x, z, (i) => env.cells[i].water, (i) => env.cells[i].hole, ground) };
   const fx = Math.floor(x),
     fz = Math.floor(z),
     smooth = (t: number) => t * t * (3 - 2 * t),
@@ -269,9 +302,14 @@ export function environmentAt(
       "windX",
       "windZ",
       "fog",
+      "dust", "bounce", "flowX", "flowZ", "lift", "liftCeiling", "glide", "flicker",
     ] as const)
       out[key] += c[key] * w;
   }
-  out.water = waterLevelAt(env.size, x, z, (i) => env.cells[i].water, (i) => env.cells[i].hole);
+  const nearest = env.cells[Math.max(0, Math.min(env.size - 1, Math.round(z))) * env.size + Math.max(0, Math.min(env.size - 1, Math.round(x)))];
+  if (out.lift > .001) out.liftCeiling *= .65 / out.lift;
+  out.hole = nearest.hole;
+  out.clusterSize = nearest.clusterSize;
+  out.water = waterLevelAt(env.size, x, z, (i) => env.cells[i].water, (i) => env.cells[i].hole, ground);
   return out;
 }

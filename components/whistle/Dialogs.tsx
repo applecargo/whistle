@@ -1,14 +1,15 @@
 "use client";
-import { useLanguage } from "./Language";
+import { PresentationControls } from "./PresentationControls";
+import { useLanguage, userErrorMessage } from "./Language";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   uid,
+  MAX_TEXT_LENGTH,
   type Asset,
   type Shape,
   type Rule,
   type World,
 } from "@/lib/world";
-import { encodeWorld, downloadWorld } from "@/lib/sharing";
 import { ImageEditor, type ImageEditorHandle } from "./ImageEditor";
 import { ObjectArt } from "./Art";
 import { textImage } from "@/lib/text-image";
@@ -17,11 +18,13 @@ export function Dialog({
   heading,
   children,
   onClose,
+  className = "",
 }: {
   title: string;
   heading?: ReactNode;
   children: ReactNode;
   onClose: () => void;
+  className?: string;
 }) {
   const { t } = useLanguage();
   const ref = useRef<HTMLDialogElement>(null);
@@ -33,7 +36,7 @@ export function Dialog({
   return (
     <dialog
       ref={ref}
-      className="dialog"
+      className={`dialog ${className}`}
       aria-label={title}
       onCancel={onClose}
       onClick={(e) => {
@@ -76,23 +79,43 @@ const shapeNames: Partial<Record<Shape, string>> = {
   ring: "고리",
   bar: "선",
 };
+export function MakerActions({ onSave, disabled, onDelete, deleteLabel }: {
+  onSave: () => void;
+  disabled: boolean;
+  onDelete?: () => void;
+  deleteLabel: string;
+}) {
+  const { t } = useLanguage();
+  return <div className="dialog-footer">
+    {onDelete && <button type="button" onClick={onDelete}>{t(deleteLabel)}</button>}
+    <button type="button" className="primary" disabled={disabled} onClick={onSave}>{t("저장")}</button>
+  </div>;
+}
 export function AssetMaker({
   asset: existing,
+  contentType,
   onSave,
   onClose,
+  onDelete,
+  placement: editingPlacement = false,
 }: {
   asset?: Asset;
+  contentType?: "image" | "text";
   onSave: (a: Asset) => void;
   onClose: () => void;
+  onDelete?: () => void;
+  placement?: boolean;
 }) {
   const { t } = useLanguage();
   const [shape, setShape] = useState<Shape>(
     existing?.shape === "image" ? "sphere" : (existing?.shape ?? "sphere"),
   );
   const [name, setName] = useState(existing?.name ?? "");
-  const [mediaType, setMediaType] = useState<"image" | "text">(existing?.text !== undefined ? "text" : "image");
+  const [mediaType, setMediaType] = useState<"image" | "text">(contentType ?? (existing?.text !== undefined ? "text" : "image"));
   const [text, setText] = useState(existing?.text ?? "");
+  const [textColor, setTextColor] = useState(existing?.textColor ?? "#111111");
   const [scale, setScale] = useState(existing?.defaultScale ?? 1);
+  const [placement, setPlacement] = useState<"upright" | "floating" | "surface">(existing?.placement === "field" ? "surface" : existing?.placement ?? "upright");
   const [loading, setLoading] = useState(false),
     [error, setError] = useState("");
   const editor = useRef<ImageEditorHandle>(null);
@@ -101,13 +124,14 @@ export function AssetMaker({
     name: name || shapeNames[shape] || "무제",
     shape,
     color: existing?.color ?? "#111111",
-    solid: existing?.solid ?? false,
+    solid: false,
     defaultScale: scale,
+    placement,
   };
   const save = () => {
     try {
       const media = mediaType === "text"
-        ? { text: text.trim(), image: textImage(text) }
+        ? { text, textColor, image: textImage(text, textColor) }
         : editor.current?.export();
       if (!media) return;
       onSave({
@@ -117,12 +141,12 @@ export function AssetMaker({
         ...media,
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "저장할 수 없습니다.");
+      setError(userErrorMessage(e, "저장할 수 없습니다."));
     }
   };
   return (
-    <Dialog title={t(mediaType === "image" ? "이미지" : "텍스트")} onClose={onClose}
-      heading={<div className="media-tabs" role="group" aria-label={t("이미지 또는 텍스트")}>
+    <Dialog className="maker-dialog" title={t(mediaType === "image" ? "이미지" : "텍스트")} onClose={onClose}
+      heading={contentType ? undefined : <div className="media-tabs" role="group" aria-label={t("이미지 또는 텍스트")}>
         {(["image", "text"] as const).map((kind) => <button key={kind}
           aria-pressed={mediaType === kind}
           onClick={() => { setMediaType(kind); setError(""); }}>
@@ -130,7 +154,7 @@ export function AssetMaker({
         </button>)}
       </div>}>
 
-      <div className="shape-options" role="group" aria-label={t("기호")}>
+      {!contentType && <div className="shape-options" role="group" aria-label={t("기호")}>
         {(["sphere", "box", "cone", "diamond", "ring", "bar"] as Shape[]).map(
           (s) => (
             <button
@@ -144,7 +168,7 @@ export function AssetMaker({
             </button>
           ),
         )}
-      </div>
+      </div>}
       <div hidden={mediaType !== "image"}>
       <ImageEditor
         ref={editor}
@@ -154,21 +178,33 @@ export function AssetMaker({
         onBusy={setLoading}
       />
       </div>
-      {mediaType === "text" && <textarea className="text-object-input"
-        aria-label={t("텍스트 입력")} placeholder={t("텍스트 입력")}
-        value={text} maxLength={500}
-        onChange={(e) => setText(e.target.value)} />}
-      <SizeOptions compact value={scale} onChange={setScale} />
+      {mediaType === "text" && <div className="text-object-editor">
+        <div className="text-object-actions">
+          <label className="text-color-control">
+            <input type="color" aria-label={t("글자 색")} value={textColor} onChange={e => setTextColor(e.target.value)} />
+          </label>
+          <span id="text-length">{text.length.toLocaleString()} / {MAX_TEXT_LENGTH.toLocaleString()}</span>
+        </div>
+        <textarea className="text-object-input" style={{ color: textColor }}
+          aria-label={t("텍스트 입력")} placeholder={t("텍스트 입력")}
+          aria-describedby="text-length"
+          aria-invalid={text.length > MAX_TEXT_LENGTH}
+          value={text}
+          onChange={(e) => { setText(e.target.value); setError(""); }} />
+        {text.length > MAX_TEXT_LENGTH && <p className="error" role="alert">{t("텍스트가 10,000자를 초과했습니다.")}</p>}
+      </div>}
+      <div className="asset-options-row">
+        <SizeOptions compact value={scale} onChange={setScale} />
+        <PresentationControls placement={placement} onPlacement={setPlacement} />
+      </div>
       {error && (
         <p className="error" role="alert">
           {t(error)}
         </p>
       )}
-      <div className="dialog-footer">
-        <button className="primary" disabled={mediaType === "image" ? loading : !text.trim()} onClick={save}>
-          {t("저장")}
-        </button>
-      </div>
+      <MakerActions onSave={save} onDelete={onDelete}
+        deleteLabel={editingPlacement ? "배치 삭제" : mediaType === "image" ? "이미지 삭제" : "텍스트 삭제"}
+        disabled={mediaType === "image" ? loading : !text.trim() || text.length > MAX_TEXT_LENGTH} />
     </Dialog>
   );
 }
@@ -198,6 +234,7 @@ export function SizeOptions({
             key={scale}
             type="button"
             aria-pressed={value === scale}
+            aria-label={t(label)}
             onClick={() => onChange(scale)}
           >
             {t(label)}
@@ -366,65 +403,6 @@ export function RuleMaker({
           {t("저장")}
         </button>
       </div>
-    </Dialog>
-  );
-}
-export function ShareDialog({
-  world,
-  onClose,
-  onToast,
-}: {
-  world: World;
-  onClose: () => void;
-  onToast: (s: string) => void;
-}) {
-  const { t } = useLanguage();
-  const [link, setLink] = useState(""),
-    [error, setError] = useState(""),
-    [copied, setCopied] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    let live = true;
-    encodeWorld(world)
-      .then((s) => {
-        if (!live) return;
-        if (s.length > 48000) setError("링크 용량 초과. 파일로 저장하세요.");
-        else setLink(`${location.origin}${location.pathname}#world=${s}`);
-      })
-      .catch(() => {
-        if (live) setError("링크 생성 실패");
-      });
-    return () => {
-      live = false;
-    };
-  }, [world]);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopied(true);
-    } catch {
-      input.current?.focus();
-      input.current?.select();
-      setError("선택된 링크를 복사하세요.");
-    }
-  };
-  return (
-    <Dialog title={t("공유")} onClose={onClose}>
-      <label className="field">
-        {t("링크")}
-        <input ref={input} readOnly value={link} aria-label={t("세계 링크")} />
-      </label>
-      <div className="share-actions">
-        <button disabled={!link} onClick={() => void copy()}>
-          {t(copied ? "복사됨" : "복사")}
-        </button>
-        <button onClick={() => downloadWorld(world)}>{t("파일 저장")}</button>
-      </div>
-      {error && (
-        <p className="error" role="alert">
-          {t(error)}
-        </p>
-      )}
     </Dialog>
   );
 }

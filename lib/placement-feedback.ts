@@ -1,7 +1,6 @@
 import type { World } from "./world.ts";
 import { deriveStructures, tileAt } from "./terrain.ts";
 import { deriveEnvironment } from "./environment.ts";
-import { drainSources } from "./environment-effects.ts";
 import type { WorldDerivation } from "./world-derivation.ts";
 
 export type CellChange = { index: number; result: boolean; removed: boolean };
@@ -10,15 +9,19 @@ export type PlacementFeedback = { id: number; cells: CellChange[] };
 function snapshot(world: World, derivation?: WorldDerivation) {
   const structures = derivation?.structures ?? deriveStructures(world);
   const environment = derivation?.environment ?? deriveEnvironment(world, structures);
-  const drains = drainSources(world,environment);
   return environment.cells.map((c, i) => {
     const x = i % world.size,
       z = Math.floor(i / world.size);
     const results = [
       c.grass ? "grass" : "",
-      ...drains.filter(d=>d.cell===i || d.hole===i).map(d=>`drain:${d.cell}:${d.hole}`),
+      ...(c.grass && c.clusterSize >= 2 ? ["grass:2"] : []),
+      ...(c.grass && c.clusterSize >= 3 ? ["grass:3"] : []),
       c.tree ? "tree" : "",
       c.water === null ? "" : `water:${c.water.toFixed(2)}`,
+      ...(c.water !== null && c.clusterSize >= 2 ? ["water:2"] : []),
+      ...(c.water !== null && c.clusterSize >= 3 ? ["water:3"] : []),
+      c.dust ? "dust" : "", c.bounce ? "bounce" : "",
+      c.flicker ? "flicker" : "", c.lift ? "lift" : "", c.glide ? "glide" : "",
       c.fog > 0.05 ? `fog:${Math.round(c.fog * 4)}` : "",
       Math.hypot(c.windX, c.windZ) > 0.1 ? `wind:${c.windX},${c.windZ}` : "",
       c.light < 0.7 ? `shade:${Math.round(c.light * 4)}` : "",

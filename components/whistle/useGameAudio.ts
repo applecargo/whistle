@@ -3,23 +3,33 @@ import { useEffect, useMemo, useRef } from "react";
 import { createPdSession, type EditSound } from "@/lib/audio/webpd-session";
 import { createGameAudio } from "@/lib/audio/game-audio";
 import { playerSound, type PlayerAudioFrame } from "@/lib/audio/game-parameters";
-import type { Event, Player } from "@/lib/world";
+import { createPlacedSounds } from "@/lib/audio/placed-sounds";
+import type { Actor, World, Event, Player } from "@/lib/world";
+import type { Environment } from "@/lib/environment";
 
-export function useGameAudio(notify: (message: string) => void) {
+export function useGameAudio() {
   const controller = useRef<ReturnType<typeof createGameAudio> | null>(null);
-  const report = useRef(notify);
-  report.current = notify;
+  const recordings = useRef<ReturnType<typeof createPlacedSounds> | null>(null);
+  const enabled = useRef(false);
+  const paused = useRef(false);
   const api = useMemo(() => {
     const get = () => controller.current ??= createGameAudio(
-      () => createPdSession(`${import.meta.env.BASE_URL}audio-test/`, () => {}),
-      () => report.current("오디오를 시작하지 못했어요. 다음 클릭에서 다시 시도합니다."),
+      async () => {
+        const session = await createPdSession(`${import.meta.env.BASE_URL}audio-test/`, () => {});
+        recordings.current = createPlacedSounds(session.context, () => {});
+        return session;
+      },
+      () => {},
     );
     return {
-      edit: (sound: EditSound) => get().edit(sound),
-      play: () => get().play(),
-      stop: () => controller.current?.stop(),
-      reset: () => controller.current?.reset(),
-      movement: (frame: PlayerAudioFrame) => controller.current?.movement(playerSound(frame)),
+      edit: (sound: EditSound) => { enabled.current = false; recordings.current?.stop(); get().edit(sound); },
+      play: () => { enabled.current = true; paused.current = false; recordings.current?.stop(); get().play(); },
+      stop: () => { enabled.current = false; recordings.current?.stop(); controller.current?.stop(); },
+      reset: () => { recordings.current?.stop(); controller.current?.reset(); },
+      movement: (frame: PlayerAudioFrame, world?: World, actors?: Actor[], environment?: Environment) => {
+        controller.current?.movement(playerSound(frame));
+        if (enabled.current && !paused.current && world && actors) recordings.current?.update(world, actors, frame, environment);
+      },
       event: (event: Event, player: Player) => {
         const distance = Math.hypot(event.x - player.x, event.z - player.z);
         const angle = Math.atan2(event.x - player.x, -(event.z - player.z)) - player.yaw;
@@ -31,9 +41,9 @@ export function useGameAudio(notify: (message: string) => void) {
     };
   }, []);
   useEffect(() => {
-    const pause = () => controller.current?.pause();
+    const pause = () => { paused.current = true; recordings.current?.stop(false); controller.current?.pause(); };
     const visibility = () => { if (document.hidden) pause(); };
-    const resume = () => { if (!document.hidden) controller.current?.resume(); };
+    const resume = () => { if (!document.hidden) { paused.current = false; controller.current?.resume(); } };
     window.addEventListener("blur", pause);
     document.addEventListener("visibilitychange", visibility);
     window.addEventListener("pointerdown", resume);
@@ -43,6 +53,8 @@ export function useGameAudio(notify: (message: string) => void) {
       document.removeEventListener("visibilitychange", visibility);
       window.removeEventListener("pointerdown", resume);
       window.removeEventListener("keydown", resume);
+      recordings.current?.stop();
+      recordings.current = null;
       controller.current?.dispose();
       controller.current = null;
     };

@@ -68,7 +68,7 @@ start.onclick = async () => {
     enable(true);
     status.textContent = "실행 중";
   } catch (error) {
-    status.textContent = error instanceof Error ? error.message : "오디오 시작 실패";
+    status.textContent = "오디오를 시작할 수 없습니다.";
     start.disabled = false;
   }
 };
@@ -90,7 +90,7 @@ mute.onclick = () => {
 };
 const act = (action: () => void) => {
   try { action(); } catch (error) {
-    status.textContent = error instanceof Error ? error.message : "입력 오류";
+    status.textContent = "입력값이 올바르지 않습니다.";
   }
 };
 element("edit").onclick = () => act(() => session?.edit({

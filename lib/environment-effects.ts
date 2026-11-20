@@ -1,6 +1,4 @@
-import type { World } from "./world.ts";
-import { terrainSample } from "./terrain.ts";
-import { environmentAt, type Environment } from "./environment.ts";
+import type { Environment } from "./environment.ts";
 
 export function wetGround(env: Environment, x: number, z: number, height: number) {
   let wet = 0;
@@ -11,29 +9,6 @@ export function wetGround(env: Environment, x: number, z: number, height: number
       wet = Math.max(wet, Math.max(0, 1 - Math.hypot(x - xx, z - zz) / 1.25));
     }
   return wet;
-}
-
-
-export function drainSources(world: World, env: Environment) {
-  const drains: { x: number; z: number; dx: number; dz: number; level: number; cell: number; hole: number }[] = [];
-  for (let i = 0; i < env.cells.length; i++) {
-    const level = env.cells[i].water;
-    if (level === null) continue;
-    const x = i % env.size, z = Math.floor(i / env.size);
-    for (const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-      const hx=x+dx, hz=z+dz, hole=hz*env.size+hx;
-      if (hx<0 || hz<0 || hx>=env.size || hz>=env.size || !env.cells[hole].hole) continue;
-      let low=0, high=1;
-      for(let n=0;n<16;n++) {
-        const mid=(low+high)/2;
-        if(terrainSample(world,x+dx*mid,z+dz*mid).coverage>=.5) low=mid; else high=mid;
-      }
-      const t=(low+high)/2, sx=x+dx*(t-.035), sz=z+dz*(t-.035);
-      if (environmentAt(env,sx,sz).water !== level || terrainSample(world,sx,sz).height > level) continue;
-      if (drains.length < 48) drains.push({x:x+dx*t,z:z+dz*t,dx,dz,level,cell:i,hole});
-    }
-  }
-  return drains;
 }
 
 

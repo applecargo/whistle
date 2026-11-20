@@ -20,7 +20,7 @@ export function createWorldDeriver() {
   const environmentCache = new Map<string, WorldDerivation>();
   return (world: World, objects: (Placed & { removed?: boolean })[] = world.objects): WorldDerivation => {
     const terrainKey = JSON.stringify([world.size, world.terrain]);
-    const objectsKey = JSON.stringify(objects.filter((o) => !o.removed).map((o) => [o.asset, o.x, o.z]));
+    const objectsKey = JSON.stringify(objects.filter((o) => !o.removed && !world.assets.find(a => a.id === o.asset)?.sound).map((o) => [o.asset, o.x, o.z]));
     const structureKey = terrainKey + objectsKey;
     const structures = structuresCache.get(structureKey) ?? remember(
       structuresCache, structureKey, deriveStructures(world, objects),
