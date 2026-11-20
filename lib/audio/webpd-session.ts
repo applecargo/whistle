@@ -164,16 +164,16 @@ export async function createPdSession(
 export type PdSession = Awaited<ReturnType<typeof createPdSession>>;
 
 export async function createNamedPdSession(
+  context: AudioContext,
+  destination: AudioNode,
   baseUrl: string,
   patchName: string,
   receive: (bus: string, message: PdMessage) => void,
   spatialOptions?: { x: number; y: number; z: number }
 ) {
-  const context = new AudioContext();
   let node: PdNode | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await context.resume();
     const [patchResponse, ioResponse] = await Promise.all([
       fetch(`${baseUrl}${patchName}.wasm`), fetch(`${baseUrl}${patchName}.io.json`),
     ]);
@@ -204,27 +204,26 @@ export async function createNamedPdSession(
     });
     node.onprocessorerror = () => failReady(new Error("Pd 오디오 프로세서 오류"));
 
-    const masterGain = context.createGain();
-    const panner = context.createPanner();
-    panner.panningModel = "HRTF";
-    panner.distanceModel = "inverse";
-    panner.refDistance = 1;
-    panner.maxDistance = 10000;
-    panner.rolloffFactor = 1;
+    const patchGain = context.createGain();
+    let panner: PannerNode | undefined;
     if (spatialOptions) {
+      panner = context.createPanner();
+      panner.panningModel = "HRTF";
+      panner.distanceModel = "inverse";
+      panner.refDistance = 1;
+      panner.maxDistance = 50;
+      panner.rolloffFactor = 1.4;
       panner.positionX.setValueAtTime(spatialOptions.x, context.currentTime);
       panner.positionY.setValueAtTime(spatialOptions.y, context.currentTime);
       panner.positionZ.setValueAtTime(spatialOptions.z, context.currentTime);
+
+      node.connect(patchGain);
+      patchGain.connect(panner);
+      panner.connect(destination);
+    } else {
+      node.connect(patchGain);
+      patchGain.connect(destination);
     }
-
-    const limiter = context.createDynamicsCompressor();
-    limiter.threshold.setValueAtTime(-1.0, context.currentTime);
-    limiter.ratio.setValueAtTime(20.0, context.currentTime);
-
-    node.connect(masterGain);
-    masterGain.connect(panner);
-    panner.connect(limiter);
-    limiter.connect(context.destination);
 
     setTimeout(() => markReady(), 500);
 
@@ -238,15 +237,14 @@ export async function createNamedPdSession(
       node!.port.postMessage({ type: "io:messageReceiver", payload: { ...port, message } });
     };
     return {
-      context,
       node,
-      masterGain,
+      patchGain,
       panner,
-      limiter,
       send(bus: string, message: PdMessage) {
         send(bus, message);
       },
       setPosition(x: number, y: number, z: number) {
+        if (!panner) return;
         panner.positionX.setValueAtTime(x, context.currentTime);
         panner.positionY.setValueAtTime(y, context.currentTime);
         panner.positionZ.setValueAtTime(z, context.currentTime);
@@ -257,10 +255,8 @@ export async function createNamedPdSession(
         node!.destroy();
         node!.disconnect();
         node!.port.close();
-        masterGain.disconnect();
-        panner.disconnect();
-        limiter.disconnect();
-        await context.close();
+        patchGain.disconnect();
+        panner?.disconnect();
       },
     };
   } catch (error) {
@@ -268,7 +264,6 @@ export async function createNamedPdSession(
     node?.destroy();
     node?.disconnect();
     node?.port.close();
-    await context.close();
     throw error;
   }
 }
