@@ -8,6 +8,7 @@ import type { GameAudioDebug } from "@/components/whistle/useGameAudio";
 import type { World } from "@/lib/world";
 import type { WorldDerivation } from "@/lib/world-derivation";
 import { isHole } from "@/lib/tile";
+import { renderQuality } from "@/lib/render-quality";
 
 const TOGGLE_CODE = "Backquote";
 const REFRESH_MS = 250;
@@ -22,6 +23,21 @@ type Props = {
   getWorld: () => World;
   derivation: WorldDerivation;
 };
+
+/** 브라우저가 WebGL에 쓰는 GPU 이름(소프트웨어 렌더링이면 llvmpipe·SwiftShader 등). 한 번만 읽는다. */
+let gpuName: string | undefined;
+function gpu() {
+  if (gpuName !== undefined) return gpuName;
+  try {
+    const gl = document.createElement("canvas").getContext("webgl2") ?? document.createElement("canvas").getContext("webgl");
+    const info = gl?.getExtension("WEBGL_debug_renderer_info");
+    gpuName = gl ? String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER)) : "WebGL 없음";
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+  } catch {
+    gpuName = "알 수 없음";
+  }
+  return gpuName;
+}
 
 /** 렌더 루프 부하: 1초 동안의 프레임 수와 가장 긴 프레임 간격 */
 function useFrameStats() {
@@ -48,6 +64,9 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
   const lines: string[] = [];
   const memory = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
   lines.push(`렌더  ${f(frame.fps, 0)} fps · 최장 프레임 ${f(frame.worst, 0)} ms${memory ? ` · JS 힙 ${f(memory.usedJSHeapSize / 2 ** 20, 0)} MB` : ""}`);
+  const q = renderQuality();
+  lines.push(`품질 ${q.name} (배율 ${f(q.pixelRatio, 2)}/기기 ${f(window.devicePixelRatio || 1, 2)} · MSAA ${q.samples} · 부드러운 그림자 ${q.softShadows ? "켬" : "끔"})`);
+  lines.push(`GPU  ${gpu().slice(0, 70)}`);
 
   // 오디오
   const c = info.context;
