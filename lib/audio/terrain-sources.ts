@@ -31,20 +31,20 @@ export type Layer = (typeof LAYERS)[number];
 
 /** 종류별 패치. 지금은 빌드된 지형 패치가 terrain_clock 하나뿐이라 모두 같은 패치. */
 export const KIND_PATCHES: Record<string, string> = {
-  plain: "terrain_clock",
-  rough: "terrain_clock",
-  slick: "terrain_clock",
-  soft: "terrain_clock",
-  water: "terrain_clock",
-  grass: "terrain_clock",
-  tree: "terrain_clock",
-  fog: "terrain_clock",
-  wind: "terrain_clock",
-  stairs: "terrain_clock",
-  bridge: "terrain_clock",
-  canopy: "terrain_clock",
+  plain: "terrain_plain",
+  rough: "terrain_rough",
+  slick: "terrain_slick",
+  soft: "terrain_soft",
+  water: "environment_water",
+  grass: "environment_grass",
+  tree: "environment_tree",
+  fog: "environment_fog",
+  wind: "environment_wind",
+  stairs: "structure_stairs",
+  bridge: "structure_bridge",
+  canopy: "structure_canopy",
 };
-const DEFAULT_PATCH = "terrain_clock";
+const DEFAULT_PATCH = "terrain_plain";
 
 /** 소리를 놓을 맵 정보. environment·structures가 없으면 surface 층만 만든다. */
 export type SoundField = {
@@ -169,7 +169,7 @@ export type NearbyOptions = {
   /** 외곽까지 이 거리(타일)부터 패닝이 줄어들어 외곽에서 좌우 1이 된다 */
   blend: number;
 };
-export const DEFAULT_NEARBY: NearbyOptions = { radius: 3, max: 6, hysteresis: 0.5, blend: 2 };
+export const DEFAULT_NEARBY: NearbyOptions = { radius: 2, max: 6, hysteresis: 0.5, blend: 2 };
 
 export type NearbyRegion = {
   id: string;

@@ -1,0 +1,6 @@
+#N canvas 0 33 409 320 12;
+#X obj 152 188 dac~;
+#X obj 281 20 loadbang;
+#X obj 281 50 s whistle-ready;
+#X obj 281 75 r whistle-ready;
+#X connect 1 0 2 0;
