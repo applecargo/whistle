@@ -18,12 +18,16 @@ Pd 엔진 하나(AudioContext 하나)에서 여러 패치를 실행한다. 소�
 ## Pd 엔진 (pd4web)
 
 - 엔진: [pd4web](https://github.com/charlesneimog/pd4web) 3.4.1(libpd, Pd 0.56의 vanilla 객체 전체를 C에서 wasm으로).
-  빈 host 패치만 들어 있는 엔진을 한 번 빌드해 `audio/engine/`에 커밋해 둔다(pd4web.js·wasm·data, 약 2.8MB).
+  빈 host 패치만 들어 있는 엔진을 한 번 빌드해 `audio/engine/`에 커밋해 둔다(pd4web.js·wasm·data, 약 2MB).
+  **pdlua(GPL-2.0-or-later)는 빼고 빌드한다.** pd4web 3.4.1은 pdlua를 항상 링크하므로 빌드 스크립트가 CLI가 만든 빌드 폴더에서
+  pdlua 링크·호출·패키징(pd.lua 등)을 잘라 내고 다시 빌드한다(`engine.json`의 `"pdlua": false`). Lua 객체와 GUI는 쓸 수 없다.
+  남은 구성 요소는 Pd·libpd·pd4web(BSD), ThorVG·Emscripten(MIT)이다. 배포 시 이들의 저작권·라이선스 고지가 필요하다.
   **패치는 엔진에 넣어 빌드하지 않는다.** 실행 중에 `.pd` 파일을 엔진 파일시스템으로 보내고(`sendFile`) 동적 패칭으로 만든다.
   그래서 패치를 고치면 `npm run audio:build`(파일 복사, 수 초) 후 새로고침만 하면 된다. 개발 PC에 pd4web·Emscripten이 없어도 된다.
 - 엔진을 다시 빌드할 때(pd4web 버전업, 외부 객체 추가 등)만 `npm run audio:engine`.
   pd4web CLI(파이썬 `pip install pd4web`, Python 3.12+)가 필요하다. `PD4WEB=/경로/pd4web npm run audio:engine`.
-  첫 빌드는 Emscripten 등을 받아 수 분, 이후는 `output/pd4web-engine/` 캐시로 약 2~3분.
+  첫 빌드는 Emscripten 등을 받아 수 분, 이후는 `output/pd4web-engine/` 캐시로 약 4~5분(CLI 빌드 + pdlua 제외 재빌드).
+  pd4web 버전을 바꿔 잘라 낼 코드가 달라지면 빌드가 멈춘다(pdlua가 조용히 남지 않도록). 그때 스크립트의 `stripPdlua`를 맞춘다.
 - 런타임 `lib/audio/pd-runtime.ts`: `openEngine(baseUrl, { latencyHint })`가 페이지당 엔진 하나를 연다(AudioContext도 엔진의 것).
   `engine.start(이름, { scoped })` → 슬롯 하나: host의 `[pd slotN]` 안에 `[<패치> slotN]` → `[dac~ 2N+1 2N+2]`를 만들고
   `loadbang`을 보낸다(동적으로 만든 패치에는 loadbang이 저절로 오지 않음). 엔진 출력 32채널을 슬롯별 스테레오 노드로 나눠 돌려준다.
