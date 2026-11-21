@@ -14,6 +14,10 @@
 //
 // 패닝 기본값은 equalpower(가벼움, 앞뒤 구분 없음). HRTF는 옵션(panning: "HRTF").
 //
+// 리스너는 그래프에서 원점(앞 −Z)에 고정하고, setListener로 받은 실제 위치·방향 기준으로 소스 좌표를 바꿔 넣는다
+// (toListenerSpace). 소스 위치는 0.1초에 걸쳐 직선으로 옮겨 계단(틱 소리)을 없앤다.
+// Firefox는 AudioListener 위치를 AudioParam으로 옮길 수 없어서 리스너를 움직이면 매번 뛰었다.
+//
 // - 소스는 등록만으로는 아무 오디오 노드도 만들지 않는다. activate()할 때 패치를 로드한다.
 // - 좌표는 3D 장면 좌표(미터)다. 타일 좌표 변환은 호출하는 쪽(게임 연결) 책임.
 // - fade는 AudioParam 스케줄링으로만 한다(타이머 없음). fade-out이 끝난 노드는
@@ -76,35 +80,68 @@ function ramp(param: AudioParam, target: number, now: number, duration: number) 
 }
 
 // Firefox는 AudioListener의 position*/forward*/up* AudioParam을 지원하지 않고
-// 예전 방식인 setPosition()/setOrientation()만 있다. PannerNode도 같은 방식으로 대비한다.
+// 예전 방식인 setPosition()/setOrientation()만 있다. PannerNode는 AudioParam이 있지만 없는 브라우저에 대비한다.
 type LegacyListener = { setPosition(x: number, y: number, z: number): void; setOrientation(fx: number, fy: number, fz: number, ux: number, uy: number, uz: number): void };
 type LegacyPanner = { setPosition(x: number, y: number, z: number): void };
 
-function placePanner(panner: PannerNode, { x, y, z }: Vec3, now: number) {
+/** 소스 위치가 바뀔 때 이 시간(초)에 걸쳐 직선으로 옮긴다. 오디오 프레임(80ms)보다 조금 길게 잡아 계단이 생기지 않게 한다. */
+const POSITION_GLIDE = 0.1;
+
+/**
+ * 장면 좌표의 점을 리스너 기준 좌표로 바꾼다(리스너 = 원점, 앞 = −Z, 위 = +Y, 오른쪽 = +X).
+ * 리스너는 오디오 그래프에서 원점에 고정해 두고 소스만 이 좌표로 옮긴다:
+ * Firefox는 AudioListener 위치를 부드럽게 옮길 수 없지만(setPosition만 있음) 패너 위치는 AudioParam이라 가능하다.
+ * 거리는 그대로 유지되므로 거리 감쇠도 같다.
+ */
+export function toListenerSpace(point: Vec3, listener: Vec3, forward: Vec3): Vec3 {
+  const fl = Math.hypot(forward.x, forward.y, forward.z) || 1;
+  const f = { x: forward.x / fl, y: forward.y / fl, z: forward.z / fl };
+  // right = f × (0, 1, 0)
+  let rx = -f.z, rz = f.x;
+  const rl = Math.hypot(rx, rz);
+  if (rl < 1e-9) { rx = 1; rz = 0; } else { rx /= rl; rz /= rl; }
+  // up = right × f
+  const ux = -rz * f.y, uy = rz * f.x - rx * f.z, uz = rx * f.y;
+  const d = { x: point.x - listener.x, y: point.y - listener.y, z: point.z - listener.z };
+  return {
+    x: d.x * rx + d.z * rz,
+    y: d.x * ux + d.y * uy + d.z * uz,
+    z: -(d.x * f.x + d.y * f.y + d.z * f.z),
+  };
+}
+
+/** 패너 위치: immediate면 바로, 아니면 현재 값에서 POSITION_GLIDE에 걸쳐 직선으로. */
+function placePanner(panner: PannerNode, { x, y, z }: Vec3, now: number, immediate: boolean) {
   if (panner.positionX) {
-    panner.positionX.setValueAtTime(x, now);
-    panner.positionY.setValueAtTime(y, now);
-    panner.positionZ.setValueAtTime(z, now);
+    for (const [param, value] of [[panner.positionX, x], [panner.positionY, y], [panner.positionZ, z]] as const) {
+      if (immediate) {
+        param.cancelScheduledValues(now);
+        param.setValueAtTime(value, now);
+      } else {
+        ramp(param, value, now, POSITION_GLIDE);
+      }
+    }
   } else {
     (panner as unknown as LegacyPanner).setPosition(x, y, z);
   }
 }
 
-function placeListener(listener: AudioListener, position: Vec3, forward: Vec3, now: number) {
+/** 리스너는 원점에서 −Z를 바라보도록 한 번만 놓는다. */
+function placeListenerAtOrigin(listener: AudioListener, now: number) {
   if (listener.positionX) {
-    listener.positionX.setValueAtTime(position.x, now);
-    listener.positionY.setValueAtTime(position.y, now);
-    listener.positionZ.setValueAtTime(position.z, now);
-    listener.forwardX.setValueAtTime(forward.x, now);
-    listener.forwardY.setValueAtTime(forward.y, now);
-    listener.forwardZ.setValueAtTime(forward.z, now);
+    listener.positionX.setValueAtTime(0, now);
+    listener.positionY.setValueAtTime(0, now);
+    listener.positionZ.setValueAtTime(0, now);
+    listener.forwardX.setValueAtTime(0, now);
+    listener.forwardY.setValueAtTime(0, now);
+    listener.forwardZ.setValueAtTime(-1, now);
     listener.upX.setValueAtTime(0, now);
     listener.upY.setValueAtTime(1, now);
     listener.upZ.setValueAtTime(0, now);
   } else {
     const legacy = listener as unknown as LegacyListener;
-    legacy.setPosition(position.x, position.y, position.z);
-    legacy.setOrientation(forward.x, forward.y, forward.z, 0, 1, 0);
+    legacy.setPosition(0, 0, 0);
+    legacy.setOrientation(0, 0, -1, 0, 1, 0);
   }
 }
 
@@ -193,7 +230,12 @@ export function createSoundscape(options: SoundscapeOptions) {
     voice.wetDiffuse = wetDiffuse;
   };
 
-  const setPosition = (panner: PannerNode, position: Vec3) => placePanner(panner, position, context.currentTime);
+  // 리스너는 원점에 고정. 실제 리스너 위치·방향은 여기 두고 소스 위치를 그 기준으로 바꿔 넣는다.
+  let listenerPosition: Vec3 = { x: 0, y: 0, z: 0 };
+  let listenerForward: Vec3 = { x: 0, y: 0, z: -1 };
+  placeListenerAtOrigin(context.listener, context.currentTime);
+  const setPosition = (panner: PannerNode, position: Vec3, immediate = false) =>
+    placePanner(panner, toListenerSpace(position, listenerPosition, listenerForward), context.currentTime, immediate);
 
   const release = (id: string, voice: Voice) => {
     voice.patch?.destroy();
@@ -228,7 +270,7 @@ export function createSoundscape(options: SoundscapeOptions) {
       panner.distanceModel = "inverse";
       panner.refDistance = refDistance;
       panner.rolloffFactor = rolloff;
-      setPosition(panner, voice.source.position);
+      setPosition(panner, voice.source.position, true);
       const dry = context.createGain();
       const wet = context.createGain();
       patch.node.connect(gain);
@@ -326,7 +368,9 @@ export function createSoundscape(options: SoundscapeOptions) {
     diffuse: () => diffuse,
     /** 리스너(플레이어 귀) 위치와 바라보는 방향. forward는 정규화하지 않아도 된다. */
     setListener(position: Vec3, forward: Vec3) {
-      placeListener(context.listener, position, forward, context.currentTime);
+      listenerPosition = position;
+      listenerForward = forward;
+      for (const voice of voices.values()) if (voice.panner) setPosition(voice.panner, voice.source.position);
     },
     /** fade-out이 끝난 소스의 노드를 정리한다. 자동으로도 불리므로 선택 사항. */
     update: reap,

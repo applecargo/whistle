@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createSoundscape, type SoundscapeEvent } from "../lib/audio/soundscape.ts";
+import { createSoundscape, toListenerSpace, type SoundscapeEvent } from "../lib/audio/soundscape.ts";
 
 // --- 최소한의 가짜 Web Audio: 램프를 시간에 따라 실제처럼 보간한다 ---
 class FakeParam {
@@ -260,27 +260,63 @@ test("로드 실패는 error 이벤트로 알리고 다음 activate에서 다시
   assert.deepEqual(types(), ["loading:a", "error:a", "loading:a"]);
 });
 
-test("set: 위치는 바로 반영하고, 패치가 바뀌면 끄고 다음 activate에서 새 패치를 로드한다", async () => {
+test("set: 위치는 짧게(0.1초) 미끄러지듯 옮기고, 패치가 바뀌면 끄고 다음 activate에서 새 패치를 로드한다", async () => {
   const { scape, started, created, clock } = setup(0.5);
   scape.set({ id: "a", patch: "p", position: origin });
   scape.activate("a");
   started[0].resolve();
   await flush();
+  clock.currentTime = 1;
   scape.set({ id: "a", patch: "p", position: { x: 5, y: 0, z: 0 } });
-  assert.equal((created.panners[0].positionX as FakeParam).value, 5);
+  const x = created.panners[0].positionX as FakeParam;
+  assert.equal(x.value, 0, "바로 뛰지 않는다");
+  clock.currentTime = 1.05;
+  assert.ok(Math.abs(x.value - 2.5) < 1e-9, "중간");
+  clock.currentTime = 1.1;
+  assert.equal(x.value, 5);
   scape.set({ id: "a", patch: "q", position: origin });
   assert.equal(scape.snapshot().voices[0].state, "releasing");
   scape.activate("a");
   assert.equal(started[0].destroyed, true, "이전 패치 정리");
   assert.equal(started[1].name, "q");
-  clock.currentTime = 1;
 });
 
-test("리스너 위치·방향을 설정한다", () => {
-  const { scape, listener } = setup();
-  scape.setListener({ x: 1, y: 2, z: 3 }, { x: 0, y: 0, z: -1 });
-  const values = Object.fromEntries(Object.entries(listener).map(([k, p]) => [k, (p as FakeParam).value]));
-  assert.deepEqual(values, { positionX: 1, positionY: 2, positionZ: 3, forwardX: 0, forwardY: 0, forwardZ: -1, upX: 0, upY: 1, upZ: 0 });
+test("리스너는 원점에 고정하고, 소스를 리스너 기준 좌표로 옮긴다", async () => {
+  const { scape, listener, started, created, clock } = setup();
+  const values = () => Object.fromEntries(Object.entries(listener).map(([k, p]) => [k, (p as FakeParam).value]));
+  const fixed = { positionX: 0, positionY: 0, positionZ: 0, forwardX: 0, forwardY: 0, forwardZ: -1, upX: 0, upY: 1, upZ: 0 };
+  assert.deepEqual(values(), fixed);
+  scape.set({ id: "a", patch: "p", position: { x: 5, y: 1, z: 3 } });
+  scape.activate("a");
+  started[0].resolve();
+  await flush();
+  const panner = created.panners[0];
+  const at = () => [panner.positionX, panner.positionY, panner.positionZ].map(p => +(p as FakeParam).value.toFixed(9));
+  assert.deepEqual(at(), [5, 1, 3], "처음 연결할 때는 바로(미끄러지지 않음)");
+  // 리스너가 (5, 0, 3)에서 +X를 보면 소스는 바로 위(앞뒤·좌우 0)
+  clock.currentTime = 1;
+  scape.setListener({ x: 5, y: 0, z: 3 }, { x: 1, y: 0, z: 0 });
+  clock.currentTime = 1.1;
+  assert.deepEqual(at(), [0, 1, 0]);
+  assert.deepEqual(values(), fixed, "그래프의 리스너는 그대로");
+});
+
+test("toListenerSpace: 앞은 −Z, 오른쪽은 +X, 거리는 유지", () => {
+  const close = (a: { x: number; y: number; z: number }, b: [number, number, number]) =>
+    assert.ok(Math.abs(a.x - b[0]) < 1e-9 && Math.abs(a.y - b[1]) < 1e-9 && Math.abs(a.z - b[2]) < 1e-9, JSON.stringify(a));
+  const L = { x: 10, y: 2, z: -4 };
+  // −Z를 볼 때는 평행이동만
+  close(toListenerSpace({ x: 13, y: 3, z: -6 }, L, { x: 0, y: 0, z: -1 }), [3, 1, -2]);
+  // +X를 볼 때: 앞(+X)에 있는 점은 −Z, 오른쪽(+Z)에 있는 점은 +X
+  close(toListenerSpace({ x: 12, y: 2, z: -4 }, L, { x: 1, y: 0, z: 0 }), [0, 0, -2]);
+  close(toListenerSpace({ x: 10, y: 2, z: -1 }, L, { x: 1, y: 0, z: 0 }), [3, 0, 0]);
+  // 뒤를 볼 때(+Z): 왼쪽·오른쪽이 뒤집힌다
+  close(toListenerSpace({ x: 13, y: 2, z: -4 }, L, { x: 0, y: 0, z: 1 }), [-3, 0, 0]);
+  // 정규화하지 않은 방향도 같다
+  close(toListenerSpace({ x: 12, y: 2, z: -4 }, L, { x: 7, y: 0, z: 0 }), [0, 0, -2]);
+  // 거리 유지
+  const p = { x: 4, y: -1, z: 7 }, local = toListenerSpace(p, L, { x: Math.sin(0.7), y: 0, z: -Math.cos(0.7) });
+  assert.ok(Math.abs(Math.hypot(local.x, local.y, local.z) - Math.hypot(p.x - L.x, p.y - L.y, p.z - L.z)) < 1e-9);
 });
 
 test("dispose: 모든 패치를 정리하고 로딩 중인 것도 끝나면 정리한다", async () => {
@@ -306,7 +342,7 @@ test("등록되지 않은 소스를 켜면 오류", () => {
   assert.throws(() => scape.activate("missing"), /등록되지 않은/);
 });
 
-test("Firefox: AudioParam이 없는 리스너·패너는 setPosition/setOrientation으로 설정한다", async () => {
+test("AudioParam이 없는 리스너·패너(예전 브라우저)는 setPosition/setOrientation으로 설정한다", async () => {
   const calls: string[] = [];
   const clock = { currentTime: 0 };
   const context = {
@@ -331,11 +367,12 @@ test("Firefox: AudioParam이 없는 리스너·패너는 setPosition/setOrientat
   started[0].resolve();
   await flush();
   scape.set({ id: "a", patch: "p", position: { x: 4, y: 1, z: 2 } });
+  // 리스너는 처음에 원점에 한 번 놓고, 소스는 리스너 (1, 2, 3) 기준 좌표로
   assert.deepEqual(calls, [
-    "listener.setPosition 1,2,3",
+    "listener.setPosition 0,0,0",
     "listener.setOrientation 0,0,-1,0,1,0",
-    "panner.setPosition -6,0,0",
-    "panner.setPosition 4,1,2",
+    "panner.setPosition -7,-2,-3",
+    "panner.setPosition 3,-1,-1",
   ]);
   assert.equal(scape.snapshot().voices[0].state, "active");
 });
