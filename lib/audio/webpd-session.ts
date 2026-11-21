@@ -55,6 +55,7 @@ export async function createPdSession(
 ) {
   const context = new AudioContext();
   let node: PdNode | undefined;
+  let silentInput: ConstantSourceNode | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await context.resume();
@@ -87,6 +88,12 @@ export async function createPdSession(
       },
     });
     node.onprocessorerror = () => failReady(new Error("Pd 오디오 프로세서 오류"));
+    node.channelCount = 2;
+    node.channelCountMode = "explicit";
+    silentInput = context.createConstantSource();
+    silentInput.offset.value = 0;
+    silentInput.connect(node);
+    silentInput.start();
     node.connect(context.destination);
     await ready;
     clearTimeout(timer);
@@ -121,6 +128,8 @@ export async function createPdSession(
       async close() {
         if (closed) return;
         closed = true;
+        silentInput!.stop();
+        silentInput!.disconnect();
         node!.destroy();
         node!.disconnect();
         node!.port.close();
@@ -129,6 +138,7 @@ export async function createPdSession(
     };
   } catch (error) {
     clearTimeout(timer);
+    silentInput?.disconnect();
     node?.destroy();
     node?.disconnect();
     node?.port.close();

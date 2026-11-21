@@ -59,7 +59,7 @@ test("distance reduces volume and turning reverses left and right", () => {
 
 test("only three nearby voices play, share one decoded buffer, and stop on exit", async () => {
   const world = worldWithSounds(5), actors = createSimulation(world).actors, probe = contextProbe();
-  const audio = createPlacedSounds(probe.ctx, () => assert.fail("decode failed"));
+  const audio = createPlacedSounds(probe.ctx, probe.ctx.destination, () => assert.fail("decode failed"));
   audio.update(world, actors, player); await flush();
   assert.deepEqual(probe.state(), { decoded: 1, starts: 3, active: 3 });
   audio.update(world, actors, { ...player, x: 0, z: 0 });
@@ -71,7 +71,7 @@ test("only three nearby voices play, share one decoded buffer, and stop on exit"
 
 test("late decoding cannot start playback after stopping", async () => {
   const world = worldWithSounds(), probe = contextProbe(true);
-  const audio = createPlacedSounds(probe.ctx, () => assert.fail("decode failed"));
+  const audio = createPlacedSounds(probe.ctx, probe.ctx.destination, () => assert.fail("decode failed"));
   audio.update(world, createSimulation(world).actors, player);
   audio.stop(); probe.finish(); await flush();
   assert.equal(probe.state().starts, 0);
@@ -80,7 +80,7 @@ test("late decoding cannot start playback after stopping", async () => {
 test("approach clips play once and rearm only after leaving the radius", async () => {
   const world = worldWithSounds(); world.assets.at(-1)!.sound!.mode = "approach";
   const actors = createSimulation(world).actors, probe = contextProbe();
-  const audio = createPlacedSounds(probe.ctx, () => assert.fail("decode failed"));
+  const audio = createPlacedSounds(probe.ctx, probe.ctx.destination, () => assert.fail("decode failed"));
   audio.update(world, actors, player); await flush();
   probe.nodes[0].stop(); probe.nodes[0].onended?.();
   audio.update(world, actors, player); await flush();

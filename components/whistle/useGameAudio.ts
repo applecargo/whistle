@@ -16,7 +16,7 @@ export function useGameAudio() {
     const get = () => controller.current ??= createGameAudio(
       async () => {
         const session = await createPdSession(`${import.meta.env.BASE_URL}audio-test/`, () => {});
-        recordings.current = createPlacedSounds(session.context, () => {});
+        recordings.current = createPlacedSounds(session.context, session.node, () => {});
         return session;
       },
       () => {},

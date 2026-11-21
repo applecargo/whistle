@@ -3,16 +3,16 @@ import { terrainFixtures } from "../terrain-fixtures";
 
 test.setTimeout(90_000);
 
-function wav(seconds = 0.5) {
+function wav(seconds = 0.5, frequency = 440) {
   const rate = 44100, count = Math.floor(rate * seconds), bytes = Buffer.alloc(44 + count * 2);
   bytes.write("RIFF"); bytes.writeUInt32LE(36 + count * 2, 4); bytes.write("WAVEfmt ", 8);
   bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22);
   bytes.writeUInt32LE(rate, 24); bytes.writeUInt32LE(rate * 2, 28); bytes.writeUInt16LE(2, 32); bytes.writeUInt16LE(16, 34);
   bytes.write("data", 36); bytes.writeUInt32LE(count * 2, 40);
-  for (let i = 0; i < count; i++) bytes.writeInt16LE(Math.round(Math.sin(i / rate * Math.PI * 880) * 8000), 44 + i * 2);
+  for (let i = 0; i < count; i++) bytes.writeInt16LE(Math.round(Math.sin(i / rate * Math.PI * 2 * frequency) * 8000), 44 + i * 2);
   return bytes;
 }
-type Probe = { contexts: AudioContext[]; started: number; active: number; pd: number; rms: number };
+type Probe = { contexts: AudioContext[]; started: number; active: number; pd: number; rms: number; output?: AnalyserNode };
 const probe = (page: Page) => page.evaluate(() => {
   const p = (window as typeof window & { soundProbe: Probe }).soundProbe;
   return { contexts: p.contexts.map(c => c.state), started: p.started, active: p.active, pd: p.pd, rms: p.rms };
@@ -52,6 +52,11 @@ test.beforeEach(async ({ page }) => {
       WebPdRuntime.run = async (...args) => {
         const node = await originalRun(...args);
         window.soundProbe.pd++;
+        const analyser = node.context.createAnalyser();
+        analyser.fftSize = 8192;
+        analyser.smoothingTimeConstant = 0;
+        node.connect(analyser);
+        window.soundProbe.output = analyser;
         return node;
       };
     ` });
@@ -60,18 +65,19 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole("button", { name: "파일 저장", exact: true })).toHaveAttribute("aria-description", "이 브라우저에 저장됨");
 });
 
-async function upload(page: Page, seconds = 0.5) {
+async function upload(page: Page, seconds = 0.5, frequency = 440) {
   await page.getByRole("button", { name: "사운드 만들기" }).click();
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "사운드 불러오기", exact: true }).click();
-  await (await chooser).setFiles({ name: "목소리.wav", mimeType: "audio/wav", buffer: wav(seconds) });
+  await (await chooser).setFiles({ name: "목소리.wav", mimeType: "audio/wav", buffer: wav(seconds, frequency) });
   await expect(page.getByRole("button", { name: "저장", exact: true })).toBeEnabled();
   await expect(page.getByRole("button", { name: "미리 듣기", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "저장", exact: true }).click();
 }
 
 test("upload, place, save, reload, mix with Pd, pause, resume and remove", async ({ page }) => {
-  await upload(page);
+  const carrier = 2040;
+  await upload(page, 0.5, carrier);
   await page.locator('[data-cell="126"]').click();
   await expect(page.locator('[data-cell="126"] [data-symbol-site]')).toBeVisible();
   await expect(page.locator(".sound-range").first()).toBeVisible();
@@ -84,6 +90,16 @@ test("upload, place, save, reload, mix with Pd, pause, resume and remove", async
   await expect.poll(async () => (await probe(page)).rms).toBeGreaterThan(0.01);
   expect((await probe(page)).contexts).toEqual(["running"]);
   expect((await probe(page)).pd).toBe(1);
+  const world = terrainFixtures().flat;
+  const modulation = 40 + 120 * (world.start.x + 0.5) / world.size;
+  await expect.poll(() => page.evaluate(({ carrier, modulation }) => {
+    const analyser = (window as typeof window & { soundProbe: Probe }).soundProbe.output!;
+    const bins = new Float32Array(analyser.frequencyBinCount);
+    analyser.getFloatFrequencyData(bins);
+    const level = (hz: number) => bins[Math.round(hz * analyser.fftSize / analyser.context.sampleRate)];
+    const sidebands = Math.min(level(carrier - modulation), level(carrier + modulation));
+    return sidebands > -55 && sidebands > level(carrier) + 12;
+  }, { carrier, modulation })).toBe(true);
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
   await expect.poll(async () => (await probe(page)).active).toBe(0);
   await page.keyboard.press("a");

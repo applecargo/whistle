@@ -21,7 +21,7 @@ export function nearbySounds(world: World, actors: Actor[], player: PlayerAudioF
   }).sort((a, b) => a.distance - b.distance || a.id.localeCompare(b.id));
 }
 
-export function createPlacedSounds(context: AudioContext, onError: () => void) {
+export function createPlacedSounds(context: AudioContext, output: AudioNode, onError: () => void) {
   const voices = new Map<string, Voice>();
   const buffers = new Map<string, AudioBuffer>();
   const pending = new Map<string, Promise<void>>();
@@ -46,7 +46,7 @@ export function createPlacedSounds(context: AudioContext, onError: () => void) {
     gain.gain.setValueAtTime(0, context.currentTime);
     gain.gain.setTargetAtTime(item.gain, context.currentTime, 0.04);
     pan.pan.value = item.pan;
-    source.connect(gain).connect(pan).connect(context.destination);
+    source.connect(gain).connect(pan).connect(output);
     voices.set(item.id, { source, gain, pan });
     source.onended = () => {
       source.disconnect(); gain.disconnect(); pan.disconnect(); voices.delete(item.id);

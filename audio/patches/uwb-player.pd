@@ -1,4 +1,4 @@
-#N canvas 0 0 900 300 12;
+#N canvas 0 0 900 350 12;
 #X obj 30 30 player3;
 #X obj 250 30 s whistle-board-height;
 #X obj 250 70 r whistle-board-height;
@@ -13,3 +13,11 @@
 #X obj 710 130 s whistle-player-stop;
 #X obj 710 170 r whistle-player-stop;
 #X obj 540 30 r whistle-ready;
+#X obj 30 220 adc~ 1 2;
+#X obj 30 255 placed-sound-fx;
+#X obj 30 290 throw~ outL;
+#X obj 170 290 throw~ outR;
+#X connect 14 0 15 0;
+#X connect 14 1 15 1;
+#X connect 15 0 16 0;
+#X connect 15 1 17 0;
