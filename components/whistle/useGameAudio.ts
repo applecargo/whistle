@@ -18,6 +18,12 @@ const MASTER_FADE = 0.05;
 /** 사운드스케이프 가운데 경로의 비상관 필터. 기본 끔, 주소에 `?diffuse`를 붙이면 켠 채로 시작한다.
  *  실행 중에는 F 키로 켜고 끈다(비교 청취). 키는 자판 위치(code)로 본다. */
 const DIFFUSE_TOGGLE_CODE = "KeyF";
+/** 오디오 버퍼 크기. 주소에 `?latency=playback`을 붙이면 큰 버퍼(끊김에 강함, 대신 발소리·편집음이 늦게 들림).
+ *  `?latency=balanced`도 받는다. 없으면 브라우저 기본(interactive, 가장 짧음). */
+const latencyHint = (): AudioContextLatencyCategory => {
+  const value = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("latency");
+  return value === "playback" || value === "balanced" ? value : "interactive";
+};
 const diffuseEnabled = () => typeof location !== "undefined" && new URLSearchParams(location.search).has("diffuse");
 /** 지형이 없는 맵의 평지 타일. 프레임마다 새 배열이면 영역을 매번 다시 나누므로 크기별로 하나만 만든다. */
 const flatTiles = new Map<number, ReturnType<typeof flatTerrain>["tiles"]>();
@@ -32,7 +38,8 @@ const tilesOf = (world: World) => world.terrain?.tiles ?? flatTiles.get(world.si
  */
 async function createGameMix() {
   const started = performance.now();
-  const context = new AudioContext();
+  const hint = latencyHint();
+  const context = new AudioContext({ latencyHint: hint });
   try {
     await context.resume();
     const master = context.createGain();
@@ -57,7 +64,7 @@ async function createGameMix() {
         else if (event.type === "active" || event.type === "released") log(`${event.id} ${event.patch} ${event.type === "active" ? "켜짐" : "꺼짐"}`);
       },
     });
-    log(`오디오 시작: ${context.sampleRate}Hz, 상호작용 패치 edit·player·event 준비됨 (${Math.round(performance.now() - started)}ms), 비상관 필터 ${diffuse ? "켬" : "끔"}`);
+    log(`오디오 시작: ${context.sampleRate}Hz, 상호작용 패치 edit·player·event 준비됨 (${Math.round(performance.now() - started)}ms), 비상관 필터 ${diffuse ? "켬" : "끔"}, 지연 설정 ${hint} (${(context.baseLatency * 1000).toFixed(1)}ms)`);
     return {
       context, master, scape, diffuse, game: createGameSoundscape(scape, log),
       session: {
@@ -85,7 +92,7 @@ async function createGameMix() {
 const INTERACTION_PATCH_NAMES = ["edit", "player", "event"];
 
 export type GameAudioDebug = {
-  context: { state: AudioContextState; sampleRate: number; baseLatency: number; outputLatency?: number } | null;
+  context: { state: AudioContextState; sampleRate: number; latencyHint: AudioContextLatencyCategory; baseLatency: number; outputLatency?: number } | null;
   /** 시작된 상호작용 패치(오디오가 시작되면 3개가 계속 돈다) */
   interaction: string[];
   /** 사운드스케이프 패치 인스턴스(loading·active·releasing 모두 wasm 하나씩) */
@@ -138,7 +145,7 @@ export function useGameAudio() {
       debug: (): GameAudioDebug => {
         const mix = mixRef.current;
         return {
-          context: mix ? { state: mix.context.state, sampleRate: mix.context.sampleRate,
+          context: mix ? { state: mix.context.state, sampleRate: mix.context.sampleRate, latencyHint: latencyHint(),
             baseLatency: mix.context.baseLatency, outputLatency: mix.context.outputLatency } : null,
           interaction: mix ? INTERACTION_PATCH_NAMES : [],
           voices: mix?.scape.snapshot().voices ?? [],

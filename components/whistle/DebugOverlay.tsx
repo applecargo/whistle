@@ -73,7 +73,7 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
   const byState = info.voices.reduce<Record<string, number>>((n, v) => ((n[v.state] = (n[v.state] ?? 0) + 1), n), {});
   const wasm = info.interaction.length + info.voices.length;
   lines.push(c
-    ? `오디오 ${c.state} · ${c.sampleRate} Hz · 지연 ${f(c.baseLatency * 1000, 1)}+${f((c.outputLatency ?? NaN) * 1000, 1)} ms · 비상관 ${info.diffuse ? "켬" : "끔"}`
+    ? `오디오 ${c.state} · ${c.sampleRate} Hz · 지연(${c.latencyHint}) ${f(c.baseLatency * 1000, 1)}+${f((c.outputLatency ?? NaN) * 1000, 1)} ms · 비상관 ${info.diffuse ? "켬" : "끔"}`
     : "오디오 시작 전");
   // 상호작용 패치는 항상 edit·player·event 세 개라 이름은 생략(줄이 길어지면 폭을 넘는다)
   lines.push(`wasm ${wasm}개 = 상호작용 ${info.interaction.length} + 사운드스케이프 ${info.voices.length}` +
