@@ -1,5 +1,7 @@
 // 게임 ↔ 사운드스케이프 연결. 3D 플레이 중 오디오 프레임마다
 // 리스너를 옮기고, 플레이어 근처에 걸친 소리 영역(층별로 같은 종류끼리 이어진 섬)을 가까운 순으로 켠다.
+// 음원은 영역 외곽에서 플레이어에게 가장 가까운 점. 다가갈수록 커지고(외곽에서 1) 패닝이 줄어들어
+// 외곽에 닿으면 좌우 모두 1, 안에서는 계속 1. 농도는 음량에 쓰지 않고 패치로 보낸다.
 import type { Soundscape } from "./soundscape.ts";
 import type { PlayerAudioFrame } from "./game-parameters.ts";
 import {
@@ -9,6 +11,8 @@ import {
 
 /** 리스너(귀) 높이: 발 높이 + Scene.tsx의 EYE_HEIGHT */
 export const EAR_HEIGHT = 1.35;
+/** 영역 패치가 받는 버스: [농도 0~1](풀·안개·바람 세기, 나머지 층은 1). 패치에 `r whistle-region`이 없으면 보내지 않는다. */
+export const REGION_BUS = "whistle-region";
 
 type Scape = Pick<Soundscape, "set" | "remove" | "activate" | "deactivate" | "setListener">;
 
@@ -36,7 +40,7 @@ export function createGameSoundscape(scape: Scape, log: (message: string) => voi
       return count;
     }, {})).map(([kind, n]) => `${kind} ${n}`).join(", ");
     const size = field.size;
-    log(`소리 영역 등록 ${regions.list.length}개 (${size}×${size}, ${kinds || "없음"}) · 반경 ${options.radius}타일, 가까운 순 최대 ${options.max}개`);
+    log(`소리 영역 등록 ${regions.list.length}개 (${size}×${size}, ${kinds || "없음"}) · 반경 ${options.radius}타일, 패닝 전환 ${options.blend}타일, 가까운 순 최대 ${options.max}개`);
   };
 
   return {
@@ -52,7 +56,9 @@ export function createGameSoundscape(scape: Scape, log: (message: string) => voi
       const next = new Set(near.map((r) => r.id));
       const { on, off } = diffActive(active, next);
       for (const id of off) scape.deactivate(id);
-      for (const { id, patch, position, gain, spread } of near) scape.set({ id, patch, position, gain, spread });
+      for (const { id, patch, position, gain, width, amount } of near) {
+        scape.set({ id, patch, position, gain, width, messages: { [REGION_BUS]: [amount] } });
+      }
       for (const id of on) scape.activate(id);
       active = next;
     },

@@ -1,12 +1,14 @@
 // 여러 Pd 패치를 3D 공간에 배치하고 하나의 마스터로 믹스하는 엔진.
 //
-//   패치 노드 → 게인(fade) ─┬→ PannerNode(3D) → 점 게인 ─────────┬→ 마스터 → 출력
-//                           └→ 확산 게인 → (공유) 확산 버스 ──────┘
+//   패치 노드 → 게인(fade·음량) ─┬→ PannerNode(3D) → 점 게인 ──────────────┬→ 마스터 → 출력
+//                                └→ 가운데 게인 ─(diffuse면 → 공유 확산 버스)─┘
 //
-// spread(0~1): 넓게 걸친 영역 한가운데처럼 사방에서 들려야 하는 소스. 점 경로와 확산 경로를
-// equal-power로 섞는다(점 = cos, 확산 = sin). 확산 버스는 소스 전체가 하나를 같이 쓴다:
-// 모노로 모은 뒤 왼쪽·오른쪽에 서로 다른 all-pass 필터 묶음을 걸어 좌우 신호를 다르게(비상관) 만든다.
-// 방향은 없고 음량만 같은 거리 감쇠(inverse)를 따른다. 소스 수와 상관없이 필터 8개.
+// width(0~1): 0 = 패닝(방향), 1 = 방향 없이 좌우 모두 1. 영역 경계에 가까워질수록 커진다.
+// - 기본(diffuse 꺼짐): 필터 없음. 가운데 경로는 같은 신호를 좌우에 그대로 보낸다(모노 → 좌우 1).
+//   두 경로가 같은 신호라 진폭으로 더해지므로 직선으로 섞는다(점 = 1 − width, 가운데 = width).
+// - diffuse 켜짐: 가운데 경로를 공유 확산 버스로 보낸다. 모노로 모은 뒤 왼쪽·오른쪽에 서로 다른
+//   all-pass 필터 4개씩을 걸어 좌우를 다르게(비상관) 만든다. 서로 다른 신호라 equal-power로 섞는다
+//   (점 = cos, 가운데 = sin). 필터가 소리를 바꿀 수 있어 기본은 끔.
 //
 // 패닝 기본값은 equalpower(가벼움, 앞뒤 구분 없음). HRTF는 옵션(panning: "HRTF").
 //
@@ -17,13 +19,18 @@
 //   update()를 매 프레임 불러도 같은 정리를 한다(둘 중 먼저 오는 쪽).
 
 export type Vec3 = { x: number; y: number; z: number };
-export type SoundscapeSource = { id: string; patch: string; position: Vec3; gain?: number; spread?: number };
+export type PdMessage = (string | number)[];
+export type SoundscapeSource = {
+  id: string; patch: string; position: Vec3; gain?: number; width?: number;
+  /** 패치로 보낼 메시지(수신 버스 이름 → 값). 값이 바뀔 때만 보낸다. 패치에 그 버스가 없으면 건너뛴다. */
+  messages?: Record<string, PdMessage>;
+};
 export type SoundscapeEvent =
   | { type: "loading" | "active" | "releasing" | "released"; id: string; patch: string }
   | { type: "error"; id: string; patch: string; error: unknown };
 
 /** 패치 하나를 시작해 연결되지 않은 노드를 돌려준다. 실제로는 webpd-runtime의 startPatch. */
-export type PatchHandle = { node: AudioNode; destroy(): void };
+export type PatchHandle = { node: AudioNode; destroy(): void; send?(bus: string, message: PdMessage): void };
 type StartPatch = (context: BaseAudioContext, name: string) => Promise<PatchHandle>;
 
 export type SoundscapeOptions = {
@@ -33,6 +40,8 @@ export type SoundscapeOptions = {
   /** fade in/out 길이(초) */
   fade?: number;
   panning?: PanningModelType;
+  /** width의 가운데 경로에 비상관(all-pass) 필터를 쓴다. 기본 false(필터 없음) */
+  diffuse?: boolean;
   /** 이 거리(m)까지는 감쇠 없음 */
   refDistance?: number;
   rolloff?: number;
@@ -49,6 +58,8 @@ type Voice = {
   panner?: PannerNode;
   dry?: GainNode;
   wet?: GainNode;
+  /** 버스별 마지막으로 보낸 값(같으면 다시 보내지 않음). 패치에 없는 버스는 null */
+  sent?: Map<string, string | null>;
   releaseAt?: number;
 };
 
@@ -123,7 +134,7 @@ function createDiffuser(context: BaseAudioContext, output: AudioNode) {
 }
 
 export function createSoundscape(options: SoundscapeOptions) {
-  const { context, start, fade = 0.4, panning = "equalpower", refDistance = 2, rolloff = 1 } = options;
+  const { context, start, fade = 0.4, panning = "equalpower", refDistance = 2, rolloff = 1, diffuse = false } = options;
   const emit = options.onEvent ?? (() => {});
   const master = context.createGain();
   master.connect(options.destination ?? context.destination);
@@ -131,24 +142,35 @@ export function createSoundscape(options: SoundscapeOptions) {
   const voices = new Map<string, Voice>();
   let disposed = false;
   let diffuser: ReturnType<typeof createDiffuser> | undefined;
-  let listenerAt: Vec3 = { x: 0, y: 0, z: 0 };
 
-  /** PannerNode의 inverse 거리 감쇠와 같은 식(확산 경로용) */
-  const attenuation = (position: Vec3) => {
-    const d = Math.hypot(position.x - listenerAt.x, position.y - listenerAt.y, position.z - listenerAt.z);
-    return refDistance / (refDistance + rolloff * (Math.max(d, refDistance) - refDistance));
-  };
-  /** 점·확산 경로 비율. immediate면 바로(처음 연결할 때), 아니면 부드럽게. */
+  /** 점·가운데 경로 비율. immediate면 바로(처음 연결할 때), 아니면 부드럽게. */
   const mix = (voice: Voice, immediate = false) => {
     if (!voice.dry || !voice.wet) return;
-    const spread = Math.min(1, Math.max(0, voice.source.spread ?? 0));
-    const dry = Math.cos(spread * Math.PI / 2);
-    // 확산 버스는 모노를 좌우 양쪽에 그대로 보낸다. 가운데 점(equalpower: 좌우 각 √½)과 크기를 맞춘다.
-    const wet = Math.sin(spread * Math.PI / 2) * Math.SQRT1_2 * attenuation(voice.source.position);
+    const width = Math.min(1, Math.max(0, voice.source.width ?? 0));
+    const dry = diffuse ? Math.cos(width * Math.PI / 2) : 1 - width;
+    const wet = diffuse ? Math.sin(width * Math.PI / 2) : width;
     if (immediate) { voice.dry.gain.value = dry; voice.wet.gain.value = wet; return; }
     const now = context.currentTime;
     voice.dry.gain.setTargetAtTime(dry, now, MIX_SMOOTHING);
     voice.wet.gain.setTargetAtTime(wet, now, MIX_SMOOTHING);
+  };
+
+  /** 값이 바뀐 메시지만 패치로 보낸다. 패치에 없는 버스(send가 throw)는 기억해 두고 다시 보내지 않는다. */
+  const deliver = (voice: Voice) => {
+    const send = voice.patch?.send;
+    if (!send || !voice.source.messages) return;
+    voice.sent ??= new Map();
+    for (const [bus, message] of Object.entries(voice.source.messages)) {
+      const last = voice.sent.get(bus);
+      const key = JSON.stringify(message);
+      if (last === null || last === key) continue;
+      try {
+        send.call(voice.patch, bus, message);
+        voice.sent.set(bus, key);
+      } catch {
+        voice.sent.set(bus, null);
+      }
+    }
   };
 
   const setPosition = (panner: PannerNode, position: Vec3) => placePanner(panner, position, context.currentTime);
@@ -188,12 +210,13 @@ export function createSoundscape(options: SoundscapeOptions) {
       setPosition(panner, voice.source.position);
       const dry = context.createGain();
       const wet = context.createGain();
-      diffuser ??= createDiffuser(context, master);
       patch.node.connect(gain);
       gain.connect(panner).connect(dry).connect(master);
-      gain.connect(wet).connect(diffuser.input);
+      if (diffuse) gain.connect(wet).connect((diffuser ??= createDiffuser(context, master)).input);
+      else gain.connect(wet).connect(master);
       Object.assign(voice, { patch, gain, panner, dry, wet });
       mix(voice, true);
+      deliver(voice);
       fadeIn(id, voice);
     } catch (error) {
       if (voices.get(id) === voice) voices.delete(id);
@@ -246,6 +269,7 @@ export function createSoundscape(options: SoundscapeOptions) {
       voice.source = source;
       if (voice.panner) setPosition(voice.panner, source.position);
       mix(voice);
+      deliver(voice);
       if (voice.gain && voice.state === "active") ramp(voice.gain.gain, source.gain ?? 1, context.currentTime, fade);
     },
     remove(id: string) {
@@ -271,7 +295,6 @@ export function createSoundscape(options: SoundscapeOptions) {
     deactivate,
     /** 리스너(플레이어 귀) 위치와 바라보는 방향. forward는 정규화하지 않아도 된다. */
     setListener(position: Vec3, forward: Vec3) {
-      listenerAt = position;
       placeListener(context.listener, position, forward, context.currentTime);
     },
     /** fade-out이 끝난 소스의 노드를 정리한다. 자동으로도 불리므로 선택 사항. */

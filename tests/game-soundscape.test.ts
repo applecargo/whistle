@@ -87,9 +87,9 @@ test("켜진 영역은 프레임마다 위치·음량이 갱신된다", () => {
   const tiles = twoIslands();
   game.frame(frame(5, 3, 24), field(tiles));
   const far = { ...scape.sources.get("surface-50")! };
-  game.frame(frame(3.5, 3, 24), field(tiles));
+  game.frame(frame(4, 1.2, 24), field(tiles)); // 외곽 (3.5, 1.5)까지 0.58
   const near = scape.sources.get("surface-50")!;
-  assert.ok(near.gain! > far.gain!, "가까워지면 비중이 커진다");
+  assert.ok(near.gain! > far.gain!, "외곽에 가까워지면 커진다");
   assert.notDeepEqual(near.position, far.position);
 });
 
@@ -129,13 +129,14 @@ test("지형이 바뀌면 끄고 이전 영역을 지운 뒤 새로 등록한다
   assert.equal(logs.length, 2);
 });
 
-test("환경(derivation)이 바뀌면 다시 등록하고, 켜진 영역에는 spread를 넘긴다", () => {
+test("환경(derivation)이 바뀌면 다시 등록하고, 켜진 영역에는 width와 농도 메시지를 넘긴다", () => {
   const scape = fakeScape();
   const logs: string[] = [];
   const game = createGameSoundscape(scape, (m) => logs.push(m));
   const tiles = flatTerrain(24).tiles;
   game.frame(frame(10, 10, 24), field(tiles));
-  assert.equal(typeof scape.sources.get("surface-0")!.spread, "number");
+  assert.equal(scape.sources.get("surface-0")!.width, 1);
+  assert.deepEqual(scape.sources.get("surface-0")!.messages, { "whistle-region": [1] });
   const environment = {
     size: 24, regions: [], trees: [], ponds: [],
     cells: tiles.map((_, i) => ({ grass: i % 24 < 12 ? 1 : 0, water: null, tree: false, fog: 0, windX: 0, windZ: 0 })),
@@ -144,4 +145,7 @@ test("환경(derivation)이 바뀌면 다시 등록하고, 켜진 영역에는 s
   assert.equal(logs.length, 2);
   assert.match(logs[1], /plain 1, grass 1/);
   assert.deepEqual(new Set(game.activeIds()), new Set(["surface-0", "grass-0"]));
+  // (10, 10)은 풀(x < 12) 안: 음량 1, 농도는 메시지로
+  assert.equal(scape.sources.get("grass-0")!.gain, 1);
+  assert.deepEqual(scape.sources.get("grass-0")!.messages, { "whistle-region": [1] });
 });

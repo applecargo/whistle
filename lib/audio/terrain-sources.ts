@@ -59,7 +59,7 @@ type LayerMap = {
   layer: Layer;
   /** 타일 인덱스 → list의 인덱스(이 층에 속하지 않으면 −1) */
   regionOf: Int32Array;
-  /** 칸별 농도 0~1(속하지 않으면 0) */
+  /** 칸별 농도 0~1(속하지 않으면 0). 음량·위치에는 쓰지 않고 패치로 보낸다 */
   amount: Float64Array;
   /** 칸별 높이(장면 좌표 y) */
   height: Float64Array;
@@ -160,35 +160,37 @@ export function terrainRegions(field: SoundField): Regions {
 }
 
 export type NearbyOptions = {
-  /** 이 거리(타일) 안의 칸이 영역을 켠다 */
+  /** 영역 외곽까지 이 거리(타일) 안이면 켠다. 여기서 음량 0, 외곽에 닿으면 1 */
   radius: number;
   /** 동시에 켜 두는 최대 영역 수. 층을 가리지 않고 플레이어에게 가까운 순 */
   max: number;
-  /** 이미 켜진 영역은 radius + hysteresis 안의 칸까지 세고, 거리 순위에서도 이만큼 가깝게 친다(경계 깜빡임 방지) */
+  /** 이미 켜진 영역은 radius + hysteresis까지 유지하고, 거리 순위에서도 이만큼 가깝게 친다(경계 깜빡임 방지) */
   hysteresis: number;
+  /** 외곽까지 이 거리(타일)부터 패닝이 줄어들어 외곽에서 좌우 1이 된다 */
+  blend: number;
 };
-export const DEFAULT_NEARBY: NearbyOptions = { radius: 3, max: 6, hysteresis: 0.5 };
-
-/** 가까운 칸일수록 크게 친다. */
-const tileWeight = (distance: number) => 1 / (1 + distance);
-/** 이보다 가까운 칸(발밑)은 방향이 없다: 사방에서 들리는 쪽으로 센다. */
-const UNDERFOOT = 0.5;
+export const DEFAULT_NEARBY: NearbyOptions = { radius: 3, max: 6, hysteresis: 0.5, blend: 2 };
 
 export type NearbyRegion = {
   id: string;
   patch: string;
-  /** 반경 안에 들어온 그 영역 칸들의 가중 중심(장면 좌표) */
+  /** 플레이어에서 가장 가까운 영역 외곽의 점(장면 좌표). 영역 안이면 플레이어 위치 */
   position: Vec3;
-  /** 반경 안(구멍 포함 모든 칸)의 가중치 합 대비 이 영역의 비중(농도 반영), 0~1 */
+  /** 외곽까지 거리로 정한 음량: radius에서 0, 외곽·안에서 1 */
   gain: number;
-  /** 0 = 한 방향의 점, 1 = 사방을 감쌈. 1 − (칸 방향 단위벡터 가중 평균의 길이) */
-  spread: number;
-  /** 플레이어에서 영역의 가장 가까운 칸까지 거리(타일) */
+  /** 0 = 패닝(방향), 1 = 좌우 1(방향 없음). 외곽까지 blend 타일부터 커져 외곽에서 1 */
+  width: number;
+  /** 플레이어에서 영역 외곽까지 유클리드 거리(타일). 안이면 0 */
   distance: number;
+  /** 가장 가까운 칸의 농도(풀·안개·바람 세기 등, 나머지 층은 1). 음량에는 쓰지 않고 패치로 보낸다 */
+  amount: number;
 };
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /**
  * 플레이어(격자 좌표) 근처에서 켤 영역들. 모든 층의 후보를 모아 가까운 순으로 max개.
+ * 칸은 중심 (x, z), 한 변 1인 정사각형으로 보고 외곽까지 유클리드 거리를 잰다.
  * active: 지금 켜져 있는 영역 id.
  */
 export function nearbyRegions(
@@ -199,52 +201,43 @@ export function nearbyRegions(
 ): NearbyRegion[] {
   const { field: { size }, list, layers } = regions;
   const keep = options.radius + options.hysteresis;
-  const reach = Math.ceil(keep);
+  const reach = Math.ceil(keep + 1);
   const cx = Math.round(player.x), cz = Math.round(player.z);
-  let disk = 0;
-  type Sum = { w: number; x: number; y: number; z: number; dx: number; dz: number; nearest: number };
-  const sums = new Map<number, Sum>();
+  type Nearest = { distance: number; x: number; z: number; index: number; map: LayerMap };
+  const nearest = new Map<number, Nearest>();
   for (let z = Math.max(0, cz - reach); z <= Math.min(size - 1, cz + reach); z++) {
     for (let x = Math.max(0, cx - reach); x <= Math.min(size - 1, cx + reach); x++) {
-      const distance = Math.hypot(x - player.x, z - player.z);
+      // 이 칸(정사각형)에서 플레이어에게 가장 가까운 점
+      const px = clamp(player.x, x - 0.5, x + 0.5), pz = clamp(player.z, z - 0.5, z + 0.5);
+      const distance = Math.hypot(px - player.x, pz - player.z);
       if (distance > keep) continue;
-      const weight = tileWeight(distance);
-      if (distance <= options.radius) disk += weight;
       const index = z * size + x;
-      const ux = distance < UNDERFOOT ? 0 : (x - player.x) / distance;
-      const uz = distance < UNDERFOOT ? 0 : (z - player.z) / distance;
       for (const map of layers) {
         const r = map.regionOf[index];
         if (r === -1) continue;
-        if (distance > options.radius && !active.has(list[r].id)) continue;
-        const w = weight * map.amount[index];
-        const sum = sums.get(r) ?? { w: 0, x: 0, y: 0, z: 0, dx: 0, dz: 0, nearest: Infinity };
-        sum.w += w;
-        sum.x += w * toScene(x, size);
-        sum.y += w * map.height[index];
-        sum.z += w * toScene(z, size);
-        sum.dx += w * ux;
-        sum.dz += w * uz;
-        sum.nearest = Math.min(sum.nearest, distance);
-        sums.set(r, sum);
+        const best = nearest.get(r);
+        if (!best || distance < best.distance) nearest.set(r, { distance, x: px, z: pz, index, map });
       }
     }
   }
-  const found = [...sums].filter(([, sum]) => sum.w > 0).map(([r, sum]) => {
-    const region = list[r];
-    const gain = disk > 0 ? Math.min(1, sum.w / disk) : 0;
-    return {
-      rank: active.has(region.id) ? sum.nearest - options.hysteresis : sum.nearest,
-      region: {
-        id: region.id, patch: region.patch, gain,
-        position: { x: sum.x / sum.w, y: sum.y / sum.w, z: sum.z / sum.w },
-        spread: clamp01(1 - Math.hypot(sum.dx, sum.dz) / sum.w),
-        distance: sum.nearest,
-      },
-    };
-  });
-  // 가까운 순. 같으면 비중이 큰 순, 그것도 같으면 id 순으로 고정한다.
-  found.sort((a, b) => a.rank - b.rank || b.region.gain - a.region.gain || (a.region.id < b.region.id ? -1 : 1));
+  const found = [...nearest]
+    .filter(([r, n]) => n.distance <= options.radius || active.has(list[r].id))
+    .map(([r, n]) => {
+      const region = list[r];
+      return {
+        rank: active.has(region.id) ? n.distance - options.hysteresis : n.distance,
+        region: {
+          id: region.id, patch: region.patch,
+          position: { x: toScene(n.x, size), y: n.map.height[n.index], z: toScene(n.z, size) },
+          gain: clamp(1 - n.distance / options.radius, 0, 1),
+          width: options.blend > 0 ? clamp(1 - n.distance / options.blend, 0, 1) : n.distance > 0 ? 0 : 1,
+          distance: n.distance,
+          amount: n.map.amount[n.index],
+        },
+      };
+    });
+  // 가까운 순. 같으면 id 순으로 고정한다.
+  found.sort((a, b) => a.rank - b.rank || (a.region.id < b.region.id ? -1 : 1));
   return found.slice(0, options.max).map((f) => f.region);
 }
 

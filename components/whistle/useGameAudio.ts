@@ -15,6 +15,8 @@ const BASE = `${import.meta.env.BASE_URL}audio-test/`;
 const log = (message: string) => console.log(`[Whistle:Audio] ${message}`);
 /** 전체 음소거 fade(초) */
 const MASTER_FADE = 0.05;
+/** 사운드스케이프 가운데 경로의 비상관 필터. 기본 끔, 주소에 `?diffuse`를 붙이면 켠다. */
+const diffuseEnabled = () => typeof location !== "undefined" && new URLSearchParams(location.search).has("diffuse");
 /** 지형이 없는 맵의 평지 타일. 프레임마다 새 배열이면 영역을 매번 다시 나누므로 크기별로 하나만 만든다. */
 const flatTiles = new Map<number, ReturnType<typeof flatTerrain>["tiles"]>();
 const tilesOf = (world: World) => world.terrain?.tiles ?? flatTiles.get(world.size) ??
@@ -40,16 +42,20 @@ async function createGameMix() {
     limiter.release.value = 0.25;
     master.connect(limiter).connect(context.destination);
     const session = await createInteractionSession(BASE, () => {}, { context, output: master });
+    const diffuse = diffuseEnabled();
     const scape = createSoundscape({
       context,
       destination: master,
+      diffuse,
+      // 거리에 따른 음량은 game-soundscape가 영역 외곽까지 거리로 정한다(패너 감쇠는 쓰지 않음).
+      rolloff: 0,
       start: (c, name) => startPatch(c as AudioContext, BASE, name),
       onEvent: (event) => {
         if (event.type === "error") console.warn(`[Whistle:Audio] ${event.id} ${event.patch} 로드 실패`, event.error);
         else if (event.type === "active" || event.type === "released") log(`${event.id} ${event.patch} ${event.type === "active" ? "켜짐" : "꺼짐"}`);
       },
     });
-    log(`오디오 시작: ${context.sampleRate}Hz, 상호작용 패치 edit·player·event 준비됨 (${Math.round(performance.now() - started)}ms)`);
+    log(`오디오 시작: ${context.sampleRate}Hz, 상호작용 패치 edit·player·event 준비됨 (${Math.round(performance.now() - started)}ms), 비상관 필터 ${diffuse ? "켬" : "끔"}`);
     return {
       context, master, scape, game: createGameSoundscape(scape, log),
       session: {
