@@ -74,6 +74,8 @@ export function createGameSoundscape(scape: Scape, log: (message: string) => voi
     debug: () => ({
       registered: regions?.list.length ?? 0,
       near: lastNear.map((n) => ({ ...n, kind: regions?.list.find((r) => r.id === n.id)?.kind ?? "?" })),
+      /** 영역 id → 종류(꺼지는 중이라 이번 프레임 목록에 없는 영역도) */
+      kindOf: (id: string) => regions?.list.find((r) => r.id === id)?.kind ?? "?",
       options,
     }),
   };

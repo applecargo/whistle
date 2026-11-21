@@ -84,15 +84,24 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
     lines.push(`whistle-player  grass ${f(p.grass)} · rough ${f(p.rough)} · water ${f(p.water)}`);
   }
 
-  // 켜진 영역
-  const near = info.soundscape?.near ?? [];
-  if (near.length) {
+  // 실행 중인 wasm 전체: 상호작용 패치 + 사운드스케이프 패치(이번 프레임에 고른 영역 + 꺼지는 중인 영역)
+  if (info.interaction.length || info.voices.length) {
     lines.push("");
     // 한글은 폭이 두 칸이라 열이 어긋나므로 머리글은 영문(거리 d, 음량 gain, 폭 width, 농도 amount)
-    lines.push(`${pad("region", 14)}${pad("kind", 8)}${pad("patch", 20)}${pad("d", 6)}${pad("gain", 6)}${pad("width", 6)}${pad("amount", 7)}state`);
-    for (const n of near) {
-      const voice = info.voices.find((v) => v.id === n.id);
-      lines.push(`${pad(n.id, 14)}${pad(n.kind, 8)}${pad(n.patch, 20)}${pad(f(n.distance), 6)}${pad(f(n.gain), 6)}${pad(f(n.width), 6)}${pad(f(n.amount), 7)}${voice?.state ?? "-"}`);
+    lines.push(`${pad("patch", 20)}${pad("id / bus", 16)}${pad("kind", 8)}${pad("d", 6)}${pad("gain", 6)}${pad("width", 6)}${pad("amount", 7)}state`);
+    for (const name of info.interaction) {
+      const bus = name === "player" ? "whistle-player" : `whistle-${name}`;
+      lines.push(`${pad(name, 20)}${pad(bus, 16)}${pad("-", 8)}${pad("", 25)}${c?.state ?? "-"}`);
+    }
+    const near = info.soundscape?.near ?? [];
+    const order = (id: string) => { const k = near.findIndex((n) => n.id === id); return k === -1 ? Infinity : k; };
+    for (const voice of [...info.voices].sort((a, b) => order(a.id) - order(b.id) || (a.id < b.id ? -1 : 1))) {
+      const n = near.find((r) => r.id === voice.id);
+      const kind = n?.kind ?? info.soundscape?.kindOf(voice.id) ?? "?";
+      const values = n
+        ? `${pad(f(n.distance), 6)}${pad(f(n.gain), 6)}${pad(f(n.width), 6)}${pad(f(n.amount), 7)}`
+        : pad("", 25);
+      lines.push(`${pad(voice.patch, 20)}${pad(voice.id, 16)}${pad(kind, 8)}${values}${voice.state}`);
     }
   }
   return lines.join("\n");
