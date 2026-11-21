@@ -33,6 +33,9 @@ const io = {
 for (const name of ["whistle-edit", "whistle-player", "whistle-gate", "whistle-event", "whistle-player-stop", "whistle-board-height"]) {
   if (!io.inputs[name] || !io.outputs[name]) throw new Error(`Missing Pd bus: ${name}`);
 }
+for (const bus of ["whistle-resonance", "whistle-resonance-control", "whistle-habitat", "whistle-habitat-run", "whistle-phrase-space", "whistle-phrase-run", "whistle-phrase-zone"]) {
+  if (!io.inputs[bus]) throw new Error(`Missing soundscape input: ${bus}`);
+}
 if (!io.outputs["whistle-ready"]) throw new Error("Missing Pd ready signal");
 await mkdir(output, { recursive: true });
 await writeFile(join(output, "patch.wasm"), wasm);

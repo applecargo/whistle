@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { createPdSession, type EditSound } from "@/lib/audio/webpd-session";
 import { createGameAudio } from "@/lib/audio/game-audio";
+import { resonanceAt } from "@/lib/audio/soundscape";
 import { playerSound, type PlayerAudioFrame } from "@/lib/audio/game-parameters";
 import { createPlacedSounds } from "@/lib/audio/placed-sounds";
 import type { Actor, World, Event, Player } from "@/lib/world";
@@ -27,7 +28,7 @@ export function useGameAudio() {
       stop: () => { enabled.current = false; recordings.current?.stop(); controller.current?.stop(); },
       reset: () => { recordings.current?.stop(); controller.current?.reset(); },
       movement: (frame: PlayerAudioFrame, world?: World, actors?: Actor[], environment?: Environment) => {
-        controller.current?.movement(playerSound(frame));
+        controller.current?.movement({ ...playerSound(frame), resonance: environment && resonanceAt(environment, frame) });
         if (enabled.current && !paused.current && world && actors) recordings.current?.update(world, actors, frame, environment);
       },
       event: (event: Event, player: Player) => {

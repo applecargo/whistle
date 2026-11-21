@@ -1,4 +1,4 @@
-#N canvas 0 0 900 350 12;
+#N canvas 0 0 900 450 12;
 #X obj 30 30 player3;
 #X obj 250 30 s whistle-board-height;
 #X obj 250 70 r whistle-board-height;
@@ -17,6 +17,20 @@
 #X obj 30 255 placed-sound-fx;
 #X obj 30 290 throw~ outL;
 #X obj 170 290 throw~ outR;
+#X obj 420 220 soundscape;
+#X obj 420 250 s whistle-habitat;
+#X obj 620 250 s whistle-habitat-run;
+#X obj 35 325 grass-water-phrase;
+#X obj 420 325 s whistle-phrase-space;
+#X obj 620 325 s whistle-phrase-run;
+#X obj 420 290 s whistle-phrase-zone;
+#X obj 35 370 world-resonance-live;
+#X obj 35 405 throw~ outL;
+#X obj 200 405 throw~ outR;
+#X obj 420 370 s whistle-resonance;
+#X obj 620 370 s whistle-resonance-control;
+#X connect 25 0 26 0;
+#X connect 25 0 27 0;
 #X connect 14 0 15 0;
 #X connect 14 1 15 1;
 #X connect 15 0 16 0;

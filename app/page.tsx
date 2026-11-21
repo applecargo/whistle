@@ -21,6 +21,7 @@ import { useWorldDocument } from "@/components/whistle/useWorldDocument";
 import { SoundMaker } from "@/components/whistle/SoundMaker";
 import { contentKind, contentLimitMessage, MAX_CONTENT_COUNT, validateContentCounts } from "@/lib/content-limits";
 import { useGameAudio } from "@/components/whistle/useGameAudio";
+import { resonanceAt } from "@/lib/audio/soundscape";
 import { editSound } from "@/lib/audio/game-parameters";
 import { useWorldPersistence } from "@/components/whistle/useWorldPersistence";
 import { useLiveWorldPublisher } from "@/components/whistle/useLiveWorldPublisher";
@@ -235,8 +236,9 @@ export default function Home() {
     paintDocument(cells, erase, { layer: activeAsset ? "symbols" : "tiles", assetId: activeAsset ?? undefined, surface, terrainTool });
     const after = getWorld();
     if (before !== after) {
-      const sound = editSound(before, after, cells, deriveWorld(after));
-      if (sound) audio.edit(sound);
+      const derived = deriveWorld(after);
+      const sound = editSound(before, after, cells, derived);
+      if (sound) audio.edit({ ...sound, resonance: resonanceAt(derived.environment) });
     }
   };
   const saveAsset = (asset: Asset) => {

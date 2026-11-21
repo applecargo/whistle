@@ -4,6 +4,7 @@ import { createSimulation } from "../lib/world";
 import { createWorldDeriver } from "../lib/world-derivation";
 import { createPdSession, validateBoardHeight, type PdSession } from "../lib/audio/webpd-session";
 import { roomPositionAt, sampleTrackedPosition, type RoomMapping } from "../lib/uwb-position";
+import { resonanceAt } from "../lib/audio/soundscape";
 import { createLabWorld } from "./world";
 import { useLiveWorld } from "./useLiveWorld";
 import { useDevicePosition } from "./useDevicePosition";
@@ -73,13 +74,13 @@ export default function Lab() {
     if (!current || audioState !== "on") return;
     if (sample.value?.sound && !heightError) {
       current.boardHeight(boardHeight);
-      current.player(sample.value.sound);
+      current.player({ ...sample.value.sound, resonance: resonanceAt(derivation.environment, sample.value.frame) });
       current.mute(false);
     } else {
       current.stopPlayer();
       current.mute(true);
     }
-  }, [sample, audioState, boardHeight, heightError]);
+  }, [sample, audioState, boardHeight, heightError, derivation.environment]);
 
   useEffect(() => {
     const blur = () => { if (!liveActive.current) stopAudio(); };

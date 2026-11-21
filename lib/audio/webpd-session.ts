@@ -1,3 +1,5 @@
+import type { resonanceAt } from "./soundscape.ts";
+type Resonance = ReturnType<typeof resonanceAt>;
 export type PdMessage = (string | number)[];
 type Port = { nodeId: string; portletId: string };
 type Manifest = { inputs: Record<string, Port>; outputs: Record<string, Port> };
@@ -30,11 +32,11 @@ function loadRuntime(url: string) {
 
 export type EditSound = {
   x: number; z: number; overlap: number;
-  asset?: string; action?: string; surface?: string;
+  asset?: string; action?: string; surface?: string; resonance?: Resonance;
 };
 export type PlayerSound = {
   x: number; y: number; z: number; grass: number; rough: number;
-  grounded?: boolean; falling?: boolean; yaw?: number; water?: number;
+  grounded?: boolean; falling?: boolean; yaw?: number; water?: number; resonance?: Resonance;
 };
 
 export function validateBoardHeight(height: number) {
@@ -104,27 +106,49 @@ export async function createPdSession(
       if (!port) throw new Error(`Pd 수신 포트가 없습니다: ${bus}`);
       node!.port.postMessage({ type: "io:messageReceiver", payload: { ...port, message } });
     };
+    let previous: Resonance | undefined;
+    let repeating = false;
+    const stopResonance = () => {
+      if (previous) send("whistle-resonance-control", [0]);
+      previous = undefined;
+      repeating = false;
+    };
+    const updateResonance = (next: Resonance | undefined, strike: boolean) => {
+      if (!next || next.grass === 0) { stopResonance(); return; }
+      if (strike && repeating) stopResonance();
+      if (!previous || next.grass !== previous.grass || next.water !== previous.water || next.extent !== previous.extent) {
+        send("whistle-resonance", [bounded(next.grass, 0, 1), bounded(next.water, 0, 1), bounded(next.extent, 0, 1)]);
+        previous = next;
+      }
+      if (strike || !repeating) send("whistle-resonance-control", [strike ? 2 : 1]);
+      repeating = !strike;
+    };
     return {
       context,
       node,
-      edit({ x, z, overlap, asset, action, surface }: EditSound) {
+      edit({ x, z, overlap, asset, action, surface, resonance }: EditSound) {
         send("whistle-edit", [bounded(x, 0, 1), bounded(z, 0, 1), bounded(overlap, 0, 1),
           ...(asset === undefined ? [] : [asset, action ?? "paint", surface ?? "plain"])]);
+        updateResonance(resonance, true);
       },
-      player({ x, y, z, grass, rough, grounded, falling, yaw, water }: PlayerSound) {
+      player({ x, y, z, grass, rough, grounded, falling, yaw, water, resonance }: PlayerSound) {
         send("whistle-player", [
           bounded(x, 0, 1), bounded(y, -1000, 1000), bounded(z, 0, 1),
           bounded(grass, 0, 1), bounded(rough, 0, 1),
           ...(grounded === undefined ? [] : [Number(grounded), Number(!!falling),
             bounded(yaw ?? 0, -1e6, 1e6), bounded(water ?? 0, 0, 1)]),
         ]);
+        updateResonance(resonance, false);
       },
       stopPlayer() { send("whistle-player-stop", ["bang"]); },
       boardHeight(height: number) { send("whistle-board-height", [validateBoardHeight(height)]); },
       event(frequency: number, gain: number, pan: number) {
         send("whistle-event", [bounded(frequency, 20, 20000), bounded(gain, 0, 0.12), bounded(pan, -1, 1)]);
       },
-      mute(muted: boolean) { send("whistle-gate", [muted ? 0 : 1]); },
+      mute(muted: boolean) {
+        if (muted) stopResonance();
+        send("whistle-gate", [muted ? 0 : 1]);
+      },
       async close() {
         if (closed) return;
         closed = true;
