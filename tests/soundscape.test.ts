@@ -124,3 +124,66 @@ test("a fixed virtual UWB listener and game listener hear the same instrument as
     assert.equal(resonanceAt(createWorldDeriver()(world).environment, point).grass, 0);
   }
 });
+
+test("rock damping follows shared shoreline edges and clears with the last dry rock", () => {
+  const world = createSoundscapeWorld();
+  const derive = createWorldDeriver();
+  const mix = () => resonanceAt(derive(world).environment, resonanceListeningPoint);
+  const tile = (x: number, z: number) => world.terrain!.tiles[z * world.size + x];
+  const before = mix();
+  assert.equal(before.bankRock, false);
+  tile(5, 0).surface = "rough"; // diagonal to the first water cell at (6, 1)
+  assert.deepEqual(mix(), before);
+  tile(5, 1).surface = "rough";
+  assert.deepEqual(mix(), { ...before, bankRock: true });
+  tile(7, 4).surface = "rough";
+  tile(5, 1).surface = "plain";
+  assert.equal(mix().bankRock, true);
+  tile(7, 4).hole = true;
+  assert.deepEqual(mix(), before);
+  tile(7, 4).surface = "plain";
+  tile(7, 4).hole = false;
+  assert.deepEqual(mix(), before);
+
+  for (const cell of world.terrain!.tiles) cell.surface = "plain";
+  tile(world.size - 1, 1).surface = "slick";
+  tile(0, 2).surface = "rough";
+  assert.equal(mix().bankRock, false);
+  tile(world.size - 1, 2).surface = "rough";
+  assert.equal(mix().bankRock, true);
+});
+
+test("grass reaches a closed water ring by shared edges in game and virtual UWB", () => {
+  const world = createSoundscapeWorld(), derive = createWorldDeriver();
+  const tile = (x: number, z: number) => world.terrain!.tiles[z * world.size + x];
+  for (const cell of world.terrain!.tiles) cell.surface = "plain";
+  tile(2, 5).surface = "soft";
+  for (const x of [3, 4, 5, 7]) tile(x, 5).surface = "slick";
+  for (const z of [4, 6]) for (const x of [5, 6, 7]) tile(x, z).surface = "slick";
+  const mapping = { originX: -1, originZ: 3, width: 5, depth: 7, rotation: 28 };
+  const metres = roomPositionAt(2.5 / world.size, 5.5 / world.size, mapping);
+  function check(steps: number, area: number) {
+    const derived = derive(world), env = derived.environment;
+    const frame = sampleTrackedPosition(world, derived, metres, mapping).frame!;
+    for (const point of [undefined, { x: 2, z: 5 }, frame]) {
+      const { pathSteps, loopArea } = resonanceAt(env, point);
+      assert.deepEqual([pathSteps, loopArea], [steps, area]);
+    }
+  }
+  check(3, 1);
+  tile(4, 5).surface = "plain";
+  check(0, 0);
+  tile(4, 5).surface = "slick";
+  tile(6, 4).surface = "plain";
+  check(8, 0);
+  tile(6, 4).surface = "slick";
+  tile(7, 4).surface = "plain";
+  check(7, 0);
+  tile(7, 4).surface = "slick";
+  tile(6, 5).hole = true;
+  check(7, 0);
+  tile(6, 5).hole = false;
+  for (const z of [4, 5, 6]) tile(8, z).surface = "slick";
+  tile(7, 5).surface = "plain";
+  check(3, 2);
+});

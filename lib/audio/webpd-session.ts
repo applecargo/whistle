@@ -116,8 +116,10 @@ export async function createPdSession(
     const updateResonance = (next: Resonance | undefined, strike: boolean) => {
       if (!next || next.grass === 0) { stopResonance(); return; }
       if (strike && repeating) stopResonance();
-      if (!previous || next.grass !== previous.grass || next.water !== previous.water || next.extent !== previous.extent) {
-        send("whistle-resonance", [bounded(next.grass, 0, 1), bounded(next.water, 0, 1), bounded(next.extent, 0, 1)]);
+      if (!previous || next.grass !== previous.grass || next.water !== previous.water || next.extent !== previous.extent || next.bankRock !== previous.bankRock ||
+          next.pathSteps !== previous.pathSteps || next.loopArea !== previous.loopArea) {
+        send("whistle-resonance", [bounded(next.grass, 0, 1), bounded(next.water, 0, 1), bounded(next.extent, 0, 1), Number(next.bankRock),
+          next.pathSteps, next.loopArea]);
         previous = next;
       }
       if (strike || !repeating) send("whistle-resonance-control", [strike ? 2 : 1]);

@@ -209,3 +209,59 @@ test("one grid edit auditions one strike and leaves the play clock stopped", asy
   pd.send("whistle-resonance-control", 0);
   assert.ok(pd.rms(300) < .00001);
 });
+
+test("placing and removing a shoreline rock changes the decay of the same grass strike", async (t) => {
+  const pd = await renderer();
+  const world = createSoundscapeWorld();
+  pd.send("whistle-gate", 1);
+  pd.rms(2000);
+  function strike(surface) {
+    world.terrain.tiles[2 * world.size + 5].surface = surface;
+    const mix = resonanceAt(deriveEnvironment(world));
+    pd.send("whistle-resonance", mix.grass, mix.water, mix.extent, Number(mix.bankRock));
+    pd.rms(40);
+    pd.send("whistle-resonance-control", 2);
+    pd.rms(22);
+    const attack = pd.rms(4);
+    const levels = Array.from({ length: 100 }, () => pd.rms(20));
+    const threshold = Math.max(...levels) / 10;
+    pd.send("whistle-resonance-control", 0);
+    pd.rms(80);
+    return { attack, decayMs: 20 * (1 + levels.findLastIndex(level => level >= threshold)) };
+  }
+  const before = strike("plain"), damped = strike("rough"), restored = strike("plain");
+  t.diagnostic(`Decay to -20 dB (ms): ${before.decayMs} → ${damped.decayMs} → ${restored.decayMs}`);
+  assert.ok(before.attack > .001 && Math.abs(damped.attack - before.attack) < .0001);
+  assert.ok(damped.decayMs > 0 && before.decayMs > 3 * damped.decayMs);
+  assert.ok(Math.abs(restored.decayMs - before.decayMs) <= 20);
+});
+
+test("the same strike returns as a breath, a single path echo, or no distant response", async () => {
+  async function render(steps, area, interrupt, changeMs = 100) {
+    const pd = await renderer();
+    pd.send("whistle-gate", 1);
+    const space = (length, enclosed) => pd.send("whistle-resonance", 1, 1, 0, 0, length, enclosed);
+    space(steps, area);
+    pd.rms(50);
+    pd.send("whistle-resonance-control", 2);
+    return Array.from({ length: 110 }, (_, i) => {
+      if (i * 10 === changeMs && interrupt) space(...interrupt);
+      return pd.rms(10);
+    });
+  }
+  const closed = await render(3, 1);
+  const open = await render(8, 0);
+  const cut = await render(0, 0);
+  const changedInFlight = await render(3, 1, [8, 0]);
+  const peak = (levels, from, to) => Math.max(...levels.slice(from / 10, to / 10));
+  assert.ok(Math.abs(closed[2] - open[2]) < .00001 && Math.abs(closed[2] - cut[2]) < .00001);
+  assert.deepEqual(closed.slice(0, 23), cut.slice(0, 23));
+  assert.ok(Math.min(...closed.slice(32, 60)) > .006);
+  assert.ok(peak(open, 410, 440) < .001 && peak(open, 440, 470) > .007);
+  assert.ok(peak(open, 520, 1000) < .001);
+  assert.ok(peak(cut, 300, 1000) < .001);
+  assert.ok(peak(changedInFlight, 300, 1000) < .001);
+  const openedWhileBreathing = await render(3, 1, [8, 0], 400);
+  assert.ok(peak(openedWhileBreathing, 400, 450) > .01);
+  assert.ok(peak(openedWhileBreathing, 590, 1000) < .001);
+});

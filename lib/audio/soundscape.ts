@@ -1,4 +1,5 @@
 import type { Environment } from "../environment.ts";
+import { traceWaterPath } from "./water-path.ts";
 import { flatTerrain } from "../terrain.ts";
 import { starterWorld } from "../world.ts";
 import type { Position2D } from "../uwb-position.ts";
@@ -80,24 +81,36 @@ export type PhraseRoute = "stay" | "follow";
 export type VisitRoute = "pass" | "listen";
 export const resonanceListeningPoint = { x: 5, z: 6 };
 
-const connectivityCache = new WeakMap<Environment, number>();
-export function waterConnectivity(environment: Environment) {
-  const cached = connectivityCache.get(environment);
+const waterCache = new WeakMap<Environment, { extent: number; bankRock: boolean } & ReturnType<typeof traceWaterPath>>();
+
+function waterResonance(environment: Environment) {
+  const cached = waterCache.get(environment);
   if (cached !== undefined) return cached;
-  let largest = 0, total = 0;
+  const { size, terrain, cells } = environment;
+  const dryRock = (i: number) => terrain?.tiles[i]?.surface === "rough" && !cells[i].hole && cells[i].water === null;
+  const touchesRock = (i: number) =>
+    (i % size > 0 && dryRock(i - 1)) || (i % size < size - 1 && dryRock(i + 1)) ||
+    (i >= size && dryRock(i - size)) || (i + size < cells.length && dryRock(i + size));
+  let largest = 0, total = 0, bankRock = false;
   for (const pond of environment.ponds) {
     largest = Math.max(largest, pond.cells.length);
     total += pond.cells.length;
+    bankRock ||= pond.cells.some(touchesRock);
   }
-  const connected = total > 1 ? (largest - 1) / (total - 1) : 0;
-  connectivityCache.set(environment, connected);
-  return connected;
+  const path = traceWaterPath(environment, locatePhraseSources(environment).grass);
+  const water = { ...path, extent: total > 1 ? (largest - 1) / (total - 1) : 0, bankRock };
+  waterCache.set(environment, water);
+  return water;
+}
+
+export function waterConnectivity(environment: Environment) {
+  return waterResonance(environment).extent;
 }
 
 export function resonanceAt(environment: Environment, point?: Position2D) {
   const sources = locatePhraseSources(environment);
   const grass = point ? phraseMix(sources, point).grass : Number(sources.grass !== null);
-  return { grass, water: environment.ponds.length ? grass : 0, extent: waterConnectivity(environment) };
+  return { grass, water: environment.ponds.length ? grass : 0, ...waterResonance(environment) };
 }
 export type ListeningZone = "away" | "grass" | "bank";
 
