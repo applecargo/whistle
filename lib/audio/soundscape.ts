@@ -1,6 +1,12 @@
 // 여러 Pd 패치를 3D 공간에 배치하고 하나의 마스터로 믹스하는 엔진.
 //
-//   패치 노드 → 게인(fade) → PannerNode(3D) → 마스터 → 출력
+//   패치 노드 → 게인(fade) ─┬→ PannerNode(3D) → 점 게인 ─────────┬→ 마스터 → 출력
+//                           └→ 확산 게인 → (공유) 확산 버스 ──────┘
+//
+// spread(0~1): 넓게 걸친 영역 한가운데처럼 사방에서 들려야 하는 소스. 점 경로와 확산 경로를
+// equal-power로 섞는다(점 = cos, 확산 = sin). 확산 버스는 소스 전체가 하나를 같이 쓴다:
+// 모노로 모은 뒤 왼쪽·오른쪽에 서로 다른 all-pass 필터 묶음을 걸어 좌우 신호를 다르게(비상관) 만든다.
+// 방향은 없고 음량만 같은 거리 감쇠(inverse)를 따른다. 소스 수와 상관없이 필터 8개.
 //
 // 패닝 기본값은 equalpower(가벼움, 앞뒤 구분 없음). HRTF는 옵션(panning: "HRTF").
 //
@@ -11,7 +17,7 @@
 //   update()를 매 프레임 불러도 같은 정리를 한다(둘 중 먼저 오는 쪽).
 
 export type Vec3 = { x: number; y: number; z: number };
-export type SoundscapeSource = { id: string; patch: string; position: Vec3; gain?: number };
+export type SoundscapeSource = { id: string; patch: string; position: Vec3; gain?: number; spread?: number };
 export type SoundscapeEvent =
   | { type: "loading" | "active" | "releasing" | "released"; id: string; patch: string }
   | { type: "error"; id: string; patch: string; error: unknown };
@@ -41,6 +47,8 @@ type Voice = {
   patch?: PatchHandle;
   gain?: GainNode;
   panner?: PannerNode;
+  dry?: GainNode;
+  wet?: GainNode;
   releaseAt?: number;
 };
 
@@ -85,6 +93,35 @@ function placeListener(listener: AudioListener, position: Vec3, forward: Vec3, n
   }
 }
 
+/** 확산 경로의 좌우 all-pass 주파수(Hz). 좌우가 달라야 위상이 서로 달라진다. */
+const DIFFUSE_ALLPASS = [[190, 760, 2300, 6200], [330, 1150, 3600, 8800]];
+/** 점·확산 섞는 비율이 바뀔 때의 시간 상수(초) */
+const MIX_SMOOTHING = 0.08;
+
+function createDiffuser(context: BaseAudioContext, output: AudioNode) {
+  const input = context.createGain();
+  input.channelCount = 1;
+  input.channelCountMode = "explicit";
+  input.channelInterpretation = "speakers";
+  const merger = context.createChannelMerger(2);
+  const nodes: AudioNode[] = [input, merger];
+  DIFFUSE_ALLPASS.forEach((frequencies, channel) => {
+    let last: AudioNode = input;
+    for (const frequency of frequencies) {
+      const allpass = context.createBiquadFilter();
+      allpass.type = "allpass";
+      allpass.frequency.value = frequency;
+      allpass.Q.value = 0.5;
+      last.connect(allpass);
+      nodes.push(allpass);
+      last = allpass;
+    }
+    last.connect(merger, 0, channel);
+  });
+  merger.connect(output);
+  return { input, dispose: () => nodes.forEach((n) => n.disconnect()) };
+}
+
 export function createSoundscape(options: SoundscapeOptions) {
   const { context, start, fade = 0.4, panning = "equalpower", refDistance = 2, rolloff = 1 } = options;
   const emit = options.onEvent ?? (() => {});
@@ -93,6 +130,26 @@ export function createSoundscape(options: SoundscapeOptions) {
   const sources = new Map<string, SoundscapeSource>();
   const voices = new Map<string, Voice>();
   let disposed = false;
+  let diffuser: ReturnType<typeof createDiffuser> | undefined;
+  let listenerAt: Vec3 = { x: 0, y: 0, z: 0 };
+
+  /** PannerNode의 inverse 거리 감쇠와 같은 식(확산 경로용) */
+  const attenuation = (position: Vec3) => {
+    const d = Math.hypot(position.x - listenerAt.x, position.y - listenerAt.y, position.z - listenerAt.z);
+    return refDistance / (refDistance + rolloff * (Math.max(d, refDistance) - refDistance));
+  };
+  /** 점·확산 경로 비율. immediate면 바로(처음 연결할 때), 아니면 부드럽게. */
+  const mix = (voice: Voice, immediate = false) => {
+    if (!voice.dry || !voice.wet) return;
+    const spread = Math.min(1, Math.max(0, voice.source.spread ?? 0));
+    const dry = Math.cos(spread * Math.PI / 2);
+    // 확산 버스는 모노를 좌우 양쪽에 그대로 보낸다. 가운데 점(equalpower: 좌우 각 √½)과 크기를 맞춘다.
+    const wet = Math.sin(spread * Math.PI / 2) * Math.SQRT1_2 * attenuation(voice.source.position);
+    if (immediate) { voice.dry.gain.value = dry; voice.wet.gain.value = wet; return; }
+    const now = context.currentTime;
+    voice.dry.gain.setTargetAtTime(dry, now, MIX_SMOOTHING);
+    voice.wet.gain.setTargetAtTime(wet, now, MIX_SMOOTHING);
+  };
 
   const setPosition = (panner: PannerNode, position: Vec3) => placePanner(panner, position, context.currentTime);
 
@@ -100,6 +157,8 @@ export function createSoundscape(options: SoundscapeOptions) {
     voice.patch?.destroy();
     voice.gain?.disconnect();
     voice.panner?.disconnect();
+    voice.dry?.disconnect();
+    voice.wet?.disconnect();
     voices.delete(id);
     emit({ type: "released", id, patch: voice.source.patch });
   };
@@ -127,8 +186,14 @@ export function createSoundscape(options: SoundscapeOptions) {
       panner.refDistance = refDistance;
       panner.rolloffFactor = rolloff;
       setPosition(panner, voice.source.position);
-      patch.node.connect(gain).connect(panner).connect(master);
-      Object.assign(voice, { patch, gain, panner });
+      const dry = context.createGain();
+      const wet = context.createGain();
+      diffuser ??= createDiffuser(context, master);
+      patch.node.connect(gain);
+      gain.connect(panner).connect(dry).connect(master);
+      gain.connect(wet).connect(diffuser.input);
+      Object.assign(voice, { patch, gain, panner, dry, wet });
+      mix(voice, true);
       fadeIn(id, voice);
     } catch (error) {
       if (voices.get(id) === voice) voices.delete(id);
@@ -180,6 +245,7 @@ export function createSoundscape(options: SoundscapeOptions) {
       }
       voice.source = source;
       if (voice.panner) setPosition(voice.panner, source.position);
+      mix(voice);
       if (voice.gain && voice.state === "active") ramp(voice.gain.gain, source.gain ?? 1, context.currentTime, fade);
     },
     remove(id: string) {
@@ -205,6 +271,7 @@ export function createSoundscape(options: SoundscapeOptions) {
     deactivate,
     /** 리스너(플레이어 귀) 위치와 바라보는 방향. forward는 정규화하지 않아도 된다. */
     setListener(position: Vec3, forward: Vec3) {
+      listenerAt = position;
       placeListener(context.listener, position, forward, context.currentTime);
     },
     /** fade-out이 끝난 소스의 노드를 정리한다. 자동으로도 불리므로 선택 사항. */
@@ -222,6 +289,7 @@ export function createSoundscape(options: SoundscapeOptions) {
         if (voice.state === "loading") voice.wanted = false;
         else release(id, voice);
       }
+      diffuser?.dispose();
       master.disconnect();
     },
   };

@@ -9,17 +9,21 @@ import { createSoundscape } from "@/lib/audio/soundscape";
 import { createGameSoundscape, type GameSoundscape } from "@/lib/audio/game-soundscape";
 import { flatTerrain } from "@/lib/terrain";
 import type { Actor, World, Event, Player } from "@/lib/world";
-import type { Environment } from "@/lib/environment";
+import type { WorldDerivation } from "@/lib/world-derivation";
 
 const BASE = `${import.meta.env.BASE_URL}audio-test/`;
 const log = (message: string) => console.log(`[Whistle:Audio] ${message}`);
 /** 전체 음소거 fade(초) */
 const MASTER_FADE = 0.05;
+/** 지형이 없는 맵의 평지 타일. 프레임마다 새 배열이면 영역을 매번 다시 나누므로 크기별로 하나만 만든다. */
+const flatTiles = new Map<number, ReturnType<typeof flatTerrain>["tiles"]>();
+const tilesOf = (world: World) => world.terrain?.tiles ?? flatTiles.get(world.size) ??
+  flatTiles.set(world.size, flatTerrain(world.size).tiles).get(world.size)!;
 
 /**
  * AudioContext 1개:
  *   상호작용 패치(edit·player·event) ─┐
- *   지형 사운드스케이프(영역 패치들) ──┼─→ 마스터 게인(음소거 fade) → 리미터 → 출력
+ *   사운드스케이프(층별 영역 패치들) ──┼─→ 마스터 게인(음소거 fade) → 리미터 → 출력
  *   배치한 녹음 사운드 ───────────────┘
  */
 async function createGameMix() {
@@ -92,11 +96,16 @@ export function useGameAudio() {
       play: () => { enabled.current = true; paused.current = false; recordings.current?.stop(); get().play(); },
       stop: () => { enabled.current = false; quiet(); recordings.current?.stop(); controller.current?.stop(); },
       reset: () => { quiet(); recordings.current?.stop(); controller.current?.reset(); },
-      movement: (frame: PlayerAudioFrame, world?: World, actors?: Actor[], environment?: Environment) => {
+      movement: (frame: PlayerAudioFrame, world?: World, actors?: Actor[], derivation?: WorldDerivation) => {
         controller.current?.movement(playerSound(frame));
         if (!enabled.current || paused.current || !world) return;
-        soundscape.current?.frame(frame, (world.terrain ?? flatTerrain(world.size)).tiles);
-        if (actors) recordings.current?.update(world, actors, frame, environment);
+        soundscape.current?.frame(frame, {
+          size: world.size,
+          tiles: tilesOf(world),
+          environment: derivation?.environment,
+          structures: derivation?.structures,
+        });
+        if (actors) recordings.current?.update(world, actors, frame, derivation?.environment);
       },
       event: (event: Event, player: Player) => {
         const distance = Math.hypot(event.x - player.x, event.z - player.z);

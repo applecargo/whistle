@@ -22,6 +22,8 @@ class FakeParam {
   cancelScheduledValues(time: number) { this.events = this.events.filter(e => e.time < time); }
   setValueAtTime(value: number, time: number) { this.events.push({ time, value, ramp: false }); }
   linearRampToValueAtTime(value: number, time: number) { this.events.push({ time, value, ramp: true }); }
+  /** 테스트에서는 지수 접근 대신 그 시각에 바로 목표값이 되는 것으로 본다. */
+  setTargetAtTime(value: number, time: number) { this.events.push({ time, value, ramp: false }); }
 }
 class FakeNode {
   outputs: FakeNode[] = [];
@@ -33,7 +35,7 @@ function fakeContext() {
   const clock = { currentTime: 0 };
   const param = (v = 0) => new FakeParam(clock, v);
   type FakePanner = FakeNode & { positionX: FakeParam; positionY: FakeParam; positionZ: FakeParam; panningModel?: string };
-  const created = { gains: [] as (FakeNode & { gain: FakeParam })[], panners: [] as FakePanner[] };
+  const created = { gains: [] as (FakeNode & { gain: FakeParam })[], panners: [] as FakePanner[], filters: [] as (FakeNode & { type?: string; frequency: FakeParam })[], mergers: [] as FakeNode[] };
   const listener = Object.fromEntries(
     ["positionX", "positionY", "positionZ", "forwardX", "forwardY", "forwardZ", "upX", "upY", "upZ"].map(k => [k, param()]),
   );
@@ -58,6 +60,16 @@ function fakeContext() {
     createGain() {
       const node = Object.assign(new FakeNode(), { gain: param(1) });
       created.gains.push(node);
+      return node;
+    },
+    createBiquadFilter() {
+      const node = Object.assign(new FakeNode(), { frequency: param(350), Q: param(1) });
+      created.filters.push(node);
+      return node;
+    },
+    createChannelMerger() {
+      const node = new FakeNode();
+      created.mergers.push(node);
       return node;
     },
     createPanner() {
@@ -98,7 +110,7 @@ test("등록만으로는 패치를 로드하지 않는다", () => {
   assert.deepEqual(scape.snapshot(), { sources: 1, voices: [] });
 });
 
-test("activate: 패치 → 게인 → 패너 → 마스터로 연결하고 위치를 적용한 뒤 fade in", async () => {
+test("activate: 패치 → 게인 → 패너 → 점 게인 → 마스터(+ 확산 게인 → 확산 버스)로 연결하고 위치를 적용한 뒤 fade in", async () => {
   const { scape, started, created, clock } = setup(0.5);
   scape.set({ id: "a", patch: "terrain_clock", position: { x: 3, y: 1, z: -4 } });
   scape.activate("a");
@@ -106,11 +118,16 @@ test("activate: 패치 → 게인 → 패너 → 마스터로 연결하고 위�
   assert.equal(started.length, 1);
   started[0].resolve();
   await flush();
-  const [master, gain] = created.gains;
+  const [master, gain, dry, wet, bus] = created.gains;
   const [panner] = created.panners;
   assert.deepEqual(started[0].node.outputs, [gain]);
-  assert.deepEqual(gain.outputs, [panner]);
-  assert.deepEqual(panner.outputs, [master]);
+  assert.deepEqual(gain.outputs, [panner, wet]);
+  assert.deepEqual(panner.outputs, [dry]);
+  assert.deepEqual(dry.outputs, [master]);
+  assert.deepEqual(wet.outputs, [bus]);
+  assert.deepEqual(created.mergers[0].outputs, [master], "확산 버스 → 좌우 합침 → 마스터");
+  assert.equal(dry.gain.value, 1, "spread 없음 = 점 경로만");
+  assert.equal(wet.gain.value, 0);
   assert.equal(panner.panningModel, "equalpower", "기본값");
   assert.deepEqual([(panner.positionX as FakeParam).value, (panner.positionY as FakeParam).value, (panner.positionZ as FakeParam).value], [3, 1, -4]);
   assert.equal(gain.gain.value, 0);
@@ -292,6 +309,8 @@ test("Firefox: AudioParam이 없는 리스너·패너는 setPosition/setOrientat
     createPanner: () => Object.assign(new FakeNode(), {
       setPosition: (...a: number[]) => calls.push(`panner.setPosition ${a.join(",")}`),
     }),
+    createBiquadFilter: () => Object.assign(new FakeNode(), { frequency: new FakeParam(clock), Q: new FakeParam(clock) }),
+    createChannelMerger: () => new FakeNode(),
   } as unknown as BaseAudioContext;
   const { start, started } = fakePatches();
   const scape = createSoundscape({ context, start });
@@ -308,4 +327,31 @@ test("Firefox: AudioParam이 없는 리스너·패너는 setPosition/setOrientat
     "panner.setPosition 4,1,2",
   ]);
   assert.equal(scape.snapshot().voices[0].state, "active");
+});
+
+test("spread: 점·확산 경로를 equal-power로 섞고, 확산 버스는 소스 전체가 하나를 쓴다", async () => {
+  const { scape, started, created, clock } = setup(0.5);
+  scape.set({ id: "a", patch: "p", position: origin, spread: 1 });
+  scape.set({ id: "b", patch: "p", position: { x: 10, y: 0, z: 0 }, spread: 0.5 });
+  scape.activate("a");
+  scape.activate("b");
+  started.forEach(s => s.resolve());
+  await flush();
+  // master, a(gain, dry, wet), 버스, b(gain, dry, wet)
+  const [, , aDry, aWet, bus, , bDry, bWet] = created.gains;
+  assert.equal(created.mergers.length, 1, "확산 버스는 하나");
+  assert.equal(created.filters.length, 8, "좌우 all-pass 4개씩");
+  assert.ok(created.filters.every(f => f.type === "allpass"));
+  assert.deepEqual(bWet.outputs, [bus]);
+  assert.ok(Math.abs(aDry.gain.value) < 1e-9);
+  assert.ok(Math.abs(aWet.gain.value - Math.SQRT1_2) < 1e-9, "리스너 위치(거리 0)라 감쇠 없음, 가운데 점과 같은 크기(√½)");
+  // b: spread 0.5 → cos·sin 45°(확산 쪽은 √½ 더), 확산 쪽은 거리 10m의 inverse 감쇠(ref 2: 2 / (2 + 8) = 0.2)
+  assert.ok(Math.abs(bDry.gain.value - Math.SQRT1_2) < 1e-9);
+  assert.ok(Math.abs(bWet.gain.value - 0.5 * 0.2) < 1e-9);
+  // 갱신: spread가 0이 되면 점 경로만
+  clock.currentTime = 1;
+  scape.set({ id: "b", patch: "p", position: { x: 10, y: 0, z: 0 }, spread: 0 });
+  clock.currentTime = 1.01;
+  assert.equal(bDry.gain.value, 1);
+  assert.equal(bWet.gain.value, 0);
 });

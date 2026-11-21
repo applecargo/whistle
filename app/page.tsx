@@ -309,7 +309,7 @@ export default function Home() {
             derivation={derivation}
             mode="play"
             onPlayer={(p) => (player.current = p)}
-            onAudioFrame={frame => audio.movement(frame, getWorld(), simulationRef.current.actors, derivation.environment)}
+            onAudioFrame={frame => audio.movement(frame, getWorld(), simulationRef.current.actors, derivation)}
             controls={controls}
             onControlsReset={() => setMovementMode("walk")}
           />

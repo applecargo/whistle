@@ -50,7 +50,7 @@ test.afterEach(async ({}, info) => {
   if (logs && info.status !== info.expectedStatus) await info.attach("audio-logs", { body: logs.join("\n"), contentType: "text/plain" });
 });
 
-test("3D 플레이: 지형 소스를 등록하고 플레이어 근처 영역만(최대 6개) 켜서 소리를 내며, 에디터로 돌아가면 끈다", async ({ page }, info) => {
+test("3D 플레이: 소리 영역을 등록하고 플레이어 근처 영역만(가까운 순 최대 6개) 켜서 소리를 내며, 에디터로 돌아가면 끈다", async ({ page }, info) => {
   const { logs, errors } = await instrument(page);
   (info as unknown as { _logs?: string[] })._logs = logs;
   await page.goto(".");
@@ -65,14 +65,14 @@ test("3D 플레이: 지형 소스를 등록하고 플레이어 근처 영역만(
 
   await page.getByRole("button", { name: "플레이", exact: true }).click();
   await expect.poll(() => count(logs, /오디오 시작/), { timeout: 60_000 }).toBe(1);
-  await expect.poll(() => count(logs, /지형 영역 등록/), { timeout: 30_000 }).toBe(1);
+  await expect.poll(() => count(logs, /소리 영역 등록/), { timeout: 30_000 }).toBe(1);
   await expect.poll(() => count(logs, /켜짐/), { timeout: 60_000 }).toBeGreaterThan(0);
 
   // 이동에 따른 켜고 끄기는 단위 테스트(tests/game-soundscape.test.ts, tests/terrain-sources.test.ts)가 본다.
   // (headless에서 keyboard.down("w")가 이동으로 이어지지 않아 여기서는 걷지 않는다: 위치가 그대로였음)
   await page.waitForTimeout(2000);
   const lit = count(logs, /켜짐/) - count(logs, /꺼짐/);
-  const registered = Number(/지형 영역 등록 (\d+)개/.exec(logs.find((l) => /지형 영역 등록/.test(l))!)![1]);
+  const registered = Number(/소리 영역 등록 (\d+)개/.exec(logs.find((l) => /소리 영역 등록/.test(l))!)![1]);
   expect(lit).toBeGreaterThan(0);
   expect(lit).toBeLessThanOrEqual(Math.min(6, registered));
   expect((await probe(page)).peak).toBeGreaterThan(0.001);
