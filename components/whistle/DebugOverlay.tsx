@@ -1,6 +1,7 @@
 "use client";
 // 3D 플레이 화면 위에 디버그 정보를 글자로 겹쳐 보인다.
-// 켜기: 주소에 `?debug`를 붙이거나, 플레이 중 ` (백틱) 키로 켜고 끈다.
+// 3D 플레이에 들어가면 오른쪽 위에 기본으로 보인다. ` (백틱, 숫자 1 왼쪽) 키로 켜고 끈다.
+// 키는 자판 위치(code)로 본다: 한/영 입력 상태와 상관없이 같은 키.
 // 0.25초마다 읽기만 한다(게임·오디오 상태를 바꾸지 않음).
 import { useEffect, useRef, useState } from "react";
 import type { GameAudioDebug } from "@/components/whistle/useGameAudio";
@@ -8,10 +9,9 @@ import type { World } from "@/lib/world";
 import type { WorldDerivation } from "@/lib/world-derivation";
 import { isHole } from "@/lib/tile";
 
-const TOGGLE_KEY = "`";
+const TOGGLE_CODE = "Backquote";
 const REFRESH_MS = 250;
 
-const startVisible = () => typeof location !== "undefined" && new URLSearchParams(location.search).has("debug");
 const f = (v: number | undefined, digits = 2) => (v === undefined || !Number.isFinite(v) ? "-" : v.toFixed(digits));
 const pad = (s: string, n: number) => (s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length));
 
@@ -96,7 +96,7 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
 }
 
 export function DebugOverlay({ audio, getWorld, derivation }: Props) {
-  const [visible, setVisible] = useState(startVisible);
+  const [visible, setVisible] = useState(true);
   const [text, setText] = useState("");
   const frame = useFrameStats();
   const latest = useRef({ audio, getWorld, derivation });
@@ -104,7 +104,7 @@ export function DebugOverlay({ audio, getWorld, derivation }: Props) {
 
   useEffect(() => {
     const toggle = (event: KeyboardEvent) => {
-      if (event.key === TOGGLE_KEY && !event.repeat) setVisible((v) => !v);
+      if (event.code === TOGGLE_CODE && !event.repeat) setVisible((v) => !v);
     };
     window.addEventListener("keydown", toggle);
     return () => window.removeEventListener("keydown", toggle);
@@ -126,9 +126,9 @@ export function DebugOverlay({ audio, getWorld, derivation }: Props) {
     <pre
       aria-hidden="true"
       style={{
-        position: "absolute", top: 64, left: 8, zIndex: 50, margin: 0, padding: "8px 10px",
-        maxWidth: "calc(100% - 16px)", overflow: "hidden", pointerEvents: "none",
-        font: "11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace", whiteSpace: "pre",
+        position: "absolute", top: "max(12px, env(safe-area-inset-top))", right: "max(12px, env(safe-area-inset-right))", zIndex: 50, margin: 0, padding: "8px 10px",
+        maxWidth: "calc(100% - 80px)", overflow: "hidden", pointerEvents: "none",
+        font: "14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace", whiteSpace: "pre",
         color: "#e8f5e9", background: "rgba(0, 0, 0, 0.62)", borderRadius: 6,
       }}
     >
