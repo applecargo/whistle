@@ -1,6 +1,6 @@
 "use client";
 // 3D 플레이 화면 위에 디버그 정보를 글자로 겹쳐 보인다.
-// 3D 플레이에 들어가면 오른쪽 위에 기본으로 보인다. ` (백틱, 숫자 1 왼쪽) 키로 켜고 끈다.
+// 3D 플레이 중 ` (백틱, 숫자 1 왼쪽) 키로 켜고 끈다(기본은 꺼짐). 켜면 오른쪽 위에 보인다.
 // 키는 자판 위치(code)로 본다: 한/영 입력 상태와 상관없이 같은 키.
 // 0.25초마다 읽기만 한다(게임·오디오 상태를 바꾸지 않음).
 import { useEffect, useRef, useState } from "react";
@@ -96,7 +96,7 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
 }
 
 export function DebugOverlay({ audio, getWorld, derivation }: Props) {
-  const [visible, setVisible] = useState(true);
+  const [visible, setVisible] = useState(false);
   const [text, setText] = useState("");
   const frame = useFrameStats();
   const latest = useRef({ audio, getWorld, derivation });
