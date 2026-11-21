@@ -15,7 +15,9 @@ const BASE = `${import.meta.env.BASE_URL}audio-test/`;
 const log = (message: string) => console.log(`[Whistle:Audio] ${message}`);
 /** 전체 음소거 fade(초) */
 const MASTER_FADE = 0.05;
-/** 사운드스케이프 가운데 경로의 비상관 필터. 기본 끔, 주소에 `?diffuse`를 붙이면 켠다. */
+/** 사운드스케이프 가운데 경로의 비상관 필터. 기본 끔, 주소에 `?diffuse`를 붙이면 켠 채로 시작한다.
+ *  실행 중에는 F 키로 켜고 끈다(비교 청취). 키는 자판 위치(code)로 본다. */
+const DIFFUSE_TOGGLE_CODE = "KeyF";
 const diffuseEnabled = () => typeof location !== "undefined" && new URLSearchParams(location.search).has("diffuse");
 /** 지형이 없는 맵의 평지 타일. 프레임마다 새 배열이면 영역을 매번 다시 나누므로 크기별로 하나만 만든다. */
 const flatTiles = new Map<number, ReturnType<typeof flatTerrain>["tiles"]>();
@@ -141,7 +143,7 @@ export function useGameAudio() {
           interaction: mix ? INTERACTION_PATCH_NAMES : [],
           voices: mix?.scape.snapshot().voices ?? [],
           soundscape: soundscape.current?.debug() ?? null,
-          diffuse: mix?.diffuse ?? false,
+          diffuse: mix?.scape.diffuse() ?? false,
           enabled: enabled.current,
           paused: paused.current,
           frame: lastFrame.current,
@@ -170,7 +172,17 @@ export function useGameAudio() {
     document.addEventListener("visibilitychange", visibility);
     window.addEventListener("pointerdown", resume);
     window.addEventListener("keydown", resume);
+    const toggleDiffuse = (event: KeyboardEvent) => {
+      if (event.code !== DIFFUSE_TOGGLE_CODE || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.target instanceof HTMLElement && (event.target.isContentEditable || event.target.closest("input, textarea, select"))) return;
+      const scape = mixRef.current?.scape;
+      if (!scape) return;
+      scape.setDiffuse(!scape.diffuse());
+      log(`비상관 필터 ${scape.diffuse() ? "켬" : "끔"}`);
+    };
+    window.addEventListener("keydown", toggleDiffuse);
     return () => {
+      window.removeEventListener("keydown", toggleDiffuse);
       window.removeEventListener("blur", pause);
       document.removeEventListener("visibilitychange", visibility);
       window.removeEventListener("pointerdown", resume);

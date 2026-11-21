@@ -356,25 +356,66 @@ test("width(기본): 필터 없이 패닝 경로와 가운데 경로를 직선�
   assert.equal(wet.gain.value, 1, "좌우 모두 1");
 });
 
+/** 소스 하나의 경로를 연결에서 찾는다: 패치 → 게인 → [패너 → 점, 가운데, 확산] */
+type Gain = FakeNode & { gain: FakeParam };
+function paths(node: FakeNode) {
+  const gain = node.outputs[0] as Gain;
+  const [panner, wet, wetDiffuse] = gain.outputs as Gain[];
+  return { dry: panner.outputs[0] as Gain, wet, wetDiffuse };
+}
+
 test("width(diffuse): 가운데 경로를 공유 확산 버스로 보내고 equal-power로 섞는다", async () => {
-  const { scape, started, created } = setup(0.5, true);
+  const { scape, started, created, clock } = setup(0.5, true);
   scape.set({ id: "a", patch: "p", position: origin, width: 1 });
   scape.set({ id: "b", patch: "p", position: { x: 10, y: 0, z: 0 }, width: 0.5 });
   scape.activate("a");
   scape.activate("b");
   started.forEach(s => s.resolve());
   await flush();
-  // master, a(gain, dry, wet), 버스, b(gain, dry, wet)
-  const [, , aDry, aWet, bus, , bDry, bWet] = created.gains;
+  clock.currentTime = 0.01;
+  const a = paths(started[0].node), b = paths(started[1].node);
   assert.equal(created.mergers.length, 1, "확산 버스는 하나");
   assert.equal(created.filters.length, 8, "좌우 all-pass 4개씩");
   assert.ok(created.filters.every(f => f.type === "allpass"));
-  assert.deepEqual(aWet.outputs, [bus]);
-  assert.deepEqual(bWet.outputs, [bus]);
-  assert.ok(Math.abs(aDry.gain.value) < 1e-9);
-  assert.equal(aWet.gain.value, 1);
-  assert.ok(Math.abs(bDry.gain.value - Math.SQRT1_2) < 1e-9);
-  assert.ok(Math.abs(bWet.gain.value - Math.SQRT1_2) < 1e-9);
+  assert.equal(a.wetDiffuse.outputs[0], b.wetDiffuse.outputs[0], "두 소스가 같은 버스로");
+  assert.ok(Math.abs(a.dry.gain.value) < 1e-9);
+  assert.equal(a.wet.gain.value, 0, "필터 없는 가운데 경로는 쓰지 않음");
+  assert.equal(a.wetDiffuse.gain.value, 1);
+  assert.ok(Math.abs(b.dry.gain.value - Math.SQRT1_2) < 1e-9);
+  assert.ok(Math.abs(b.wetDiffuse.gain.value - Math.SQRT1_2) < 1e-9);
+});
+
+test("setDiffuse: 실행 중에 켜고 끄면 경로 비율만 옮기고, 확산 버스는 처음 켤 때 한 번 만든다", async () => {
+  const { scape, started, created, clock } = setup(0.5);
+  scape.set({ id: "a", patch: "p", position: origin, width: 0.5 });
+  scape.activate("a");
+  started[0].resolve();
+  await flush();
+  assert.equal(created.filters.length, 0, "꺼져 있으면 필터를 만들지 않음");
+  assert.equal(scape.diffuse(), false);
+  clock.currentTime = 1;
+  scape.setDiffuse(true);
+  clock.currentTime = 1.01;
+  const a = paths(started[0].node);
+  assert.equal(created.filters.length, 8);
+  assert.equal(a.wet.gain.value, 0);
+  assert.ok(Math.abs(a.wetDiffuse.gain.value - Math.SQRT1_2) < 1e-9);
+  assert.ok(Math.abs(a.dry.gain.value - Math.SQRT1_2) < 1e-9);
+  clock.currentTime = 2;
+  scape.setDiffuse(false);
+  scape.setDiffuse(true);
+  scape.setDiffuse(false);
+  clock.currentTime = 2.01;
+  assert.equal(created.filters.length, 8, "다시 켜도 새로 만들지 않음");
+  assert.equal(a.wetDiffuse.gain.value, 0);
+  assert.equal(a.wet.gain.value, 0.5);
+  assert.equal(a.dry.gain.value, 0.5);
+  // 꺼진 뒤 새로 켜진 소스도 확산 경로를 달아 둔다(다시 켤 때 바로 쓰도록), 값은 0
+  scape.set({ id: "b", patch: "p", position: origin, width: 1 });
+  scape.activate("b");
+  started[1].resolve();
+  await flush();
+  assert.equal(paths(started[1].node).wetDiffuse.gain.value, 0);
 });
 
 test("messages: 연결 직후와 값이 바뀔 때만 패치로 보내고, 패치에 없는 버스는 건너뛴다", async () => {
