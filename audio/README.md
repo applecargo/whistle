@@ -21,7 +21,8 @@ Pd 엔진 하나(AudioContext 하나)에서 여러 패치를 실행한다. 소�
   빈 host 패치만 들어 있는 엔진을 한 번 빌드해 `audio/engine/`에 커밋해 둔다(pd4web.js·wasm·data, 약 2MB).
   **pdlua(GPL-2.0-or-later)는 빼고 빌드한다.** pd4web 3.4.1은 pdlua를 항상 링크하므로 빌드 스크립트가 CLI가 만든 빌드 폴더에서
   pdlua 링크·호출·패키징(pd.lua 등)을 잘라 내고 다시 빌드한다(`engine.json`의 `"pdlua": false`). Lua 객체와 GUI는 쓸 수 없다.
-  남은 구성 요소는 Pd·libpd·pd4web(BSD), ThorVG·Emscripten(MIT)이다. 배포 시 이들의 저작권·라이선스 고지가 필요하다.
+  남은 구성 요소는 Pd·libpd·pd4web(BSD), ThorVG·Emscripten·musl(MIT), LLVM libc++(Apache-2.0 + LLVM 예외)이다.
+  저작권·라이선스 고지는 `public/THIRD_PARTY_LICENSES.txt`(배포물 `/whistle/THIRD_PARTY_LICENSES.txt`). 엔진을 다시 빌드해 버전이 바뀌면 함께 고친다.
   **패치는 엔진에 넣어 빌드하지 않는다.** 실행 중에 `.pd` 파일을 엔진 파일시스템으로 보내고(`sendFile`) 동적 패칭으로 만든다.
   그래서 패치를 고치면 `npm run audio:build`(파일 복사, 수 초) 후 새로고침만 하면 된다. 개발 PC에 pd4web·Emscripten이 없어도 된다.
 - 엔진을 다시 빌드할 때(pd4web 버전업, 외부 객체 추가 등)만 `npm run audio:engine`.
