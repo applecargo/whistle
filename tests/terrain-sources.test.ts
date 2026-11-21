@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { toScene, forwardOf, terrainRegions, nearbyRegions, diffActive, DEFAULT_NEARBY, type SoundField } from "../lib/audio/terrain-sources.ts";
+import { toScene, forwardOf, terrainRegions, nearbyRegions, diffActive, DEFAULT_NEARBY, KIND_PATCHES, type SoundField } from "../lib/audio/terrain-sources.ts";
 import { LEVEL, flatTerrain, deriveStructures, type Structure, type Surface, type Tile } from "../lib/terrain.ts";
 import { deriveEnvironment, type Environment, type EnvironmentCell } from "../lib/environment.ts";
 import { starterWorld } from "../lib/world.ts";
 
 const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
+// 튜닝값(반경·패닝 전환·히스테리시스·패치 이름)은 코드에서 읽는다. 값을 바꿔도 공식과 동작만 검사한다.
+const { radius: R, blend: B, hysteresis: H } = DEFAULT_NEARBY;
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+/** 외곽까지 거리 d에서 기대하는 음량·width */
+const expectedGain = (d: number) => clamp01(1 - d / R);
+/** 개수 상한과 무관한 동작을 볼 때: 상한만 넉넉하게 */
+const UNCAPPED = { ...DEFAULT_NEARBY, max: 99 };
+const expectedWidth = (d: number) => (B > 0 ? clamp01(1 - d / B) : d > 0 ? 0 : 1);
 
 /** 문자 지도로 지형을 만든다. p=plain r=rough s=slick o=soft .=구멍 */
 function map(rows: string[]): SoundField & { tiles: Tile[] } {
@@ -56,7 +64,7 @@ test("영역: 같은 종류끼리 상하좌우로 이어진 것만 한 영역", 
   ]);
   assert.equal(list[0].id, "surface-0");
   assert.equal(list[0].layer, "surface");
-  assert.equal(list[0].patch, "terrain_clock");
+  assert.equal(list[0].patch, KIND_PATCHES.rough);
 });
 
 test("영역: 대각선으로만 닿으면 다른 영역, 구멍은 영역을 끊고 영역에 들지 않는다", () => {
@@ -81,7 +89,8 @@ test("근처 영역: 같은 종류라도 떨어진 두 섬은 각각 켜진다",
     "ppppppp",
   ]);
   const regions = terrainRegions({ tiles, size });
-  const near = nearbyRegions({ x: 3, z: 2 }, regions, new Set());
+  // 묶기 동작만 본다: 섬이 1.5타일 떨어져 있으므로 반경을 고정
+  const near = nearbyRegions({ x: 3, z: 2 }, regions, new Set(), { ...UNCAPPED, radius: 2 });
   const rough = near.filter((r) => regions.list.find((l) => l.id === r.id)!.kind === "rough");
   assert.equal(rough.length, 2);
   // 왼쪽 섬은 플레이어 왼쪽(−x), 오른쪽 섬은 오른쪽(+x)
@@ -91,29 +100,33 @@ test("근처 영역: 같은 종류라도 떨어진 두 섬은 각각 켜진다",
 });
 
 test("근처 영역: 음원은 영역 외곽에서 가장 가까운 점, 음량·width는 외곽까지 거리로", () => {
-  // 오른쪽 세 줄(x 6..8)이 거침. 외곽선은 x = 5.5
-  const field = map(Array(9).fill("pppppprrr"));
+  // 오른쪽 세 줄이 거침. 왼쪽은 반경보다 넓게 비워 둔다. 외곽선은 x = edge
+  const size = Math.ceil(R + H) + 6;
+  const field = map(Array(size).fill("p".repeat(size - 3) + "rrr"));
   const regions = terrainRegions(field);
-  const rough = (x: number, z = 4) => nearbyRegions({ x, z }, regions, new Set()).find((r) => r.id === "surface-6");
-  assert.equal(rough(2), undefined, "외곽까지 3.5타일: 반경 밖");
-  const far = rough(3)!; // 외곽까지 2.5
-  close(far.distance, 2.5);
-  close(far.gain, 1 - 2.5 / 3);
-  close(far.width, 0, 1e-9);
-  close(far.position.x, toScene(5.5, 9));
-  close(far.position.z, toScene(4, 9));
-  const near = rough(4.5)!; // 외곽까지 1
-  close(near.gain, 2 / 3);
-  close(near.width, 0.5, 1e-9);
-  const edge = rough(5.5)!; // 외곽 위
-  close(edge.gain, 1); close(edge.width, 1);
-  const inside = rough(7.2, 3.3)!; // 안: 음원은 플레이어 위치, 좌우 1
+  const id = `surface-${size - 3}`;
+  const edge = size - 3 - 0.5, mid = Math.floor(size / 2);
+  const rough = (x: number, z = mid) => nearbyRegions({ x, z }, regions, new Set()).find((r) => r.id === id);
+  assert.equal(rough(edge - R - 0.25), undefined, "반경 밖");
+  for (const d of [R, R * 0.75, R / 2, B / 2, 0.25]) {
+    if (d > R) continue;
+    const near = rough(edge - d)!;
+    close(near.distance, d);
+    close(near.gain, expectedGain(d));
+    close(near.width, expectedWidth(d));
+    close(near.position.x, toScene(edge, size)); // 음원은 외곽 위의 점
+    close(near.position.z, toScene(mid, size));
+  }
+  const onEdge = rough(edge)!;
+  close(onEdge.gain, 1); close(onEdge.width, 1);
+  const inside = rough(size - 1.8, mid - 0.7)!; // 안: 음원은 플레이어 위치, 좌우 1
   close(inside.distance, 0); close(inside.gain, 1); close(inside.width, 1);
-  close(inside.position.x, toScene(7.2, 9));
-  close(inside.position.z, toScene(3.3, 9));
-  // 대각선 방향도 유클리드 거리: 모서리 (5.5, −0.5)까지
-  const corner = nearbyRegions({ x: 4, z: -2 }, regions, new Set()).find((r) => r.id === "surface-6")!;
-  close(corner.distance, Math.hypot(1.5, 1.5));
+  close(inside.position.x, toScene(size - 1.8, size));
+  close(inside.position.z, toScene(mid - 0.7, size));
+  // 대각선 방향도 유클리드 거리: 모서리 (edge, −0.5)까지
+  const a = R / 2;
+  const corner = nearbyRegions({ x: edge - a, z: -0.5 - a }, regions, new Set()).find((r) => r.id === id)!;
+  close(corner.distance, Math.hypot(a, a));
 });
 
 test("근처 영역: 높이는 가장 가까운 칸의 높이, 높이는 영역을 나누지 않는다", () => {
@@ -125,15 +138,19 @@ test("근처 영역: 높이는 가장 가까운 칸의 높이, 높이는 영역�
   close(nearbyRegions({ x: 13, z: 5 }, regions, new Set())[0].position.y, 2 * LEVEL, 1e-9);
 });
 
-test("근처 영역: 반경 밖 영역은 켜지지 않고, 켜진 영역은 반경 + 0.5까지 유지", () => {
-  const { tiles, size } = map(["ppppppppr", ...Array(8).fill("ppppppppp")]);
+test("근처 영역: 반경 밖 영역은 켜지지 않고, 켜진 영역은 반경 + 히스테리시스까지 유지", () => {
+  const size = Math.ceil(R + H) + 3;
+  const { tiles } = map(["p".repeat(size - 1) + "r", ...Array(size - 1).fill("p".repeat(size))]);
   const regions = terrainRegions({ tiles, size });
-  const rough = regions.list.find((r) => r.kind === "rough")!; // (8, 0), 외곽 x = 7.5
-  const at = (x: number, ids: string[]) => nearbyRegions({ x, z: 0 }, regions, new Set(ids)).some((r) => r.id === rough.id);
-  assert.ok(!at(4.2, []), "거리 3.3: 새로 켜지지 않음");
-  assert.ok(at(4.2, [rough.id]), "거리 3.3: 켜져 있으면 유지");
-  assert.ok(!at(3.9, [rough.id]), "거리 3.6: 꺼짐");
-  assert.ok(at(4.5, []), "거리 3: 켜짐");
+  const rough = regions.list.find((r) => r.kind === "rough")!; // 오른쪽 끝 한 칸
+  const edge = size - 1 - 0.5;
+  const at = (d: number, ids: string[]) => nearbyRegions({ x: edge - d, z: 0 }, regions, new Set(ids)).some((r) => r.id === rough.id);
+  if (H > 0) {
+    assert.ok(!at(R + H / 2, []), "반경 밖: 새로 켜지지 않음");
+    assert.ok(at(R + H / 2, [rough.id]), "반경 밖이라도 히스테리시스 안: 켜져 있으면 유지");
+  }
+  assert.ok(!at(R + H + 0.1, [rough.id]), "히스테리시스 밖: 꺼짐");
+  assert.ok(at(R, []), "반경 위: 켜짐");
 });
 
 test("근처 영역: 최대 개수를 넘으면 층을 가리지 않고 가까운 순, 켜진 것은 우대", () => {
@@ -146,8 +163,11 @@ test("근처 영역: 최대 개수를 넘으면 층을 가리지 않고 가까�
   for (let i = 1; i < near.length; i++) assert.ok(near[i - 1].distance <= near[i].distance);
   // 거리 1인 이웃 4칸까지는 반드시 들어간다
   assert.ok(near.slice(0, 5).every((r) => r.distance <= 1));
-  const again = nearbyRegions({ x: 4.05, z: 4 }, regions, new Set(near.map((r) => r.id)));
-  assert.deepEqual(again.map((r) => r.id).sort(), near.map((r) => r.id).sort());
+  if (H > 0) {
+    // 조금 움직여 다른 칸이 살짝 더 가까워져도 켜진 것을 유지
+    const again = nearbyRegions({ x: 4.05, z: 4 }, regions, new Set(near.map((r) => r.id)));
+    assert.deepEqual(again.map((r) => r.id).sort(), near.map((r) => r.id).sort());
+  }
 });
 
 test("층: 한 칸이 여러 층에 함께 속하고, 각 층의 영역이 따로 켜진다", () => {
@@ -161,7 +181,7 @@ test("층: 한 칸이 여러 층에 함께 속하고, 각 층의 영역이 따�
   assert.deepEqual(regions.list.map((r) => `${r.layer}:${r.kind}:${r.tiles.length}`), [
     "surface:soft:49", "grass:grass:9", "tree:tree:1", "fog:fog:9",
   ]);
-  const near = nearbyRegions({ x: 3, z: 3 }, regions, new Set());
+  const near = nearbyRegions({ x: 3, z: 3 }, regions, new Set(), UNCAPPED);
   assert.deepEqual(near.map((r) => r.id).sort(), ["fog-16", "grass-16", "surface-0", "tree-24"]);
   // 층끼리 음량을 나누지 않는다: 안에 서 있으면 모두 1. 농도는 음량이 아니라 amount로(패치로 보냄)
   assert.ok(near.every((r) => r.gain === 1 && r.width === 1));

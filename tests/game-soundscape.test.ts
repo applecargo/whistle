@@ -87,7 +87,7 @@ test("켜진 영역은 프레임마다 위치·음량이 갱신된다", () => {
   const tiles = twoIslands();
   game.frame(frame(5, 3, 24), field(tiles));
   const far = { ...scape.sources.get("surface-50")! };
-  game.frame(frame(4, 1.2, 24), field(tiles)); // 외곽 (3.5, 1.5)까지 0.58
+  game.frame(frame(4, 1.2, 24), field(tiles)); // 외곽 (3.5, 1.5)까지 0.58(반경이 이보다 커야 켜짐)
   const near = scape.sources.get("surface-50")!;
   assert.ok(near.gain! > far.gain!, "외곽에 가까워지면 커진다");
   assert.notDeepEqual(near.position, far.position);
