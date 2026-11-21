@@ -18,11 +18,12 @@ test("board height accepts metres within the test range and rejects invalid meas
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 function session() {
   const edits: unknown[] = [], moves: PlayerSound[] = [], gates: boolean[] = [], events: unknown[] = [];
-  let closed = 0, stops = 0;
+  let closed = 0, stops = 0, suspends = 0, resumes = 0;
   return {
     edits, moves, gates, events, get closed() { return closed; }, get stops() { return stops; },
+    get suspends() { return suspends; }, get resumes() { return resumes; },
     value: {
-      context: { resume: async () => {} } as AudioContext,
+      context: { resume: async () => { resumes++; }, suspend: async () => { suspends++; } } as unknown as AudioContext,
       edit: (value: unknown) => edits.push(value),
       player: (value: PlayerSound) => moves.push(value),
       stopPlayer: () => { stops++; },
@@ -124,5 +125,24 @@ test("a failed load can be retried by the next real interaction", async () => {
   await tick();
   assert.equal(attempt, 2);
   assert.deepEqual(stub.edits, [{ ...sound, overlap: 1 }]);
+  audio.dispose();
+});
+
+test("pause: 잠시 뒤 AudioContext를 멈추고(패치 처리 중단), 그 전에 다시 켜면 멈추지 않는다", async () => {
+  const stub = session();
+  const audio = createGameAudio(async () => stub.value, (error) => assert.fail(String(error)));
+  audio.play();
+  await tick();
+  audio.pause();
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert.equal(stub.suspends, 1, "pause가 이어지면 suspend");
+  const resumes = stub.resumes;
+  audio.resume();
+  await tick();
+  assert.equal(stub.resumes, resumes + 1, "resume에서 AudioContext를 다시 켠다");
+  audio.pause();
+  audio.resume();
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert.equal(stub.suspends, 1, "곧바로 다시 켜면 suspend하지 않는다");
   audio.dispose();
 });

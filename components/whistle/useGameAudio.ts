@@ -57,7 +57,7 @@ async function createGameMix() {
     });
     log(`오디오 시작: ${context.sampleRate}Hz, 상호작용 패치 edit·player·event 준비됨 (${Math.round(performance.now() - started)}ms), 비상관 필터 ${diffuse ? "켬" : "끔"}`);
     return {
-      context, master, scape, game: createGameSoundscape(scape, log),
+      context, master, scape, diffuse, game: createGameSoundscape(scape, log),
       session: {
         ...session,
         // whistle-gate 대신 전체 마스터 게인으로 음소거한다(상호작용·사운드스케이프·녹음 사운드 모두).
@@ -80,16 +80,34 @@ async function createGameMix() {
   }
 }
 
+const INTERACTION_PATCH_NAMES = ["edit", "player", "event"];
+
+export type GameAudioDebug = {
+  context: { state: AudioContextState; sampleRate: number; baseLatency: number; outputLatency?: number } | null;
+  /** 시작된 상호작용 패치(오디오가 시작되면 3개가 계속 돈다) */
+  interaction: string[];
+  /** 사운드스케이프 패치 인스턴스(loading·active·releasing 모두 wasm 하나씩) */
+  voices: { id: string; patch: string; state: string }[];
+  soundscape: ReturnType<GameSoundscape["debug"]> | null;
+  diffuse: boolean;
+  enabled: boolean;
+  paused: boolean;
+  frame: PlayerAudioFrame | null;
+};
+
 export function useGameAudio() {
   const controller = useRef<ReturnType<typeof createGameAudio> | null>(null);
   const recordings = useRef<ReturnType<typeof createPlacedSounds> | null>(null);
   const soundscape = useRef<GameSoundscape | null>(null);
+  const mixRef = useRef<Awaited<ReturnType<typeof createGameMix>> | null>(null);
+  const lastFrame = useRef<PlayerAudioFrame | null>(null);
   const enabled = useRef(false);
   const paused = useRef(false);
   const api = useMemo(() => {
     const get = () => controller.current ??= createGameAudio(
       async () => {
         const mix = await createGameMix();
+        mixRef.current = mix;
         recordings.current = createPlacedSounds(mix.context, () => {}, mix.master);
         soundscape.current = mix.game;
         return mix.session;
@@ -103,6 +121,7 @@ export function useGameAudio() {
       stop: () => { enabled.current = false; quiet(); recordings.current?.stop(); controller.current?.stop(); },
       reset: () => { quiet(); recordings.current?.stop(); controller.current?.reset(); },
       movement: (frame: PlayerAudioFrame, world?: World, actors?: Actor[], derivation?: WorldDerivation) => {
+        lastFrame.current = frame;
         controller.current?.movement(playerSound(frame));
         if (!enabled.current || paused.current || !world) return;
         soundscape.current?.frame(frame, {
@@ -112,6 +131,21 @@ export function useGameAudio() {
           structures: derivation?.structures,
         });
         if (actors) recordings.current?.update(world, actors, frame, derivation?.environment);
+      },
+      /** 디버그 오버레이용 현재 상태(읽기 전용 사본) */
+      debug: (): GameAudioDebug => {
+        const mix = mixRef.current;
+        return {
+          context: mix ? { state: mix.context.state, sampleRate: mix.context.sampleRate,
+            baseLatency: mix.context.baseLatency, outputLatency: mix.context.outputLatency } : null,
+          interaction: mix ? INTERACTION_PATCH_NAMES : [],
+          voices: mix?.scape.snapshot().voices ?? [],
+          soundscape: soundscape.current?.debug() ?? null,
+          diffuse: mix?.diffuse ?? false,
+          enabled: enabled.current,
+          paused: paused.current,
+          frame: lastFrame.current,
+        };
       },
       event: (event: Event, player: Player) => {
         const distance = Math.hypot(event.x - player.x, event.z - player.z);

@@ -6,7 +6,7 @@ import type { Soundscape } from "./soundscape.ts";
 import type { PlayerAudioFrame } from "./game-parameters.ts";
 import {
   terrainRegions, nearbyRegions, diffActive, toScene, forwardOf, DEFAULT_NEARBY,
-  type NearbyOptions, type Regions, type SoundField,
+  type NearbyOptions, type NearbyRegion, type Regions, type SoundField,
 } from "./terrain-sources.ts";
 
 /** 리스너(귀) 높이: 발 높이 + Scene.tsx의 EYE_HEIGHT */
@@ -19,10 +19,13 @@ type Scape = Pick<Soundscape, "set" | "remove" | "activate" | "deactivate" | "se
 export function createGameSoundscape(scape: Scape, log: (message: string) => void, options: NearbyOptions = DEFAULT_NEARBY) {
   let regions: Regions | undefined;
   let active = new Set<string>();
+  /** 마지막 프레임에서 고른 영역(디버그 표시용) */
+  let lastNear: NearbyRegion[] = [];
 
   const stop = () => {
     for (const id of active) scape.deactivate(id);
     active = new Set();
+    lastNear = [];
   };
 
   /** 맵(지형·환경·구조물)이 바뀌었을 때만 영역을 다시 나눈다(같은 객체면 아무것도 안 함). */
@@ -31,6 +34,7 @@ export function createGameSoundscape(scape: Scape, log: (message: string) => voi
     if (last && last.size === field.size && last.tiles === field.tiles &&
         last.environment === field.environment && last.structures === field.structures) return;
     stop();
+    lastNear = [];
     for (const region of regions?.list ?? []) scape.remove(region.id);
     regions = terrainRegions(field);
     // 등록만 한다(노드 없음). 위치·음량은 켜질 때 프레임마다 정한다.
@@ -53,6 +57,7 @@ export function createGameSoundscape(scape: Scape, log: (message: string) => voi
         forwardOf(frame.yaw),
       );
       const near = nearbyRegions(frame, regions!, active, options);
+      lastNear = near;
       const next = new Set(near.map((r) => r.id));
       const { on, off } = diffActive(active, next);
       for (const id of off) scape.deactivate(id);
@@ -65,6 +70,12 @@ export function createGameSoundscape(scape: Scape, log: (message: string) => voi
     /** 에디터 복귀·일시정지·종료: 켜진 영역을 모두 fade out */
     stop,
     activeIds: () => [...active],
+    /** 디버그 표시용: 등록된 영역 수, 마지막 프레임에서 켠 영역과 그 값 */
+    debug: () => ({
+      registered: regions?.list.length ?? 0,
+      near: lastNear.map((n) => ({ ...n, kind: regions?.list.find((r) => r.id === n.id)?.kind ?? "?" })),
+      options,
+    }),
   };
 }
 
