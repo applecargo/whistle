@@ -71,12 +71,12 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
   // 오디오
   const c = info.context;
   const byState = info.voices.reduce<Record<string, number>>((n, v) => ((n[v.state] = (n[v.state] ?? 0) + 1), n), {});
-  const wasm = info.interaction.length + info.voices.length;
+  const slots = info.interaction.length + info.voices.length;
   lines.push(c
     ? `오디오 ${c.state} · ${c.sampleRate} Hz · 지연(${c.latencyHint}) ${f(c.baseLatency * 1000, 1)}+${f((c.outputLatency ?? NaN) * 1000, 1)} ms · 비상관 ${info.diffuse ? "켬" : "끔"}`
     : "오디오 시작 전");
   // 상호작용 패치는 항상 edit·player·event 세 개라 이름은 생략(줄이 길어지면 폭을 넘는다)
-  lines.push(`wasm ${wasm}개 = 상호작용 ${info.interaction.length} + 사운드스케이프 ${info.voices.length}` +
+  lines.push(`Pd 슬롯 ${slots}개 = 상호작용 ${info.interaction.length} + 사운드스케이프 ${info.voices.length}` +
     (info.voices.length ? ` (${Object.entries(byState).map(([s, n]) => `${s} ${n}`).join(", ")})` : ""));
   lines.push(`사운드스케이프 ${info.enabled ? (info.paused ? "일시정지" : "켜짐") : "꺼짐"}` +
     (info.soundscape ? ` · 등록 영역 ${info.soundscape.registered}개 · 반경 ${info.soundscape.options.radius} · 패닝 전환 ${info.soundscape.options.blend} · 최대 ${info.soundscape.options.max}` : ""));
@@ -103,7 +103,7 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
     lines.push(`whistle-player  grass ${f(p.grass)} · rough ${f(p.rough)} · water ${f(p.water)}`);
   }
 
-  // 실행 중인 wasm 전체: 상호작용 패치 + 사운드스케이프 패치(이번 프레임에 고른 영역 + 꺼지는 중인 영역)
+  // 실행 중인 패치 전체(Pd 엔진 슬롯): 상호작용 패치 + 사운드스케이프 패치(이번 프레임에 고른 영역 + 꺼지는 중인 영역)
   if (info.interaction.length || info.voices.length) {
     lines.push("");
     // 한글은 폭이 두 칸이라 열이 어긋나므로 머리글은 영문(거리 d, 음량 gain, 폭 width, 농도 amount)
@@ -159,7 +159,7 @@ export function DebugOverlay({ audio, getWorld, derivation }: Props) {
       style={{
         position: "absolute", top: "max(12px, env(safe-area-inset-top))", right: "max(12px, env(safe-area-inset-right))", zIndex: 50, margin: 0, padding: "8px 10px",
         // 폭 고정: 내용 길이(releasing 표시, 영역 수)에 따라 박스가 늘고 줄면 오른쪽 기준이라 글자 시작이 흔들린다.
-        // 가장 긴 줄(wasm 6개 모두 다른 상태 + 영역 표 한 줄)이 들어가는 폭. 화면이 좁으면 화면에 맞춘다.
+        // 가장 긴 줄(슬롯 6개 모두 다른 상태 + 영역 표 한 줄)이 들어가는 폭. 화면이 좁으면 화면에 맞춘다.
         boxSizing: "border-box", width: `min(${BOX_WIDTH_CH}ch, calc(100% - 80px))`, overflow: "hidden", pointerEvents: "none",
         font: "14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace", whiteSpace: "pre",
         color: "#e8f5e9", background: "rgba(0, 0, 0, 0.62)", borderRadius: 6,

@@ -12,7 +12,8 @@
 #X obj 256 76 r whistle-ready;
 #X msg 30 172 0.08 5 \, 0 140 80, f 8;
 #X obj 30 213 vline~;
-#X obj 60 316 dac~;
+#X obj 60 316 outlet~;
+#X obj 120 316 outlet~;
 #X connect 1 0 2 0;
 #X connect 2 0 11 0;
 #X connect 2 1 3 0;
@@ -21,7 +22,7 @@
 #X connect 5 0 6 0;
 #X connect 6 0 7 0;
 #X connect 7 0 13 0;
-#X connect 7 0 13 1;
+#X connect 7 0 14 0;
 #X connect 8 0 9 0;
 #X connect 11 0 12 0;
 #X connect 12 0 7 1;

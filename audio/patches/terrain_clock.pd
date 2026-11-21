@@ -170,7 +170,8 @@
 #X obj 1231 613 r~ noisesrc\$0;
 #X text 1245 1205 ||||||||||||;
 #X obj 13 25 loadbang;
-#X obj 640 1165 dac~;
+#X obj 640 1165 outlet~;
+#X obj 700 1165 outlet~;
 #X connect 0 0 17 0;
 #X connect 1 0 17 0;
 #X connect 2 0 19 0;
@@ -260,7 +261,7 @@
 #X connect 59 2 86 0;
 #X connect 59 2 87 0;
 #X connect 60 0 171 0;
-#X connect 60 0 171 1;
+#X connect 60 0 172 0;
 #X connect 61 0 119 0;
 #X connect 62 0 148 0;
 #X connect 63 0 39 0;

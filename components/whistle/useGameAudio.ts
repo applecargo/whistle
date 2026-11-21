@@ -1,10 +1,10 @@
 "use client";
 import { useEffect, useMemo, useRef } from "react";
-import { createInteractionSession, type EditSound } from "@/lib/audio/webpd-session";
+import { createInteractionSession, type EditSound } from "@/lib/audio/pd-session";
 import { createGameAudio } from "@/lib/audio/game-audio";
 import { playerSound, type PlayerAudioFrame } from "@/lib/audio/game-parameters";
 import { createPlacedSounds } from "@/lib/audio/placed-sounds";
-import { startPatch } from "@/lib/audio/webpd-runtime";
+import { openEngine } from "@/lib/audio/pd-runtime";
 import { createSoundscape } from "@/lib/audio/soundscape";
 import { createGameSoundscape, type GameSoundscape } from "@/lib/audio/game-soundscape";
 import { flatTerrain } from "@/lib/terrain";
@@ -31,7 +31,7 @@ const tilesOf = (world: World) => world.terrain?.tiles ?? flatTiles.get(world.si
   flatTiles.set(world.size, flatTerrain(world.size).tiles).get(world.size)!;
 
 /**
- * AudioContext 1개:
+ * pd4web 엔진 1개(AudioContext도 엔진의 것. 페이지와 함께 계속 산다):
  *   상호작용 패치(edit·player·event) ─┐
  *   사운드스케이프(층별 영역 패치들) ──┼─→ 마스터 게인(음소거 fade) → 리미터 → 출력
  *   배치한 녹음 사운드 ───────────────┘
@@ -39,10 +39,12 @@ const tilesOf = (world: World) => world.terrain?.tiles ?? flatTiles.get(world.si
 async function createGameMix() {
   const started = performance.now();
   const hint = latencyHint();
-  const context = new AudioContext({ latencyHint: hint });
+  const engine = await openEngine(BASE, { latencyHint: hint });
+  const context = engine.context;
+  let master: GainNode | undefined;
   try {
     await context.resume();
-    const master = context.createGain();
+    master = context.createGain();
     const limiter = context.createDynamicsCompressor();
     limiter.threshold.value = -3;
     limiter.knee.value = 0;
@@ -50,7 +52,8 @@ async function createGameMix() {
     limiter.attack.value = 0.003;
     limiter.release.value = 0.25;
     master.connect(limiter).connect(context.destination);
-    const session = await createInteractionSession(BASE, () => {}, { context, output: master });
+    const session = await createInteractionSession(engine, undefined, master);
+    const output = master;
     const diffuse = diffuseEnabled();
     const scape = createSoundscape({
       context,
@@ -58,7 +61,8 @@ async function createGameMix() {
       diffuse,
       // 거리에 따른 음량은 game-soundscape가 영역 외곽까지 거리로 정한다(패너 감쇠는 쓰지 않음).
       rolloff: 0,
-      start: (c, name) => startPatch(c as AudioContext, BASE, name),
+      // 같은 패치가 여러 영역에 동시에 뜨므로 영역 버스(whistle-region)는 슬롯별로 보낸다(패치는 [r $1-whistle-region]).
+      start: (_c, name) => engine.start(name, { scoped: true }),
       onEvent: (event) => {
         if (event.type === "error") console.warn(`[Whistle:Audio] ${event.id} ${event.patch} 로드 실패`, event.error);
         else if (event.type === "active" || event.type === "released") log(`${event.id} ${event.patch} ${event.type === "active" ? "켜짐" : "꺼짐"}`);
@@ -66,12 +70,12 @@ async function createGameMix() {
     });
     log(`오디오 시작: ${context.sampleRate}Hz, 상호작용 패치 edit·player·event 준비됨 (${Math.round(performance.now() - started)}ms), 비상관 필터 ${diffuse ? "켬" : "끔"}, 지연 설정 ${hint} (${(context.baseLatency * 1000).toFixed(1)}ms)`);
     return {
-      context, master, scape, diffuse, game: createGameSoundscape(scape, log),
+      context, master: output, scape, diffuse, game: createGameSoundscape(scape, log),
       session: {
         ...session,
         // whistle-gate 대신 전체 마스터 게인으로 음소거한다(상호작용·사운드스케이프·녹음 사운드 모두).
         mute(muted: boolean) {
-          const now = context.currentTime, gain = master.gain, current = gain.value;
+          const now = context.currentTime, gain = output.gain, current = gain.value;
           gain.cancelScheduledValues(now);
           gain.setValueAtTime(current, now);
           gain.linearRampToValueAtTime(muted ? 0 : 1, now + MASTER_FADE);
@@ -79,12 +83,14 @@ async function createGameMix() {
         async close() {
           scape.dispose();
           await session.close();
-          await context.close();
+          output.disconnect();
+          // 엔진은 닫지 않는다(페이지당 하나). 다음 시작 때 같은 엔진을 다시 쓴다.
+          await context.suspend();
         },
       },
     };
   } catch (error) {
-    await context.close();
+    master?.disconnect();
     throw error;
   }
 }
@@ -95,7 +101,7 @@ export type GameAudioDebug = {
   context: { state: AudioContextState; sampleRate: number; latencyHint: AudioContextLatencyCategory; baseLatency: number; outputLatency?: number } | null;
   /** 시작된 상호작용 패치(오디오가 시작되면 3개가 계속 돈다) */
   interaction: string[];
-  /** 사운드스케이프 패치 인스턴스(loading·active·releasing 모두 wasm 하나씩) */
+  /** 사운드스케이프 패치 인스턴스(loading·active·releasing 모두 Pd 엔진 슬롯 하나씩) */
   voices: { id: string; patch: string; state: string }[];
   soundscape: ReturnType<GameSoundscape["debug"]> | null;
   diffuse: boolean;

@@ -1,4 +1,5 @@
-import { createInteractionSession, type InteractionSession } from "../lib/audio/webpd-session";
+import { createInteractionSession, type InteractionSession } from "../lib/audio/pd-session";
+import { openEngine } from "../lib/audio/pd-runtime";
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const start = element<HTMLButtonElement>("start");
@@ -57,7 +58,7 @@ start.onclick = async () => {
   start.disabled = true;
   status.textContent = "패치 준비 중";
   try {
-    session = await createInteractionSession(`${import.meta.env.BASE_URL}audio-test/`, (bus, message) => {
+    session = await createInteractionSession(await openEngine(`${import.meta.env.BASE_URL}audio-test/`), (bus, message) => {
       received[bus] = message;
       messages.textContent = JSON.stringify(received, null, 2);
     });

@@ -1,4 +1,4 @@
-import { loadManifest, startPatch } from "../lib/audio/webpd-runtime";
+import { openEngine } from "../lib/audio/pd-runtime";
 import { createSoundscape, type Soundscape } from "../lib/audio/soundscape";
 
 const base = `${import.meta.env.BASE_URL}audio-test/`;
@@ -139,7 +139,8 @@ yawInput.oninput = () => scape?.setListener({ x: 0, y: 0, z: 0 }, forward());
 start.onclick = async () => {
   start.disabled = true;
   try {
-    context = new AudioContext();
+    const engine = await openEngine(base);
+    context = engine.context;
     await context.resume();
     const ctx = context;
     const output = ctx.createGain();
@@ -153,7 +154,7 @@ start.onclick = async () => {
       context: ctx,
       destination: output,
       panning,
-      start: (c, name) => startPatch(c as AudioContext, base, name),
+      start: (_c, name) => engine.start(name, { scoped: true }),
       onEvent: (event) => {
         log(event.type === "error"
           ? `${event.id} ${event.patch} 오류: ${event.error instanceof Error ? event.error.message : String(event.error)}`
@@ -162,7 +163,7 @@ start.onclick = async () => {
       },
     });
     scape.setListener({ x: 0, y: 0, z: 0 }, forward());
-    const manifest = await loadManifest(base);
+    const manifest = engine.manifest;
     select.replaceChildren(...Object.keys(manifest.patches).map((name) => new Option(name, name)));
     controls.disabled = false;
     stop.disabled = false;
@@ -178,7 +179,8 @@ start.onclick = async () => {
 stop.onclick = async () => {
   cancelAnimationFrame(frame);
   scape?.dispose();
-  await context?.close();
+  // 엔진(AudioContext)은 페이지당 하나라 닫지 않고 멈춘다. 다시 시작하면 같은 엔진을 쓴다.
+  await context?.suspend();
   context = scape = analysers = undefined;
   entries = [];
   controls.disabled = true;

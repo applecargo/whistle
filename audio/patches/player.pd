@@ -100,7 +100,7 @@
 #X connect 41 0 38 0;
 #X connect 42 0 5 0;
 #X restore 100 298 pd whistle;
-#X obj 100 401 dac~;
+#X obj 100 401 outlet~;
 #X obj 100 363 *~;
 #N canvas 0 33 340 482 idle 0;
 #X msg 37 357 \$1 200;
@@ -154,11 +154,12 @@
 #X connect 17 0 2 0;
 #X connect 18 0 0 0;
 #X restore 119 335 pd idle;
+#X obj 160 401 outlet~;
 #X connect 1 0 2 0;
 #X connect 2 1 4 0;
 #X connect 4 0 13 0;
 #X connect 5 0 6 0;
 #X connect 10 0 12 0;
 #X connect 12 0 11 0;
-#X connect 12 0 11 1;
+#X connect 12 0 14 0;
 #X connect 13 0 12 1;

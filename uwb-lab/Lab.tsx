@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Scene from "../components/whistle/Scene";
 import { createSimulation } from "../lib/world";
 import { createWorldDeriver } from "../lib/world-derivation";
-import { createInteractionSession, validateBoardHeight, type InteractionSession } from "../lib/audio/webpd-session";
+import { createInteractionSession, validateBoardHeight, type InteractionSession } from "../lib/audio/pd-session";
+import { openEngine } from "../lib/audio/pd-runtime";
 import { roomPositionAt, sampleTrackedPosition, type RoomMapping } from "../lib/uwb-position";
 import { createLabWorld } from "./world";
 import { useLiveWorld } from "./useLiveWorld";
@@ -99,7 +100,7 @@ export default function Lab() {
     setAudioError("");
     setReceived({});
     try {
-      const created = await createInteractionSession(`${import.meta.env.BASE_URL}audio-test/`, (bus, message) => {
+      const created = await createInteractionSession(await openEngine(`${import.meta.env.BASE_URL}audio-test/`), (bus, message) => {
         if (request === generation.current) setReceived((previous) => ({ ...previous, [bus]: message }));
       });
       if (request !== generation.current) { await created.close(); return; }

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { probePd, pdProbe } from "./pd-probe";
 
 test.setTimeout(90_000);
 
@@ -19,23 +20,15 @@ async function open(page: Page, query = "") {
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   await page.addInitScript(() => {
-    const state = window as typeof window & { probe: { contexts: number; initialize: number; run: number } };
-    state.probe = { contexts: 0, initialize: 0, run: 0 };
+    const state = window as typeof window & { probe: { contexts: number } };
+    state.probe = { contexts: 0 };
     const Original = window.AudioContext;
     window.AudioContext = class extends Original {
       constructor(options?: AudioContextOptions) { super(options); state.probe.contexts++; }
     };
   });
-  // 테스트에서만 런타임을 감싸 호출 횟수를 센다(앱 코드에는 계측을 넣지 않는다).
-  await page.route("**/audio-test/webpd-runtime.js", async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({ response, body: await response.text() + `
-      const originalInitialize = WebPdRuntime.initialize;
-      WebPdRuntime.initialize = (context) => { window.probe.initialize++; return originalInitialize(context); };
-      const originalRun = WebPdRuntime.run;
-      WebPdRuntime.run = (...args) => { window.probe.run++; return originalRun(...args); };
-    ` });
-  });
+  // 테스트에서만 엔진을 감싸 엔진 생성·패치 시작 횟수를 센다(앱 코드에는 계측을 넣지 않는다).
+  await probePd(page);
 
   await page.goto(`audio-lab/soundscape.html${query}`);
   await page.getByRole("button", { name: "오디오 시작" }).click();
@@ -83,8 +76,8 @@ test("엔진(HRTF): 소스 2개를 같은 컨텍스트에서 돌리며, 끄면 f
   await page.locator("#map").click({ position: { x: 240, y: 100 } });
   await expect(page.locator("#status")).toContainText("오디오 노드 2개");
   await expect(page.locator("#sources")).not.toContainText("loading");
-  expect(await page.evaluate(() => (window as unknown as { probe: object }).probe))
-    .toEqual({ contexts: 1, initialize: 1, run: 2 });
+  expect(await page.evaluate(() => (window as unknown as { probe: object }).probe)).toEqual({ contexts: 1 });
+  expect(await pdProbe(page)).toEqual({ modules: 1, starts: ["terrain_clock", "terrain_clock"] });
 
   // 둘 다 끄면 fade 후 노드가 정리되고 무음이 된다.
   // 누르면 "켜기"로 바뀌므로 매번 첫 번째 "끄기"를 누른다.

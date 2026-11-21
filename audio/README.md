@@ -1,4 +1,4 @@
-# WebPd 오디오 연결과 테스트
+# Pd(pd4web) 오디오 연결과 테스트
 
 ## 역할 분리
 
@@ -8,13 +8,42 @@
 
 ```text
 2D 편집 결과 ── 단발 이벤트 ─┐
-                            ├─ 오디오 어댑터 → WebPd AudioWorklet → Pd DSP → 출력
+                            ├─ 오디오 어댑터 → pd4web(Pd 0.56 wasm) AudioWorklet → Pd DSP → 출력
 3D 이동 상태 ── 연속 값 ─────┘
 ```
 
-하나의 AudioContext에서 여러 패치(named patch)를 실행한다. 상호작용 패치(`uwb-player.pd`)가
-편집용 소리와 플레이용 소리를 나누고, 지형 사운드스케이프 패치(`terrain_clock.pd` 등)는 공간에 배치한다. 최종 패치가 여러 파일이면 상위 패치에서 합성한다.
-현재 테스트는 단일 .pd 파일이다. 샘플 파일·외부 오브젝트·서브패치는 아직 검증하지 않았다.
+Pd 엔진 하나(AudioContext 하나)에서 여러 패치를 실행한다. 소리 하나 = 패치 하나: 상호작용 패치(edit·player·event)와
+사운드스케이프 영역 패치(`environment_grass.pd` 등)가 각각 엔진의 "슬롯" 하나를 쓴다. 하위 패치(abstraction)도 쓸 수 있다.
+
+## Pd 엔진 (pd4web)
+
+- 엔진: [pd4web](https://github.com/charlesneimog/pd4web) 3.4.1(libpd, Pd 0.56의 vanilla 객체 전체를 C에서 wasm으로).
+  빈 host 패치만 들어 있는 엔진을 한 번 빌드해 `audio/engine/`에 커밋해 둔다(pd4web.js·wasm·data, 약 2.8MB).
+  **패치는 엔진에 넣어 빌드하지 않는다.** 실행 중에 `.pd` 파일을 엔진 파일시스템으로 보내고(`sendFile`) 동적 패칭으로 만든다.
+  그래서 패치를 고치면 `npm run audio:build`(파일 복사, 수 초) 후 새로고침만 하면 된다. 개발 PC에 pd4web·Emscripten이 없어도 된다.
+- 엔진을 다시 빌드할 때(pd4web 버전업, 외부 객체 추가 등)만 `npm run audio:engine`.
+  pd4web CLI(파이썬 `pip install pd4web`, Python 3.12+)가 필요하다. `PD4WEB=/경로/pd4web npm run audio:engine`.
+  첫 빌드는 Emscripten 등을 받아 수 분, 이후는 `output/pd4web-engine/` 캐시로 약 2~3분.
+- 런타임 `lib/audio/pd-runtime.ts`: `openEngine(baseUrl, { latencyHint })`가 페이지당 엔진 하나를 연다(AudioContext도 엔진의 것).
+  `engine.start(이름, { scoped })` → 슬롯 하나: host의 `[pd slotN]` 안에 `[<패치> slotN]` → `[dac~ 2N+1 2N+2]`를 만들고
+  `loadbang`을 보낸다(동적으로 만든 패치에는 loadbang이 저절로 오지 않음). 엔진 출력 32채널을 슬롯별 스테레오 노드로 나눠 돌려준다.
+  슬롯은 16개(Web Audio 노드 출력 최대 32채널). `destroy()`는 슬롯을 비운다(`clear`).
+- 교차 출처 격리(COOP/COEP)가 필요하다(SharedArrayBuffer). 개발·미리보기 서버는 `vite.config.ts`의 헤더로,
+  GitHub Pages는 `public/coi-serviceworker.js`(pd4web에 포함된 coi-serviceworker, MIT)로 건다. 첫 방문 때 페이지가 한 번 새로고침된다.
+- Pd → JS 메시지(`onBangReceived` 등)는 쓰지 않는다. 이 구성에서는 콜백이 오지 않았다(print만 옴).
+  실험 페이지의 "Pd가 수신한 값"은 JS가 Pd에 보낸 값을 보여 준다.
+
+### 패치 규칙 (pd4web 전환 때 바뀜)
+
+- **출력은 최상위 `[outlet~]` 두 개**(왼쪽 L, 오른쪽 R. 화면에서 왼쪽에 있는 것이 L). `[dac~]`를 쓰면 모든 소리가 한 채널에 섞여
+  소리별 패닝을 할 수 없다. 기존 패치는 `dac~`의 L/R 입력을 그대로 두 `outlet~`로 옮겼다.
+  Pd에서 단독으로 들어 보려면 그 패치를 객체로 넣고 `[dac~]`에 연결한 시험용 패치를 연다.
+- `$1`은 슬롯 이름(`slot0`…). 같은 패치가 여러 영역에 동시에 뜨므로 **영역마다 따로 받을 버스는 `[r $1-whistle-region]`**.
+  사운드스케이프는 `scoped`로 열어 `whistle-region`을 `slotN-whistle-region`으로 보낸다.
+  상호작용 패치(edit·player·event)는 하나씩만 뜨므로 `whistle-player` 같은 전역 이름 그대로.
+- 받는 객체가 없는 버스로 보내도 Pd가 조용히 버린다.
+- 전역 이름(`[delwrite~ b]`, `[s 이름]`, `[table 이름]`)은 같은 패치가 여러 번 뜨면 겹친다. 패치 안에서만 쓰는 이름은 `$0-`.
+- `whistle-ready`는 더 이상 쓰지 않는다(남아 있어도 무해).
 
 ## 게임 연결
 
@@ -87,8 +116,7 @@ edit.pd · player.pd(→ 이동음 게인) · event.pd ─┐
   종류 → 패치 매핑(`KIND_PATCHES`: plain·rough·slick·soft·water·grass·tree·fog·wind·stairs·bridge·canopy)은 지금 모두 `terrain_clock`.
 - 콘솔 로그(`[Whistle:Audio]`): 오디오 시작(준비까지 걸린 시간), 소리 영역 등록 개수(종류별),
   영역별 켜짐/꺼짐, 로드 실패(warn).
-- 패치 준비 신호는 메인 스레드로 오므로 무거운 3D 렌더링 중에는 늦다. GPU 없는 headless Chromium에서
-  3D 장면 실행 중 17~23초가 걸렸다(실험 페이지에서는 0.1초대). 제한 시간은 30초.
+- 엔진은 메인 스레드에서 로드되므로 무거운 3D 렌더링 중에는 늦다(GPU 없는 headless UWB 페이지에서 약 18초, 실험 페이지 0.4초).
 
 게임 화면 연결은 단위 테스트(`tests/game-soundscape.test.ts`, `tests/terrain-sources.test.ts`)와
 실제 브라우저에서의 청취로 확인한다. GPU 없는 headless 브라우저에서는 3D 장면이 너무 느려
@@ -97,8 +125,8 @@ edit.pd · player.pd(→ 이동음 게인) · event.pd ─┐
 ## 최소 테스트 구현
 
 - 원본: `audio/patches/uwb-player.pd` (`player3.pd`를 불러옴)
-- WebPd: `1.0.0-alpha.14` 고정, 개발 의존성. `.pd`를 WASM으로 사전 컴파일한다.
-- 브리지: `lib/audio/webpd-runtime.ts`(패치 로드) · `lib/audio/webpd-session.ts`(상호작용 패치의 버스 인터페이스)
+- 엔진: pd4web(위 "Pd 엔진" 참고)
+- 브리지: `lib/audio/pd-runtime.ts`(엔진·슬롯) · `lib/audio/pd-session.ts`(상호작용 패치의 버스 인터페이스)
 - 게임 연결: `components/whistle/useGameAudio.ts`, `lib/audio/game-audio.ts`, `lib/audio/game-parameters.ts`
 - 수동 테스트: `audio-lab/index.html`
 - 다중 패치 실험: `audio-lab/soundscape.html`, 회귀 테스트 `tests/browser/soundscape-lab.spec.ts`
@@ -130,31 +158,8 @@ X/Z·겹침·풀·바위 값은 0–1로 제한한다.
 유한하지 않은 숫자는 전송하지 않는다. 테스트 음은 최종 사운드 디자인이 아니며,
 X에 따른 좌우 출력도 실제 플레이어 방향을 고려한 3D 공간음향은 아니다.
 
-WebPd alpha.14의 기본 외부 입력은 최상위 `[send]` 객체의 inlet으로 전달된다.
-패치에 같은 이름의 `[s whistle-player]`와 `[r whistle-player]`를 두었고,
-JS는 컴파일 결과 메타데이터에서 해당 노드 ID를 찾아 사용한다.
-`n_0_*` 같은 컴파일러 생성 ID를 앱에 고정하지 않는다.
-각 `[r]`의 메시지가 브라우저로 돌아오는 것을 확인하며, 별도로 PCM 출력도 측정한다.
-
-`run()` 반환만으로 DSP가 준비됐다고 가정하지 않는다. `[loadbang]`에서 오는
-`whistle-ready`를 받은 후에만 입력을 허용한다. 오디오는 클릭으로 시작하고,
-시작 실패·종료 시 AudioContext와 노드를 정리한다. 재시작도 가능하다.
+오디오는 클릭으로 시작한다. 세션 `close()`는 패치(슬롯)만 내리고 엔진·AudioContext는 페이지와 함께 계속 산다(게임은 suspend).
 테스트 페이지가 숨겨지면 음소거하며 사용자가 해제한다. 마이크 입력은 사용하지 않는다.
-
-## 예전 엔진에서 옮기기
-
-예전 `createPdSession(baseUrl, receive)`(단일 `patch.wasm`, 세션마다 AudioContext 생성)는 삭제했다.
-같은 메서드(`edit`·`player`·`stopPlayer`·`event`·`mute`·`boardHeight`·`close`, `context`, `node`)를 가진
-`createInteractionSession(baseUrl, receive, shared?)`로 바꾼다. 내부에서는 `startPatch`로
-`uwb-player` named patch를 로드하고 `whistle-ready`를 받은 뒤에 돌려준다.
-
-- `shared` 없이 부르면 예전처럼 AudioContext를 새로 만들고 `close()` 때 닫는다.
-  실험 페이지(`audio-lab/index.html`, `uwb-lab`)는 이 방식으로 옮겼다(이름만 변경).
-- 게임처럼 다른 패치와 함께 쓰려면 `shared: { context, output }`으로 AudioContext를 공유한다.
-  이때 `close()`는 패치만 정리하고 컨텍스트는 닫지 않는다.
-- 브라우저 테스트에서 패치 로드를 가로챌 때는 `**/audio-test/patches/uwb-player.wasm`을 쓴다.
-- 새 패치를 추가할 때는 `audio/patch-targets.json`에 등재하고 `startPatch(context, baseUrl, 이름)`으로 로드한다.
-  외부 메시지는 최상위 `[send 이름]`이 있어야 manifest의 `inputs`에 나타난다(위 참고).
 
 ## 실행
 
@@ -173,9 +178,8 @@ npm test
 npm run build
 ```
 
-오디오 테스트와 전체 브라우저 테스트, 빌드는 패치를 먼저 컴파일한다.
-일반 `npm run dev`도 패치를 자동 컴파일한다.
-패치를 수정한 뒤에도 다시 컴파일하고 페이지를 새로고침한다.
+오디오 테스트와 전체 브라우저 테스트, 빌드, `npm run dev`는 먼저 `audio:build`(엔진·패치 파일 복사)를 한다.
+패치를 수정한 뒤에는 `npm run audio:build` 후 페이지를 새로고침한다(컴파일 없음).
 빌드 결과에도 `/whistle/audio-lab/index.html` 테스트 페이지가 포함된다.
 생성 파일 `public/audio-test/`는 Git에서 제외하며 빌드로 재생성한다.
 
@@ -194,8 +198,7 @@ npm run build
     필터가 소리를 바꿀 수 있어 기본은 끔. 측정(정면, 잡음): 좌우 상관 width 0 → 1.00, 0.5 → 0.56, 1 → 0.31.
 - `messages`: 소스마다 패치로 보낼 메시지(버스 → 값). 값이 바뀔 때만 보낸다. 패치에 없는 버스는 건너뛴다.
 
-- `lib/audio/webpd-runtime.ts`: 런타임 스크립트는 페이지당 1회, 워클릿 초기화는
-  AudioContext당 1회. 패치 wasm은 한 번 받아 캐시하고 인스턴스마다 사본을 넘긴다.
+- `lib/audio/pd-runtime.ts`: 엔진은 페이지당 1개. 패치 파일은 한 번만 엔진에 보낸다(해시가 바뀌면 다시).
   만든 노드는 연결하지 않고 돌려준다.
 - `lib/audio/soundscape.ts`: 소스 등록(`set`)만으로는 노드를 만들지 않는다.
   `activate`에서 로드·연결하고 fade in, `deactivate`에서 fade out 후
@@ -209,20 +212,14 @@ npm run build
 - 실험 페이지: `audio-lab/soundscape.html` (`?panning=hrtf`로 비교).
   평면도를 클릭해 패치를 놓고 리스너 방향을 돌린다.
 
-### 패치별 빌드 (사운드스케이프용)
+### 패치 목록과 복사 (`npm run audio:build`)
 
-`audio/patch-targets.json`의 `patches` 배열에 등재한 패치만 각각 컴파일한다.
-다른 패치 안에서 불러오는 하위 패치(abstraction)는 등재하지 않는다.
+`audio/patch-targets.json`의 `patches` 배열에 등재한 패치와, 그것이 (재귀적으로) 불러오는 하위 패치 파일을
+`public/audio-test/patches/`에 그대로 복사한다. 하위 패치는 등재하지 않는다.
 
-- 출력: `public/audio-test/patches/<이름>.wasm`, 전체 목록은 `patches/manifest.json`
-  (파일명·해시·크기·send/receive 버스)
-- 캐시: 대상 패치와 그것이 불러오는 하위 패치 전체의 내용, WebPd 버전으로 해시를 만든다.
-  해시가 같고 wasm이 있으면 건너뛴다. 하위 패치만 고쳐도 다시 컴파일된다.
-- 목록에서 빠진 패치의 이전 결과물은 빌드 때 지운다.
-- WebPd 런타임(`webpd-runtime.js`)은 모든 패치가 공유하며 패키지에서 그대로 복사한다.
-- 예전 단일 패치 빌드(`patch.wasm`, `io.json`)는 폐기했다. `uwb-player.pd`도 다른 패치와 같이
-  목록에 등재해 `patches/uwb-player.wasm`으로 빌드한다. 예전 결과물이 남아 있으면 빌드가 지운다.
-- 컴파일하는 패치마다 시작·완료 시간을 출력한다. 큰 패치는 1분 이상 걸릴 수 있다.
+- `patches/manifest.json`: 엔진 정보와 패치별 의존 파일·해시. 해시(엔진 버전 + 의존 파일 내용)는 브라우저 캐시를 넘기는 데 쓴다.
+- 엔진 파일은 `audio/engine/`에서 `public/audio-test/pd4web/`로 복사한다.
+- 목록에서 빠진 패치 파일과 예전 WebPd 결과물(wasm, 런타임)은 지운다.
 
 게임 화면(`/whistle/`)에서는 격자를 편집하거나 플레이를 시작하면 연결된다.
 실험 페이지에서는 같은 패치에 직접 입력한 파라미터를 보내 비교할 수 있다.
@@ -241,16 +238,13 @@ upstream의 사인파 시험 패치(`interaction-test.pd`)와 그 브라우저 �
 (`npm run test:audio`가 둘 다 실행. Firefox는 AudioListener의 AudioParam이 없어 예전 API로 설정한다).
 
 - equalpower(기본): 리스너 정확히 왼쪽의 소리는 R 채널 무음, 뒤로 돌면 L 채널 무음(기하 검증)
-- HRTF(옵션): AudioContext 1개에서 WebPd 초기화 1회, 패치 인스턴스 2개 동시 실행,
+- HRTF(옵션): AudioContext 1개에서 엔진 생성 1회, 패치 인스턴스 2개 동시 실행,
   끄면 fade 후 노드 정리·무음, 다시 켜기, 종료, 콘솔 오류 없음
 
 HRTF의 공간감(앞뒤·거리감)은 귀로 확인한다.
 
 ## 참고
 
-- [WebPd 공식 저장소](https://github.com/sebpiq/WebPd): 컴파일 방식, 지원 오브젝트, 메시지 순서 지침.
-- [WebPd 런타임](https://github.com/sebpiq/WebPd_runtime): AudioWorklet 실행 계층.
-
-알파 버전이므로 컴파일러 내부 메타데이터 읽기는 빌드 스크립트에만 모았다.
-업그레이드 시 이 스크립트와 오디오 테스트를 함께 확인한다.
-WebPd 런타임의 LGPL 라이선스 파일도 생성 디렉터리와 배포물에 복사한다.
+- [pd4web](https://github.com/charlesneimog/pd4web): 엔진, CLI, JS API(`pd4web.d.ts`).
+- 성능(2026-11-21, i5-7200U 3.1GHz 고정, headless Chromium, 코어 하나 기준): grass 1개 WebPd 11.1% / pd4web 8.7%,
+  grass 6개 WebPd 51%(노드 6개)·48%(패치 하나에 6개) / pd4web 23%(엔진 하나).

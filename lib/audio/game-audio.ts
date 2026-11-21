@@ -1,4 +1,4 @@
-import type { EditSound, PlayerSound, InteractionSession } from "./webpd-session.ts";
+import type { EditSound, PlayerSound, InteractionSession } from "./pd-session.ts";
 
 /** pause 후 이만큼(ms) 지나도 그대로면 AudioContext를 멈춘다(음소거 fade가 끝난 뒤). */
 const SUSPEND_DELAY_MS = 150;

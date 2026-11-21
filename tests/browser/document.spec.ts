@@ -63,7 +63,7 @@ test("old shared links do not replace the document or its undo history", async (
 
 test("automatic audio failures do not show error toasts or block editing", async ({ page }) => {
   let attempts = 0;
-  await page.route("**/audio-test/webpd-runtime.js", async route => { attempts++; await route.abort(); });
+  await page.route(/\/audio-test\/pd4web\/pd4web\.js(\?|$)/, async route => { attempts++; await route.abort(); });
   await openWorld(page, terrainFixtures().flat);
   await page.getByRole("button", { name: "높이기", exact: true }).click();
   await page.locator('[data-cell="0"]').click();

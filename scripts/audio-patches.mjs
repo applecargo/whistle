@@ -1,4 +1,4 @@
-// 패치별 WebPd 빌드를 위한 순수 헬퍼. build-audio.mjs와 테스트에서 함께 쓴다.
+// 패치 목록·의존 파일·해시를 위한 순수 헬퍼. build-audio.mjs와 테스트에서 함께 쓴다.
 import { readFile, readdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -55,25 +55,11 @@ export async function dependencyClosure(dir, name) {
   return [...closure].sort();
 }
 
-/** 컴파일러 버전 + 의존 패치 전체의 이름과 내용으로 만든 해시. 하나라도 바뀌면 다시 빌드한다. */
-export async function patchHash(dir, name, compilerVersion) {
-  const hash = createHash("sha256").update(`webpd@${compilerVersion}\n`);
+/** 엔진 버전 + 의존 패치 전체의 이름과 내용으로 만든 해시. 하나라도 바뀌면 달라진다(브라우저 캐시 무효화). */
+export async function patchHash(dir, name, engineVersion) {
+  const hash = createHash("sha256").update(`${engineVersion}\n`);
   for (const dep of await dependencyClosure(dir, name)) {
     hash.update(`${dep}\n`).update(await readFile(join(dir, `${dep}.pd`))).update("\n");
   }
   return hash.digest("hex");
-}
-
-/** WebPd 메타데이터에서 send/receive 버스 이름 → 포트 매핑을 뽑는다. */
-export function busPorts(metadata) {
-  const ports = (specs) => Object.fromEntries(Object.entries(specs).flatMap(([id, portlets]) => {
-    const node = metadata.customMetadata.graph[id];
-    if (node.type !== "send" && node.type !== "receive") return [];
-    if (!node.args.busName || portlets.length !== 1) throw new Error(`Unexpected Pd port: ${id}`);
-    return [[node.args.busName, { nodeId: id, portletId: portlets[0] }]];
-  }));
-  return {
-    inputs: ports(metadata.settings.io.messageReceivers),
-    outputs: ports(metadata.settings.io.messageSenders),
-  };
 }

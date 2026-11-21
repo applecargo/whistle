@@ -1,12 +1,13 @@
-// 상호작용 패치들의 버스 인터페이스. 패치별 빌드(named patch)로 각각 로드한다.
+// 상호작용 패치들의 버스 인터페이스. pd4web 엔진의 슬롯에 하나씩 띄운다(lib/audio/pd-runtime.ts).
 // - edit.pd   : whistle-edit           (에디터 편집음)
 // - player.pd : whistle-player, whistle-board-height (3D 이동음, UWB 보드 높이)
 // - event.pd  : whistle-event          (시뮬레이션 규칙 이벤트음)
 // 켜고 끄기는 Pd 메시지(whistle-gate, whistle-player-stop) 대신 WebAudio 게인 fade로 한다.
-import { startPatch, type PdMessage, type PatchInstance } from "./webpd-runtime.ts";
+import type { PdMessage, PatchInstance, PdEngine } from "./pd-runtime.ts";
 
 export type { PdMessage };
 export const INTERACTION_PATCHES = { edit: "edit", player: "player", event: "event" } as const;
+
 /** 음소거·이동음 정지 fade 길이(초) */
 const FADE = 0.03;
 
@@ -64,33 +65,33 @@ function fadeTo(param: AudioParam, target: number, context: BaseAudioContext) {
 }
 
 /**
- * 상호작용 패치 세 개를 시작한다(각각 whistle-ready를 받은 뒤).
- * context를 주면 그 AudioContext를 공유하고(닫지 않음), 주지 않으면 새로 만들고 close() 때 닫는다.
+ * 상호작용 패치 세 개를 엔진에 띄운다.
+ * receive: Pd에 보낸 메시지(버스, 값)를 보낸 직후 알려준다(실험 페이지의 "Pd가 수신한 값" 표시용).
  * 출력: edit/event → 세션 출력 게인, player → 이동음 게인 → 세션 출력 게인 → output(없으면 destination).
+ * close()는 패치만 내린다(엔진·AudioContext는 페이지와 함께 계속 산다).
  */
 export async function createInteractionSession(
-  baseUrl: string,
-  receive: (bus: string, message: PdMessage) => void,
-  shared?: { context: AudioContext; output?: AudioNode },
+  engine: Pick<PdEngine, "context" | "start">,
+  receive?: (bus: string, message: PdMessage) => void,
+  destination?: AudioNode,
 ) {
-  const context = shared?.context ?? new AudioContext();
-  const owned = !shared;
+  const context = engine.context;
   const started: PatchInstance[] = [];
   try {
     await context.resume();
-    // 하나가 실패해도 나머지가 끝날 때까지 기다려야 늦게 시작된 패치를 정리할 수 있다.
-    const results = await Promise.allSettled([INTERACTION_PATCHES.edit, INTERACTION_PATCHES.player, INTERACTION_PATCHES.event]
-      .map((name) => startPatch(context, baseUrl, name, receive, { ready: "whistle-ready" })));
-    for (const result of results) if (result.status === "fulfilled") started.push(result.value);
-    const failed = results.find((result) => result.status === "rejected");
-    if (failed) throw failed.reason;
-    const [edit, player, event] = started;
+    for (const name of [INTERACTION_PATCHES.edit, INTERACTION_PATCHES.player, INTERACTION_PATCHES.event]) {
+      started.push(await engine.start(name));
+    }
+    const echo = (patch: PatchInstance): Sender => ({
+      send(bus, message) { patch.send(bus, message); receive?.(bus, message); },
+    });
+    const [edit, player, event] = started.map(echo);
     const output = context.createGain();
     const playerGain = context.createGain();
-    output.connect(shared?.output ?? context.destination);
-    edit.node.connect(output);
-    event.node.connect(output);
-    player.node.connect(playerGain).connect(output);
+    output.connect(destination ?? context.destination);
+    started[0].node.connect(output);
+    started[2].node.connect(output);
+    started[1].node.connect(playerGain).connect(output);
     const messages = interactionMessages({ edit, player, event });
     let playerOn = true;
     let closed = false;
@@ -116,12 +117,10 @@ export async function createInteractionSession(
         closed = true;
         for (const patch of started) patch.destroy();
         output.disconnect();
-        if (owned) await context.close();
       },
     };
   } catch (error) {
     for (const patch of started) patch.destroy();
-    if (owned) await context.close();
     throw error;
   }
 }

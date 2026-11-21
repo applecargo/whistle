@@ -5,8 +5,8 @@ import { editSound, playerSound } from "../lib/audio/game-parameters.ts";
 import { createWorldDeriver } from "../lib/world-derivation.ts";
 import { starterWorld } from "../lib/world.ts";
 import { flatTerrain } from "../lib/terrain.ts";
-import type { InteractionSession, PlayerSound } from "../lib/audio/webpd-session.ts";
-import { validateBoardHeight } from "../lib/audio/webpd-session.ts";
+import type { InteractionSession, PlayerSound } from "../lib/audio/pd-session.ts";
+import { validateBoardHeight } from "../lib/audio/pd-session.ts";
 
 test("board height accepts metres within the test range and rejects invalid measurements", () => {
   for (const height of [0, 0.1, 1.5, 10]) assert.equal(validateBoardHeight(height), height);

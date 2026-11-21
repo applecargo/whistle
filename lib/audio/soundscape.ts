@@ -35,7 +35,7 @@ export type SoundscapeEvent =
   | { type: "loading" | "active" | "releasing" | "released"; id: string; patch: string }
   | { type: "error"; id: string; patch: string; error: unknown };
 
-/** 패치 하나를 시작해 연결되지 않은 노드를 돌려준다. 실제로는 webpd-runtime의 startPatch. */
+/** 패치 하나를 시작해 연결되지 않은 노드를 돌려준다. 실제로는 pd-runtime 엔진의 start. */
 export type PatchHandle = { node: AudioNode; destroy(): void; send?(bus: string, message: PdMessage): void };
 type StartPatch = (context: BaseAudioContext, name: string) => Promise<PatchHandle>;
 

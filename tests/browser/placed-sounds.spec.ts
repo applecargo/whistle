@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
+import { probePd, pdProbe } from "./pd-probe";
 
 test.setTimeout(90_000);
 
@@ -45,17 +46,7 @@ test.beforeEach(async ({ page }) => {
       }
     };
   }, terrainFixtures().flat);
-  await page.route("**/audio-test/webpd-runtime.js", async route => {
-    const response = await route.fetch();
-    await route.fulfill({ response, body: await response.text() + `
-      const originalRun = WebPdRuntime.run;
-      WebPdRuntime.run = async (...args) => {
-        const node = await originalRun(...args);
-        window.soundProbe.pd++;
-        return node;
-      };
-    ` });
-  });
+  await probePd(page);
   await page.goto(".");
   await expect(page.getByRole("button", { name: "파일 저장", exact: true })).toHaveAttribute("aria-description", "이 브라우저에 저장됨");
 });
@@ -83,7 +74,7 @@ test("upload, place, save, reload, mix with Pd, pause, resume and remove", async
   await expect.poll(async () => (await probe(page)).active).toBe(1);
   await expect.poll(async () => (await probe(page)).rms).toBeGreaterThan(0.01);
   expect((await probe(page)).contexts).toEqual(["running"]);
-  expect((await probe(page)).pd).toBe(1);
+  expect((await pdProbe(page)).modules).toBe(1);
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
   await expect.poll(async () => (await probe(page)).active).toBe(0);
   await page.keyboard.press("a");
