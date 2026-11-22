@@ -3,15 +3,16 @@ import react from "@vitejs/plugin-react";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 // pd4web 엔진은 SharedArrayBuffer(스레드)를 쓰므로 교차 출처 격리가 필요하다.
 // 개발·미리보기 서버는 헤더로, 정적 호스팅은 public/coi-serviceworker.js로 건다.
 const isolation = { "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp" };
 
 // audio/engine/(pd4web 엔진)과 audio/patches/(패치 폴더)를 /whistle/audio/… 로 내보낸다(개발 서버, 빌드 결과).
 // - 엔진 파일은 그대로.
-// - 패치 폴더는 하위 폴더째 tar 하나(audio/patches.tar)로 묶는다. 브라우저의 Pd 엔진이 이걸 받아 자기 가상 디스크에 푼다
+// - 패치 폴더는 하위 폴더째 tar 하나로 묶어 gzip한다(audio/patches.tar.gz). 브라우저의 Pd 엔진이 이걸 받아 자기 가상 디스크에 푼다
 //   (lib/audio/pd-runtime.ts). HTTP로는 폴더를 통째로 받을 수 없어서 묶는다. 개발 서버는 요청 때마다 지금 폴더를 묶는다.
-//   안을 보려면: tar tf patches.tar
+//   안을 보려면: tar tzf patches.tar.gz
 // - 개발 서버는 패치 폴더가 바뀌면 페이지를 새로고침한다.
 const audioDir = fileURLToPath(new URL("./audio/", import.meta.url));
 const engineDir = join(audioDir, "engine");
@@ -20,7 +21,7 @@ const walk = (dir: string, prefix = ""): string[] => readdirSync(join(dir, prefi
   .filter((f) => !f.name.startsWith("."))
   .flatMap((f) => f.isDirectory() ? walk(dir, `${prefix}${f.name}/`) : [`${prefix}${f.name}`]);
 
-/** 폴더를 tar(ustar)로 묶는다. 일반 파일만, 경로는 폴더 기준. */
+/** 폴더를 tar(ustar)로 묶고 gzip한다. 일반 파일만, 경로는 폴더 기준. */
 function tar(dir: string) {
   const blocks: Buffer[] = [];
   for (const path of walk(dir)) {
@@ -46,10 +47,10 @@ function tar(dir: string) {
     blocks.push(header, data, Buffer.alloc((512 - (data.length % 512)) % 512));
   }
   blocks.push(Buffer.alloc(1024));
-  return Buffer.concat(blocks);
+  return gzipSync(Buffer.concat(blocks));
 }
 
-const types: Record<string, string> = { ".js": "text/javascript", ".wasm": "application/wasm", ".tar": "application/x-tar" };
+const types: Record<string, string> = { ".js": "text/javascript", ".wasm": "application/wasm", ".gz": "application/gzip" };
 const audioFolder = (): Plugin => ({
   name: "whistle-audio-folder",
   configureServer(server) {
@@ -59,7 +60,7 @@ const audioFolder = (): Plugin => ({
       if (!path.startsWith(prefix)) return next();
       const rel = path.slice(prefix.length);
       const file = normalize(join(audioDir, rel));
-      const body = rel === "patches.tar" ? tar(patchDir)
+      const body = rel === "patches.tar.gz" ? tar(patchDir)
         : file.startsWith(join(engineDir, "/")) && existsSync(file) ? readFileSync(file) : undefined;
       if (!body) return next();
       for (const [key, value] of Object.entries(isolation)) res.setHeader(key, value);
@@ -73,7 +74,7 @@ const audioFolder = (): Plugin => ({
   },
   generateBundle() {
     for (const f of walk(engineDir)) this.emitFile({ type: "asset", fileName: `audio/engine/${f}`, source: readFileSync(join(engineDir, f)) });
-    this.emitFile({ type: "asset", fileName: "audio/patches.tar", source: tar(patchDir) });
+    this.emitFile({ type: "asset", fileName: "audio/patches.tar.gz", source: tar(patchDir) });
   },
 });
 

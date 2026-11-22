@@ -1,7 +1,7 @@
 // pd4web 엔진 하나에 패치를 "슬롯"으로 동적 생성하는 최소 계층.
 // - 엔진(pd4web.js/wasm, Pd 0.56)은 페이지당 하나. AudioContext도 엔진이 만든다(openEngine이 돌려준다).
 // - 패치 폴더(audio/patches/)를 엔진이 켜질 때 하위 폴더째 엔진의 가상 디스크(/)에 복사한다. abstraction은 Pd가 알아서 찾는다.
-//   폴더는 tar 하나(audio/patches.tar, Vite가 묶어 줌)로 받아 푼다.
+//   폴더는 tar.gz 하나(audio/patches.tar.gz, Vite가 묶어 줌)로 받아 푼다.
 // - 패치 하나 = 슬롯 하나: host의 [pd slotN] 안에 [<패치> slotN] → [dac~ 2N+1 2N+2]를 만들고 loadbang을 보낸다.
 //   패치는 최상위 [outlet~] 두 개(L, R)로 내보낸다. 엔진 출력(슬롯 수×2 채널)을 슬롯별 스테레오 노드로 나눠 돌려준다.
 // - 노드는 어디에도 연결하지 않고 돌려준다. 연결·게인·공간화는 호출하는 쪽 책임.
@@ -130,8 +130,13 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   // Pd → JS 메시지(onBangReceived 등)는 쓰지 않는다: 이 구성(pd4web 3.4.1, GUI 없음)에서는 콜백이 오지 않았다
   // (JS가 보낸 bang·list를 같은 이름으로 받아도 오지 않음, print만 옴). 시작 확인은 동기 생성으로 충분하다.
 
-  // --- 패치 폴더(tar 하나)를 엔진 가상 디스크(/)에 푼다 ---
-  const files = untar(new Uint8Array(await (await fetchOk(`${baseUrl}patches.tar`)).arrayBuffer()), (path, data) => {
+  // --- 패치 폴더(tar.gz 하나)를 엔진 가상 디스크(/)에 푼다 ---
+  // 서버에 따라 .gz를 Content-Encoding: gzip으로 보내 브라우저가 먼저 풀어 버리기도 한다. gzip 머리(1f 8b)가 있을 때만 푼다.
+  let archive = new Uint8Array(await (await fetchOk(`${baseUrl}patches.tar.gz`)).arrayBuffer());
+  if (archive[0] === 0x1f && archive[1] === 0x8b) {
+    archive = new Uint8Array(await new Response(new Blob([archive]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
+  }
+  const files = untar(archive, (path, data) => {
     const dir = path.slice(0, path.lastIndexOf("/") + 1);
     if (dir) module.FS.mkdirTree(`/${dir}`);
     module.FS.writeFile(`/${path}`, data);
