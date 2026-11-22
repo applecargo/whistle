@@ -54,6 +54,7 @@ Pd 엔진 하나(AudioContext 하나)에서 여러 패치를 실행한다. 소�
   사운드스케이프는 `scoped`로 열어 `whistle-region`을 `slotN-whistle-region`으로 보낸다.
   상호작용 패치(edit·player·event)는 하나씩만 뜨므로 `whistle-player` 같은 전역 이름 그대로.
 - 받는 객체가 없는 버스로 보내도 Pd가 조용히 버린다.
+- **어디에 어떤 소리(영역)가 생기는지는 [`sound-layers.md`](sound-layers.md)에 정리했다(예: 바람은 골짜기).**
 - **패치에서 받을 수 있는 값(버스·순서·범위)은 [`pd-receive.md`](pd-receive.md)에 정리했다.** 전역 이름은 어느 패치에서나 받을 수 있다(예: 영역 패치에서 `[r whistle-player]`).
 - 전역 이름(`[delwrite~ b]`, `[s 이름]`, `[table 이름]`)은 같은 패치가 여러 번 뜨면 겹친다. 패치 안에서만 쓰는 이름은 `$0-`.
 - `whistle-ready`는 더 이상 쓰지 않는다(남아 있어도 무해).

@@ -23,6 +23,7 @@ npm run dev  # Pd 자동 컴파일 · 서버 시작
 - 브라우저의 Pd는 패치 폴더를 통째로 받아 쓰므로 abstraction은 폴더에 두기만 하면 됨
 - 입력 파라미터 변경 시 연결 패치·앱 코드 확인
 - 패치 출력은 최상위 `[outlet~]` 두 개(L, R) — `audio/README.md` 참고
+- 소리가 생기는 조건(바람·안개·풀…): `audio/sound-layers.md` · 패치가 받는 값: `audio/pd-receive.md`
 - `whistle-board-height`: 보드 높이 수신만 연결, 소리 변화 없음
 
 ## UWB 테스트
