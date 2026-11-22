@@ -4,6 +4,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
+import { KIND_PATCHES } from "./lib/audio/terrain-sources.ts";
+import { INTERACTION_PATCHES } from "./lib/audio/pd-session.ts";
 // pd4web 엔진은 SharedArrayBuffer(스레드)를 쓰므로 교차 출처 격리가 필요하다.
 // 개발·미리보기 서버는 헤더로, 정적 호스팅은 public/coi-serviceworker.js로 건다.
 const isolation = { "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp" };
@@ -50,10 +52,23 @@ function tar(dir: string) {
   return gzipSync(Buffer.concat(blocks));
 }
 
+/** 앱이 여는 패치(KIND_PATCHES, 상호작용 패치) 중 audio/patches/에 없는 것. 빌드는 멈추고, 개발 서버는 경고만 한다. */
+const missingPatches = () => [...new Set([...Object.values(KIND_PATCHES), ...Object.values(INTERACTION_PATCHES)])]
+  .filter((name) => !existsSync(join(patchDir, `${name}.pd`)));
+const missingMessage = (names: string[]) => `audio/patches/에 없는 패치: ${names.map((n) => `${n}.pd`).join(", ")}`;
+
 const types: Record<string, string> = { ".js": "text/javascript", ".wasm": "application/wasm", ".gz": "application/gzip" };
+let isBuild = false;
 const audioFolder = (): Plugin => ({
   name: "whistle-audio-folder",
+  buildStart() {
+    const missing = isBuild ? missingPatches() : [];
+    if (missing.length) this.error(missingMessage(missing));
+  },
+  configResolved(config) { isBuild = config.command === "build"; },
   configureServer(server) {
+    const warn = () => { const missing = missingPatches(); if (missing.length) server.config.logger.warn(missingMessage(missing)); };
+    warn();
     const prefix = `${server.config.base}audio/`;
     server.middlewares.use((req, res, next) => {
       const path = decodeURIComponent(req.url?.split("?")[0] ?? "");
@@ -69,7 +84,7 @@ const audioFolder = (): Plugin => ({
       res.end(body);
     });
     server.watcher.on("all", (_event, file) => {
-      if (file.startsWith(join(patchDir, "/"))) server.ws.send({ type: "full-reload" });
+      if (file.startsWith(join(patchDir, "/"))) { warn(); server.ws.send({ type: "full-reload" }); }
     });
   },
   generateBundle() {

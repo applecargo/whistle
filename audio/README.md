@@ -29,7 +29,7 @@ Pd 엔진 하나(AudioContext 하나)에서 여러 패치를 실행한다. 소�
   HTTP로는 폴더를 통째로 받을 수 없어서, 패치 폴더를 tar.gz 하나(`audio/patches.tar.gz`)로 묶어 보내고 브라우저가 푼다.
   묶는 건 Vite가 한다: 개발 서버는 요청 때마다 지금 폴더를 묶고, `npm run build`는 결과물에 넣는다(엔진 `audio/engine/`도 함께).
   안을 보려면 `tar tzf patches.tar.gz`. gzip은 `.pd` 같은 텍스트는 크게 줄이지만 wav는 거의 줄이지 못한다(실측 약 14%). 관리할 목록은 없다. 개발 서버는 패치 폴더가 바뀌면 페이지를 새로고침한다.
-  없는 패치를 열면 Pd가 원래처럼 couldn't create를 낸다(따로 확인하지 않음).
+  앱이 여는 패치(`KIND_PATCHES`, 상호작용 패치)가 폴더에 없으면 `npm run build`가 멈추고, 개발 서버는 터미널에 경고를 낸다.
   그래서 패치를 고치면 Pd에서 저장만 하면 된다. 개발 PC에 pd4web·Emscripten이 없어도 된다.
   파일은 매번 서버에 바뀌었는지 묻고 받는다(`cache: "no-cache"`). 페이지를 열 때 폴더 전체(지금 약 0.7MB)를 받는다.
 - 엔진을 다시 빌드할 때(pd4web 버전업, 외부 객체 추가 등)만 `npm run audio:engine`.
