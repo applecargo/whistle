@@ -21,7 +21,7 @@ export function nearbySounds(world: World, actors: Actor[], player: PlayerAudioF
   }).sort((a, b) => a.distance - b.distance || a.id.localeCompare(b.id));
 }
 
-export function createPlacedSounds(context: AudioContext, output: AudioNode, onError: () => void) {
+export function createPlacedSounds(context: AudioContext, onError: () => void, output: AudioNode = context.destination) {
   const voices = new Map<string, Voice>();
   const buffers = new Map<string, AudioBuffer>();
   const pending = new Map<string, Promise<void>>();

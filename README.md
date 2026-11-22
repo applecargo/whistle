@@ -1,6 +1,6 @@
 # Whistle
 
-- 2D 격자 편집 → 3D 탐색 · WebPd 사운드
+- 2D 격자 편집 → 3D 탐색 · Pd(pd4web) 사운드
 - [브라우저에서 열기](https://suspiciouscloudgames.github.io/whistle/)
 
 ## 실행
@@ -9,22 +9,18 @@
 
 ```sh
 npm ci       # 최초 설치
-npm run dev  # Pd 자동 컴파일 · 서버 시작
+npm run dev  # Pd 패치 복사 · 서버 시작
 ```
 
 - 종료: `Ctrl+C`
-- 접속: [게임](http://127.0.0.1:5173/whistle/) · [오디오 테스트](http://127.0.0.1:5173/whistle/audio-lab/index.html) · [UWB 테스트](http://127.0.0.1:5173/whistle/uwb-lab/index.html)
+- 접속: [게임](http://127.0.0.1:5173/whistle/) · [오디오 테스트](http://127.0.0.1:5173/whistle/audio-lab/index.html) · [사운드스케이프 테스트](http://127.0.0.1:5173/whistle/audio-lab/soundscape.html) · [UWB 테스트](http://127.0.0.1:5173/whistle/uwb-lab/index.html)
 - 포트 변경 시 터미널 주소 확인
 
 ## 사운드 수정
 
-- [격자 재질·물길·공간화와 Pd 입력값](docs/soundscape-design.md)
-- 플레이어 지형음·편집음·규칙 이벤트음 수정 → [player3.pd](audio/patches/player3.pd) 및 하위 패치
-- 업로드한 배치 음원의 효과 수정 → [placed-sound-fx.pd](audio/patches/placed-sound-fx.pd). [스테레오 입출력과 청음 방법](audio/README.md#배치-음원-효과)
-- [uwb-player.pd](audio/patches/uwb-player.pd)에서 사운드스케이프·게임 합성·배치 음원 효과와 앱 입력 연결
-- 적용 순서 — Pd 저장 → `npm run audio:build` → 게임 새로고침 → **플레이**
-- 서버 재시작 시에도 자동 컴파일
-- 입력 파라미터 변경 시 연결 패치·앱 코드 확인
+- 편집음·플레이어음·규칙 이벤트음은 각각 `edit.pd`, `player.pd`, `event.pd`에서 수정한다. 지형·환경·구조 영역은 개별 패치를 쓴다.
+- 게임·UWB의 풀 타격과 고리 숨결은 `world-resonance-live.pd`, 게임의 배치 음원 효과는 `placed-sound-fx.pd`에서 수정한다. [격자·공간화·Pd 입력](docs/soundscape-design.md)
+- 패치 저장 → `npm run audio:build` → 페이지 새로고침. 새 최상위 패치는 `audio/patch-targets.json`에 등록한다.
 - `public/audio-test/`: 자동 생성 파일, 직접 수정 금지
 - `whistle-board-height`: 보드 높이 수신만 연결, 소리 변화 없음
 

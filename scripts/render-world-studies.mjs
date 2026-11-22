@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createEngine } from "../node_modules/webpd/dist/node_modules/@webpd/compiler/dist/src/engine-assemblyscript/run/index.js";
 import { readMetadata } from "../node_modules/webpd/dist/node_modules/@webpd/compiler/dist/src/run/index.js";
-import { createSoundscapeWorld, waterConnectivity } from "../lib/audio/soundscape.ts";
+import { createSoundscapeWorld, waterConnectivity } from "../lib/audio/world-resonance.ts";
 import { deriveEnvironment } from "../lib/environment.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));

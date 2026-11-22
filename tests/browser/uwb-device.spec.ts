@@ -1,3 +1,4 @@
+import { outputGain, probeUwbOutput } from "./pd-probe";
 import { test, expect, type Page } from "@playwright/test";
 import { createSocket } from "node:dgram";
 import { readFileSync } from "node:fs";
@@ -6,6 +7,7 @@ import { parseConfig, distanceTo } from "../../lib/uwb/solver";
 import { createLabWorld } from "../../uwb-lab/world";
 import { rectangleConfig } from "../../lib/uwb/rectangle";
 
+test.beforeEach(async ({ page }) => { await probeUwbOutput(page); });
 test.setTimeout(60_000);
 const config = parseConfig({ ...JSON.parse(readFileSync("config/uwb.example.json", "utf8")), mode: "3d", smoothingMs: 0 });
 const data = async (page: Page) => JSON.parse((await page.locator("#position-data").textContent())!);
@@ -60,15 +62,15 @@ test("UDP ranges reach the existing scene and Pd; height, invalid frames and tim
     expect((await messages(page))["whistle-player"]).toHaveLength(9);
     device.invalid();
     await expect(page.locator("#device-status")).toContainText("앵커가 4개 이상");
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    await expect.poll(() => outputGain(page)).toBe(0);
     await expect(page.getByTestId("position-marker")).toHaveCount(0);
     device.valid();
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+    await expect.poll(() => outputGain(page)).toBe(1);
     device.pause();
     await expect(page.locator("#device-status")).toContainText("위치를 1초 이상 수신하지 못했습니다.");
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    await expect.poll(() => outputGain(page)).toBe(0);
     device.resume();
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+    await expect.poll(() => outputGain(page)).toBe(1);
     await page.getByRole("button", { name: "오디오 종료", exact: true }).click();
     device.move({ x: 5, z: 3, boardHeight: 1 });
     await expect(page.locator("#water")).toHaveText("물속");
@@ -108,7 +110,7 @@ test("page rectangle settings turn raw ranges into terrain audio and clear stale
     device.move({ x: 1, z: 2, boardHeight: 1.2 });
     await expect(page.locator("#audio-block-reason")).toHaveCount(0);
     await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+    await expect.poll(() => outputGain(page)).toBe(1);
     await expect.poll(async () => (await messages(page))["whistle-board-height"]).toEqual([1.2]);
     await expect.poll(async () => (await messages(page))["whistle-player"]?.[4]).toBeCloseTo(0);
     device.move({ x: 3, z: 2, boardHeight: 1.2 });
@@ -117,25 +119,25 @@ test("page rectangle settings turn raw ranges into terrain audio and clear stale
     device.invalid();
     await expect(page.locator("#device-status")).toContainText("앵커가 3개 이상");
     await expect(page.locator("#range-data")).toContainText("미수신");
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    await expect.poll(() => outputGain(page)).toBe(0);
     device.valid();
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+    await expect.poll(() => outputGain(page)).toBe(1);
     device.pause();
     await page.getByLabel("태그 높이 (m)", { exact: true }).fill("1");
     await apply.click();
     await expect(page.getByTestId("position-marker")).toHaveCount(0);
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    await expect.poll(() => outputGain(page)).toBe(0);
     device.move({ x: 1, z: 2, boardHeight: 1 }); device.resume();
     await expect.poll(async () => (await messages(page))["whistle-board-height"]).toEqual([1]);
     device.pause();
     await expect(page.locator("#device-status")).toContainText("1초 동안 거리 수신 없음");
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    await expect.poll(() => outputGain(page)).toBe(0);
     device.resume();
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+    await expect.poll(() => outputGain(page)).toBe(1);
     await page.getByRole("button", { name: "거리만 확인", exact: true }).click();
     await expect(page.locator("#device-status")).toContainText("좌표 계산 안 함");
     await expect(page.getByTestId("position-marker")).toHaveCount(0);
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    await expect.poll(() => outputGain(page)).toBe(0);
   } finally { await device.close(); }
 });
 
@@ -156,16 +158,16 @@ test("tag selection, saved Whistle world and connection loss do not use another 
     await page.getByRole("button", { name: "연결 / 다시 연결", exact: true }).click();
     await expect(page.locator("#device-status")).toContainText("태그 1 수신 중");
     await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+    await expect.poll(() => outputGain(page)).toBe(1);
     await page.getByRole("button", { name: "연결 종료", exact: true }).click();
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    await expect.poll(() => outputGain(page)).toBe(0);
     await expect(page.getByTestId("position-marker")).toHaveCount(0);
     await page.getByRole("button", { name: "연결 / 다시 연결", exact: true }).click();
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+    await expect.poll(() => outputGain(page)).toBe(1);
     device.pause();
     await device.stopBridge();
     await expect(page.locator("#device-status")).toContainText("PC 수신기 연결이 끊겼습니다.");
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    await expect.poll(() => outputGain(page)).toBe(0);
     expect(await page.evaluate(() => localStorage.getItem("whistle.world.v2"))).toBe(stored);
   } finally { await device.close(); }
 });

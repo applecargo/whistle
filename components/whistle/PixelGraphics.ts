@@ -54,13 +54,13 @@ export function applyPixelMaterials(root: THREE.Object3D, daylight = { value: 1 
   });
 }
 
-export function makePixelRenderer(renderer: THREE.WebGLRenderer, daylight = {value: 1}) {
+export function makePixelRenderer(renderer: THREE.WebGLRenderer, daylight = {value: 1}, samples = 4) {
   const target = new THREE.WebGLRenderTarget(1, 1, {
     minFilter: THREE.NearestFilter,
     magFilter: THREE.NearestFilter,
     generateMipmaps: false,
     depthBuffer: true,
-    samples: 4,
+    samples,
   });
   const colorMask = target.clone();
   const maskMode = { value: 0 };

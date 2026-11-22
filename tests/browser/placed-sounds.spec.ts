@@ -1,28 +1,33 @@
 import { test, expect, type Page } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
+import { probePd, pdProbe } from "./pd-probe";
 
 test.setTimeout(90_000);
 
-function wav(seconds = 0.5, frequency = 440) {
-  const rate = 44100, count = Math.floor(rate * seconds), bytes = Buffer.alloc(44 + count * 2);
-  bytes.write("RIFF"); bytes.writeUInt32LE(36 + count * 2, 4); bytes.write("WAVEfmt ", 8);
-  bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22);
-  bytes.writeUInt32LE(rate, 24); bytes.writeUInt32LE(rate * 2, 28); bytes.writeUInt16LE(2, 32); bytes.writeUInt16LE(16, 34);
-  bytes.write("data", 36); bytes.writeUInt32LE(count * 2, 40);
-  for (let i = 0; i < count; i++) bytes.writeInt16LE(Math.round(Math.sin(i / rate * Math.PI * 2 * frequency) * 8000), 44 + i * 2);
+function wav(seconds = 0.5, frequencies = [440]) {
+  const rate = 44100, count = Math.floor(rate * seconds), stride = frequencies.length * 2;
+  const bytes = Buffer.alloc(44 + count * stride);
+  bytes.write("RIFF"); bytes.writeUInt32LE(bytes.length - 8, 4); bytes.write("WAVEfmt ", 8);
+  bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(frequencies.length, 22);
+  bytes.writeUInt32LE(rate, 24); bytes.writeUInt32LE(rate * stride, 28); bytes.writeUInt16LE(stride, 32); bytes.writeUInt16LE(16, 34);
+  bytes.write("data", 36); bytes.writeUInt32LE(count * stride, 40);
+  for (let i = 0; i < count; i++) {
+    frequencies.forEach((hz, channel) => bytes.writeInt16LE(
+      Math.round(Math.sin(i / rate * Math.PI * 2 * hz) * 8000), 44 + i * stride + channel * 2));
+  }
   return bytes;
 }
-type Probe = { contexts: AudioContext[]; started: number; active: number; pd: number; rms: number; output?: AnalyserNode };
+type Probe = { contexts: AudioContext[]; started: number; active: number; rms: number; output?: AnalyserNode[] };
 const probe = (page: Page) => page.evaluate(() => {
   const p = (window as typeof window & { soundProbe: Probe }).soundProbe;
-  return { contexts: p.contexts.map(c => c.state), started: p.started, active: p.active, pd: p.pd, rms: p.rms };
+  return { contexts: p.contexts.map(c => c.state), started: p.started, active: p.active, rms: p.rms };
 });
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(world => {
     if (!localStorage.getItem("whistle.world.v2")) localStorage.setItem("whistle.world.v2", JSON.stringify(world));
     localStorage.setItem("whistle.language", "ko");
     const state = window as typeof window & { soundProbe: Probe };
-    state.soundProbe = { contexts: [], started: 0, active: 0, pd: 0, rms: 0 };
+    state.soundProbe = { contexts: [], started: 0, active: 0, rms: 0 };
     const Original = window.AudioContext;
     window.AudioContext = class extends Original {
       constructor(options?: AudioContextOptions) { super(options); state.soundProbe.contexts.push(this); }
@@ -45,39 +50,24 @@ test.beforeEach(async ({ page }) => {
       }
     };
   }, terrainFixtures().flat);
-  await page.route("**/audio-test/webpd-runtime.js", async route => {
-    const response = await route.fetch();
-    await route.fulfill({ response, body: await response.text() + `
-      const originalRun = WebPdRuntime.run;
-      WebPdRuntime.run = async (...args) => {
-        const node = await originalRun(...args);
-        window.soundProbe.pd++;
-        const analyser = node.context.createAnalyser();
-        analyser.fftSize = 8192;
-        analyser.smoothingTimeConstant = 0;
-        node.connect(analyser);
-        window.soundProbe.output = analyser;
-        return node;
-      };
-    ` });
-  });
+  await probePd(page);
   await page.goto(".");
   await expect(page.getByRole("button", { name: "파일 저장", exact: true })).toHaveAttribute("aria-description", "이 브라우저에 저장됨");
 });
 
-async function upload(page: Page, seconds = 0.5, frequency = 440) {
+async function upload(page: Page, seconds = 0.5, frequencies = [440]) {
   await page.getByRole("button", { name: "사운드 만들기" }).click();
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "사운드 불러오기", exact: true }).click();
-  await (await chooser).setFiles({ name: "목소리.wav", mimeType: "audio/wav", buffer: wav(seconds, frequency) });
+  await (await chooser).setFiles({ name: "목소리.wav", mimeType: "audio/wav", buffer: wav(seconds, frequencies) });
   await expect(page.getByRole("button", { name: "저장", exact: true })).toBeEnabled();
   await expect(page.getByRole("button", { name: "미리 듣기", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "저장", exact: true }).click();
 }
 
 test("upload, place, save, reload, mix with Pd, pause, resume and remove", async ({ page }) => {
-  const carrier = 2040;
-  await upload(page, 0.5, carrier);
+  const carriers = [2040, 1530];
+  await upload(page, 0.5, carriers);
   await page.locator('[data-cell="126"]').click();
   await expect(page.locator('[data-cell="126"] [data-symbol-site]')).toBeVisible();
   await expect(page.locator(".sound-range").first()).toBeVisible();
@@ -89,17 +79,35 @@ test("upload, place, save, reload, mix with Pd, pause, resume and remove", async
   await expect.poll(async () => (await probe(page)).active).toBe(1);
   await expect.poll(async () => (await probe(page)).rms).toBeGreaterThan(0.01);
   expect((await probe(page)).contexts).toEqual(["running"]);
-  expect((await probe(page)).pd).toBe(1);
+  expect((await pdProbe(page)).modules).toBe(1);
   const world = terrainFixtures().flat;
   const modulation = 40 + 120 * (world.start.x + 0.5) / world.size;
-  await expect.poll(() => page.evaluate(({ carrier, modulation }) => {
-    const analyser = (window as typeof window & { soundProbe: Probe }).soundProbe.output!;
-    const bins = new Float32Array(analyser.frequencyBinCount);
-    analyser.getFloatFrequencyData(bins);
-    const level = (hz: number) => bins[Math.round(hz * analyser.fftSize / analyser.context.sampleRate)];
-    const sidebands = Math.min(level(carrier - modulation), level(carrier + modulation));
-    return sidebands > -55 && sidebands > level(carrier) + 12;
-  }, { carrier, modulation })).toBe(true);
+  await expect.poll(() => page.evaluate(({ carriers, modulation }) => {
+    const w = window as typeof window & { soundProbe: Probe; Pd4WebAudioWorkletNode: AudioWorkletNode; pdProbe: { starts: string[] } };
+    if (!w.soundProbe.output) {
+      const index = w.pdProbe.starts.indexOf("world-audio");
+      if (index < 0) return false;
+      const node = w.Pd4WebAudioWorkletNode;
+      const split = node.context.createChannelSplitter(32);
+      node.connect(split);
+      w.soundProbe.output = carriers.map((_, channel) => {
+        const analyser = node.context.createAnalyser();
+        analyser.fftSize = 8192;
+        analyser.smoothingTimeConstant = 0;
+        split.connect(analyser, 2 * index + channel);
+        return analyser;
+      });
+    }
+    return w.soundProbe.output.every((analyser, channel) => {
+      const bins = new Float32Array(analyser.frequencyBinCount);
+      analyser.getFloatFrequencyData(bins);
+      const level = (hz: number) => bins[Math.round(hz * analyser.fftSize / analyser.context.sampleRate)];
+      const carrier = carriers[channel], other = carriers[1 - channel];
+      const sidebands = Math.min(level(carrier - modulation), level(carrier + modulation));
+      return sidebands > -60 && sidebands > level(carrier) + 12 &&
+        sidebands > Math.max(level(other - modulation), level(other + modulation)) + 12;
+    });
+  }, { carriers, modulation })).toBe(true);
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
   await expect.poll(async () => (await probe(page)).active).toBe(0);
   await page.keyboard.press("a");

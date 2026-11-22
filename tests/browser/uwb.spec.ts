@@ -1,6 +1,8 @@
+import { outputGain, probeUwbOutput, uwbOutputRms } from "./pd-probe";
 import { test, expect, type Page } from "@playwright/test";
 import { createLabWorld } from "../../uwb-lab/world";
 
+test.beforeEach(async ({ page }) => { await probeUwbOutput(page); });
 test.setTimeout(60_000);
 
 const data = async (page: Page) => JSON.parse((await page.locator("#position-data").textContent())!);
@@ -42,15 +44,15 @@ test("Pd receives mapped values and stops for invalid input and blur", async ({ 
   await expect.poll(async () => (await messages(page))["whistle-player"]?.slice(2, 5)).toEqual([0.5, 0, 1]);
   expect((await messages(page))["whistle-player"]).toHaveLength(9);
   await page.getByLabel("가로 (m)", { exact: true }).fill("0");
-  await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+  await expect.poll(() => outputGain(page)).toBe(0);
   await expect(page.locator("#tracking-status")).toContainText("0보다 큰 값");
   await page.getByLabel("가로 (m)", { exact: true }).fill("6");
-  await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+  await expect.poll(() => outputGain(page)).toBe(1);
   await page.getByLabel("좌표 JSON", { exact: true }).fill('{"x":"2","z":1}');
   await page.getByRole("button", { name: "좌표 적용", exact: true }).click();
-  await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+  await expect.poll(() => outputGain(page)).toBe(0);
   await page.getByRole("button", { name: "왼쪽 위치", exact: true }).click();
-  await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+  await expect.poll(() => outputGain(page)).toBe(1);
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
   await expect(page.locator("#audio-status")).toHaveText("오디오 꺼짐");
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
@@ -84,48 +86,26 @@ test("two world menus show the existing world without a popup or overwriting sto
 });
 
 test("audio loading failure can retry and cancellation does not start a late session", async ({ page }) => {
-  await page.route("**/audio-test/patch.wasm", (route) => route.fulfill({ status: 503, body: "unavailable" }));
+  await page.route("**/audio-test/patches/player.pd*", (route) => route.fulfill({ status: 503, body: "unavailable" }));
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
-  await expect(page.locator("#audio-status")).toHaveText("오디오를 시작할 수 없습니다.");
-  await page.unroute("**/audio-test/patch.wasm");
+  await expect(page.locator("#audio-status")).toContainText("불러오지 못했습니다");
+  await page.unroute("**/audio-test/patches/player.pd*");
   let release!: () => void;
   const hold = new Promise<void>((resolve) => { release = resolve; });
-  await page.route("**/audio-test/patch.wasm", async (route) => { await hold; await route.continue(); });
+  await page.route("**/audio-test/patches/player.pd*", async (route) => { await hold; await route.continue(); });
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
   await expect(page.locator("#audio-status")).toHaveText("패치 준비 중");
   await page.getByRole("button", { name: "오디오 종료", exact: true }).click();
   release();
   await expect(page.locator("#audio-status")).toHaveText("오디오 꺼짐");
-  await page.unroute("**/audio-test/patch.wasm");
+  await page.unroute("**/audio-test/patches/player.pd*");
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
   await expect(page.locator("#audio-status")).toHaveText("오디오 실행 중");
 });
 
 test("board height reaches Pd independently of virtual ground and survives restart", async ({ page }) => {
   test.setTimeout(90_000);
-  await page.route("**/audio-test/webpd-runtime.js", async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({ response, body: await response.text() + `
-      const originalRun = WebPdRuntime.run;
-      WebPdRuntime.run = async (...args) => {
-        const node = await originalRun(...args);
-        const context = args[0];
-        const analyser = context.createAnalyser();
-        analyser.fftSize = 4096;
-        analyser.smoothingTimeConstant = 0;
-        node.connect(analyser);
-        window.heightProbe = () => {
-          const wave = new Float32Array(4096);
-          analyser.getFloatTimeDomainData(wave);
-          return { rms: Math.sqrt(wave.reduce((sum, n) => sum + n * n, 0) / wave.length) };
-        };
-        return node;
-      };
-    ` });
-  });
-  const probe = () => page.evaluate(() => (window as typeof window & {
-    heightProbe: () => { rms: number };
-  }).heightProbe());
+  const probe = async () => ({ rms: await uwbOutputRms(page) });
   const initial = await data(page);
   const height = page.getByLabel("보드 높이 (m)", { exact: true });
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
@@ -142,7 +122,7 @@ test("board height reaches Pd independently of virtual ground and survives resta
   for (const invalid of ["", "-1", "11"]) {
     await height.fill(invalid);
     await expect(page.locator("#height-status")).toContainText("보드 높이");
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    await expect.poll(() => outputGain(page)).toBe(0);
     await expect.poll(async () => (await probe()).rms).toBeLessThan(0.00000001);
   }
   await page.getByLabel("좌표 JSON", { exact: true }).fill('{"x":1,"z":3,"boardHeight":1.5}');
@@ -162,7 +142,7 @@ test("board height reaches Pd independently of virtual ground and survives resta
     await page.getByLabel("좌표 JSON", { exact: true }).fill(`{"x":5,"z":2,"boardHeight":${invalid}}`);
     await page.getByRole("button", { name: "좌표 적용", exact: true }).click();
     await expect(page.locator("#tracking-status")).toContainText("보드 높이");
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    await expect.poll(() => outputGain(page)).toBe(0);
     await expect(height).toHaveValue("1.5");
     await expect(page.getByLabel("관객 X (m)", { exact: true })).toHaveValue("1");
   }

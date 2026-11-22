@@ -14,3 +14,4 @@ config/uwb-router.local.json
 firmware/uwb-tag/network.local.h
 firmware/*/build/
 .playwright-cli/
+output/pd4web-engine/

@@ -1,0 +1,12 @@
+#N canvas 80 80 470 280 12;
+#X obj 30 30 world-resonance-live \$1;
+#X obj 255 30 adc~ 1 2;
+#X obj 255 90 placed-sound-fx;
+#X obj 30 190 outlet~;
+#X obj 160 190 outlet~;
+#X connect 0 0 3 0;
+#X connect 0 1 4 0;
+#X connect 1 0 2 0;
+#X connect 1 1 2 1;
+#X connect 2 0 3 0;
+#X connect 2 1 4 0;

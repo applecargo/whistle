@@ -1,7 +1,9 @@
+import { outputGain, probeUwbOutput } from "./pd-probe";
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
 import { flatTerrain } from "../../lib/terrain";
 
+test.beforeEach(async ({ page }) => { await probeUwbOutput(page); });
 test.setTimeout(90_000);
 
 const data = async (page: Page) => JSON.parse((await page.locator("#position-data").textContent())!);
@@ -67,7 +69,7 @@ test("live grid edits and undo reach the displayed world and Pd without relying 
   expect((await data(page)).boardHeight).toBe(1.5);
   await editor.close();
   await expect(page.locator("#live-status")).toContainText("연결이 끊겼습니다.");
-  await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+  await expect.poll(() => outputGain(page)).toBe(0);
   await expect(page.getByTestId("position-marker")).toHaveCount(0);
 });
 

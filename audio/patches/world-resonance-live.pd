@@ -1,5 +1,5 @@
 #N canvas 30 40 1150 830 12;
-#X obj 30 100 r whistle-resonance-control;
+#X obj 30 100 r \$1-whistle-resonance-control;
 #X obj 30 137 sel 0 1 2;
 #X msg 30 175 0;
 #X msg 100 175 stop;
@@ -15,7 +15,7 @@
 #X obj 175 410 *~;
 #X obj 175 448 *~ 0.32;
 #X obj 405 448 water-resonator;
-#X obj 620 140 r whistle-resonance;
+#X obj 620 140 r \$1-whistle-resonance;
 #X obj 620 180 unpack f f f f f f f f f;
 #X obj 580 250 pack f 20;
 #X obj 580 290 line~;

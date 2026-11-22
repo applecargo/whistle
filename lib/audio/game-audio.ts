@@ -1,6 +1,9 @@
-import type { EditSound, PlayerSound, PdSession } from "./webpd-session.ts";
+import type { EditSound, PlayerSound, InteractionSession } from "./pd-session.ts";
 
-type Session = Pick<PdSession, "context" | "edit" | "player" | "stopPlayer" | "event" | "mute" | "close">;
+/** pause 후 이만큼(ms) 지나도 그대로면 AudioContext를 멈춘다(음소거 fade가 끝난 뒤). */
+const SUSPEND_DELAY_MS = 150;
+
+type Session = Pick<InteractionSession, "context" | "edit" | "player" | "stopPlayer" | "event" | "mute" | "close">;
 export function createGameAudio(load: () => Promise<Session>, onError: (error: unknown) => void) {
   let session: Session | undefined;
   let loading: Promise<void> | undefined;
@@ -8,6 +11,17 @@ export function createGameAudio(load: () => Promise<Session>, onError: (error: u
   let pendingEdit: EditSound | undefined;
   let latestPlayer: PlayerSound | undefined;
   let pendingEvent: [number, number, number] | undefined;
+  // 탭을 보지 않을 때(blur·숨김)는 음소거만으로는 부족하다: 패치 wasm이 오디오 스레드에서 계속 돈다.
+  // AudioContext를 suspend해 모든 패치(상호작용·사운드스케이프)의 처리를 멈추고, activate()의 resume()으로 다시 켠다.
+  let suspendTimer: ReturnType<typeof setTimeout> | undefined;
+  const cancelSuspend = () => { clearTimeout(suspendTimer); suspendTimer = undefined; };
+  const scheduleSuspend = () => {
+    cancelSuspend();
+    suspendTimer = setTimeout(() => {
+      suspendTimer = undefined;
+      if (paused && session && !disposed) void session.context.suspend?.().catch(onError);
+    }, SUSPEND_DELAY_MS);
+  };
   const safely = (action: () => void) => {
     try { action(); } catch (error) { onError(error); }
   };
@@ -23,6 +37,7 @@ export function createGameAudio(load: () => Promise<Session>, onError: (error: u
   const activate = () => {
     if (disposed) return;
     paused = false;
+    cancelSuspend();
     if (session) {
       void session.context.resume().then(() => safely(flush)).catch(onError);
     } else if (!loading) {
@@ -62,10 +77,11 @@ export function createGameAudio(load: () => Promise<Session>, onError: (error: u
       if (session) safely(() => session?.event(frequency, gain, pan));
       else pendingEvent = [frequency, gain, pan];
     },
-    pause() { paused = true; reset(); },
+    pause() { paused = true; reset(); scheduleSuspend(); },
     resume() { if (paused && (session || loading)) activate(); },
     dispose() {
       disposed = true;
+      cancelSuspend();
       reset();
       void session?.close().catch(onError);
       session = undefined;
