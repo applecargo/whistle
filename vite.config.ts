@@ -52,7 +52,7 @@ function tar(dir: string) {
   return gzipSync(Buffer.concat(blocks));
 }
 
-/** 앱이 여는 패치(KIND_PATCHES, 상호작용 패치) 중 audio/patches/에 없는 것. 빌드는 멈추고, 개발 서버는 켤 때 경고만 한다. */
+/** 앱이 여는 패치(KIND_PATCHES, 상호작용 패치) 중 audio/patches/에 없는 것. 빌드도 개발 서버도 시작하지 않는다. */
 const missingPatches = () => [...new Set([...Object.values(KIND_PATCHES), ...Object.values(INTERACTION_PATCHES)])]
   .filter((name) => !existsSync(join(patchDir, `${name}.pd`)));
 const missingMessage = (names: string[]) => `audio/patches/에 없는 패치: ${names.map((n) => `${n}.pd`).join(", ")}`;
@@ -68,7 +68,7 @@ const audioFolder = (): Plugin => ({
   configResolved(config) { isBuild = config.command === "build"; },
   configureServer(server) {
     const missing = missingPatches();
-    if (missing.length) server.config.logger.warn(missingMessage(missing));
+    if (missing.length) throw new Error(missingMessage(missing));
     const prefix = `${server.config.base}audio/`;
     server.middlewares.use((req, res, next) => {
       const path = decodeURIComponent(req.url?.split("?")[0] ?? "");
