@@ -1,5 +1,5 @@
-import { validateContentCounts } from "./content-limits.ts";
-import { isHole, MIN_HEIGHT, MAX_HEIGHT } from "./tile.ts";
+import { validateContentCounts, MAX_CONTENT_COUNT, MAX_LIBRARY_SIZE } from "./content-limits.ts";
+import { isGap, MIN_HEIGHT, MAX_HEIGHT } from "./tile.ts";
 import { validRecording, type Recording } from "./audio/recording.ts";
 import {
   deriveStructures,
@@ -28,6 +28,7 @@ export type Asset = {
   shape: Shape;
   color: string;
   glyphColor?: string;
+  received?: boolean;
   image?: string;
   originalImage?: string;
   sound?: Recording;
@@ -102,6 +103,7 @@ export type Player = {
   yaw: number;
   pitch?: number;
   falling?: boolean;
+  grounded?: boolean;
 };
 export const PALETTE = ["#111111", "#555555", "#999999", "#dddddd"];
 export const uid = () =>
@@ -437,7 +439,7 @@ export function describeRule(r: Rule, w: World) {
             : `${name(r.replacement)}으로 변하기`;
   return { condition, action };
 }
-export function validateWorld(input: unknown): World {
+export function validateWorld(input: unknown, libraryLimit = MAX_CONTENT_COUNT): World {
   if (!input || typeof input !== "object")
     throw Error("파일을 읽을 수 없습니다.");
   const w = input as World;
@@ -469,7 +471,7 @@ export function validateWorld(input: unknown): World {
     !number(w.size, 6, 24) ||
     !Array.isArray(w.assets) ||
     w.assets.length < 1 ||
-    w.assets.length > 250 ||
+    w.assets.length > MAX_LIBRARY_SIZE ||
     !Array.isArray(w.objects) ||
     w.objects.length > 250 ||
     !Array.isArray(w.rules) ||
@@ -485,6 +487,7 @@ export function validateWorld(input: unknown): World {
       !shapes.includes(a.shape) ||
       !/^#[0-9a-f]{6}$/i.test(a.color) ||
       (a.glyphColor !== undefined && !/^#[0-9a-f]{6}$/i.test(a.glyphColor)) ||
+      (a.received !== undefined && typeof a.received !== "boolean") ||
       typeof a.solid !== "boolean" ||
       (a.sound !== undefined && (!validRecording(a.sound) || a.solid || a.image !== undefined || a.text !== undefined)) ||
       (a.placement !== undefined && !["upright", "floating", "surface", "field"].includes(a.placement)) ||
@@ -506,7 +509,7 @@ export function validateWorld(input: unknown): World {
       throw Error("사물 데이터가 올바르지 않습니다.");
     ids.add(a.id);
   }
-  validateContentCounts(w);
+  validateContentCounts(w, libraryLimit);
   const placed = new Set<string>();
   for (const o of w.objects) {
     if (
@@ -558,6 +561,7 @@ export function validateWorld(input: unknown): World {
     const t = w.terrain;
     if (
       !t ||
+      (t.floating !== undefined && typeof t.floating !== "boolean") ||
       (t.generatorVersion !== undefined && t.generatorVersion !== 2) ||
       !Number.isInteger(t.seed) ||
       !number(t.seed, 0, 4294967295) ||
@@ -568,6 +572,7 @@ export function validateWorld(input: unknown): World {
           !tile ||
           !Number.isInteger(tile.height) ||
           !number(tile.height, MIN_HEIGHT, MAX_HEIGHT) ||
+          (tile.void !== undefined && (typeof tile.void !== "boolean" || (tile.void && (!t.floating || tile.hole)))) ||
           (tile.hole !== undefined && typeof tile.hole !== "boolean") ||
           !["plain", "rough", "slick", "soft"].includes(tile.surface),
       ) ||
@@ -578,7 +583,7 @@ export function validateWorld(input: unknown): World {
       )
     )
       throw Error("지형 데이터가 올바르지 않습니다.");
-    if (isHole(t.tiles[w.start.z * w.size + w.start.x]))
+    if (isGap(t.tiles[w.start.z * w.size + w.start.x]))
       throw Error("시작점에는 바닥이 필요합니다.");
   }
   return clone(w);

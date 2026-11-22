@@ -10,8 +10,11 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
+    "start": "node --experimental-strip-types scripts/serve.ts",
     "test": "npm run test:unit && npm run test:browser",
-    "test:unit": "node --experimental-strip-types --test tests/engine.test.ts tests/environment.test.ts tests/effect-rules.test.ts tests/symbols.test.ts tests/derivation.test.ts tests/game-audio.test.ts tests/placed-sounds.test.ts tests/uwb-position.test.ts tests/uwb-bridge.test.ts",
+    "test:unit": "node --experimental-strip-types --test tests/engine.test.ts tests/environment.test.ts tests/effect-rules.test.ts tests/symbols.test.ts tests/derivation.test.ts tests/game-audio.test.ts tests/placed-sounds.test.ts tests/uwb-position.test.ts tests/uwb-bridge.test.ts tests/portals.test.ts tests/floating-world.test.ts tests/meeting.test.ts tests/meeting-whistle.test.ts tests/meeting-wire.test.ts tests/meeting-regressions.test.ts",
+    "test:meeting": "node --experimental-strip-types --test tests/meeting.test.ts tests/meeting-whistle.test.ts tests/meeting-wire.test.ts tests/meeting-regressions.test.ts && playwright test tests/browser/meeting.spec.ts",
+    "test:portals": "node --experimental-strip-types --test tests/portals.test.ts && playwright test tests/browser/portals.spec.ts",
     "test:browser": "playwright test",
     "test:storage": "playwright test tests/browser/storage.spec.ts",
     "benchmark:editor": "node tests/performance/editor.mjs",
@@ -29,7 +32,8 @@
     "@breezystack/lamejs": "1.2.7",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "three": "0.180.0"
+    "three": "0.180.0",
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.0",
@@ -42,7 +46,6 @@
     "serialport": "^13.0.0",
     "typescript": "5.9.3",
     "vite": "8.0.13",
-    "webpd": "1.0.0-alpha.14",
-    "ws": "^8.23.0"
+    "webpd": "1.0.0-alpha.14"
   }
 }

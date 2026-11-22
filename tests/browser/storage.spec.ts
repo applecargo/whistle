@@ -16,6 +16,7 @@ async function open(page: Page, stored?: string, hash = "", key = STORAGE) {
   await expect(page.getByRole("button", { name: "파일 저장", exact: true }))
     .toHaveAttribute("aria-description", "이 브라우저에 저장됨");
   await page.evaluate(({ key, stored }) => {
+    sessionStorage.clear();
     localStorage.clear();
     localStorage.setItem("whistle.language", "ko");
     if (stored !== undefined) localStorage.setItem(key, stored);

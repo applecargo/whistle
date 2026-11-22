@@ -74,7 +74,7 @@ test("symbols overlap without backgrounds, keep shared colors and erase independ
 test("text is created freely, placed repeatedly, erased, undone and edited without generated slots", async ({ page }, testInfo) => {
   const errors = await setup(page);
   await page.getByRole("button", { name: "텍스트 만들기", exact: true }).click();
-  await expect(page.locator(".media-tabs, .shape-options, [title], [data-display]")).toHaveCount(0);
+  await expect(page.getByRole("dialog").locator(".media-tabs, .shape-options, [title], [data-display]")).toHaveCount(0);
   await expect(page.locator("[data-placement]")).toHaveText("세우기");
   await expect(page.locator(".cycle-mark")).toHaveCount(1);
   await expect(page.locator('.asset-size-options button[aria-pressed="true"]')).toHaveCSS("text-decoration-line", "underline");

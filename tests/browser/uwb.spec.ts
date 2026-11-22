@@ -86,7 +86,7 @@ test("two world menus show the existing world without a popup or overwriting sto
 test("audio loading failure can retry and cancellation does not start a late session", async ({ page }) => {
   await page.route("**/audio-test/patch.wasm", (route) => route.fulfill({ status: 503, body: "unavailable" }));
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
-  await expect(page.locator("#audio-status")).toContainText("불러오지 못했습니다");
+  await expect(page.locator("#audio-status")).toHaveText("오디오를 시작할 수 없습니다.");
   await page.unroute("**/audio-test/patch.wasm");
   let release!: () => void;
   const hold = new Promise<void>((resolve) => { release = resolve; });

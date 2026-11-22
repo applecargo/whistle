@@ -1,9 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
+import { portalRelayPlugin } from "./scripts/portals/vite";
 export default defineConfig({
   base: "/whistle/",
-  plugins: [react()],
+  plugins: [react(), portalRelayPlugin()],
+  server: { watch: { ignored: ["**/output/**", "**/.whistle-data/**"] } },
   resolve: { alias: { "@": fileURLToPath(new URL(".", import.meta.url)) } },
   build: {
     rolldownOptions: {

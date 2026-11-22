@@ -7,11 +7,15 @@ import { DaylightIndicator } from "./DaylightIndicator";
 import { WeatherControls } from "./WeatherControls";
 import { HoleGlyph } from "./HoleGlyph";
 import { useLanguage } from "./Language";
+import type { ReactNode } from "react";
 
 type Props = {
   timeOfDay?: TimeOfDay;
   weather?: Weather; surface: Surface; terrainTool: TerrainTool; placingStart: boolean;
   symbols: Asset[]; selectedSymbol?: string;
+  sharedSymbolIds?: ReadonlySet<string>;
+  materialCount?: number; materialLimit?: number;
+  startLocked?: boolean;
   onSelectSurface: (surface: Surface) => void;
   onSelectTerrainTool: (tool: TerrainTool) => void;
   onTimeOfDayChange: (time: TimeOfDay) => void;
@@ -20,15 +24,16 @@ type Props = {
   onSelectSymbol: (id: string) => void;
   onEditSymbol: (id: string) => void;
   onToggleStart: () => void;
+  extraTools?: ReactNode;
 };
 
-export function EditorPalette({ weather, timeOfDay, surface, terrainTool, placingStart, symbols, selectedSymbol,
-  onSelectSurface, onSelectTerrainTool, onWeatherChange, onTimeOfDayChange, onCreateSymbol, onSelectSymbol, onEditSymbol, onToggleStart }: Props) {
+export function EditorPalette({ weather, timeOfDay, surface, terrainTool, placingStart, symbols, selectedSymbol, sharedSymbolIds, materialCount, materialLimit, startLocked,
+  onSelectSurface, onSelectTerrainTool, onWeatherChange, onTimeOfDayChange, onCreateSymbol, onSelectSymbol, onEditSymbol, onToggleStart, extraTools }: Props) {
   const { t } = useLanguage();
   return <aside className="palette direct-palette generated-palette" aria-label={t("재료")}>
     <div className="tile-palette">
       <div className="surface-choices" aria-label={t("타일")}>
-        {(["soft", "slick", "rough"] as const).map(id => {
+        {(["plain", "soft", "slick", "rough"] as const).map(id => {
           const entry = SURFACES.find(entry => entry.id === id)!;
           return <button key={id} className={`surface-choice ${surface === id && terrainTool === "surface" && !placingStart && !selectedSymbol ? "active" : ""}`}
             aria-label={t(entry.name)} aria-pressed={surface === id && terrainTool === "surface" && !placingStart && !selectedSymbol}
@@ -37,22 +42,27 @@ export function EditorPalette({ weather, timeOfDay, surface, terrainTool, placin
         <button className={`surface-choice clear-tile ${terrainTool === "hole" && !placingStart && !selectedSymbol ? "active" : ""}`}
           aria-label={t("꺼짐")} aria-pressed={terrainTool === "hole" && !placingStart && !selectedSymbol}
           onClick={() => onSelectTerrainTool("hole")}><HoleGlyph className="hole-glyph" /></button>
+        <button className={`surface-choice ${terrainTool === "erase" && !placingStart && !selectedSymbol ? "active" : ""}`}
+          aria-label={t("타일 지우기")} aria-pressed={terrainTool === "erase" && !placingStart && !selectedSymbol}
+          onClick={() => onSelectTerrainTool("erase")}><span className="surface-swatch empty-swatch" /></button>
       </div>
       <div className="height-choices" aria-label={t("바닥 높이")}>
         {(["raise", "lower"] as const).map(tool => <button key={tool} aria-label={t(tool === "raise" ? "높이기" : "낮추기")}
           aria-pressed={terrainTool === tool && !placingStart && !selectedSymbol}
           className={terrainTool === tool && !placingStart && !selectedSymbol ? "active" : ""} onClick={() => onSelectTerrainTool(tool)}>{tool === "raise" ? "＋" : "−"}</button>)}
       </div>
-      <button className={`site-start ${placingStart ? "active" : ""}`} aria-label={t("시작점")}
-        aria-pressed={placingStart} onClick={onToggleStart}>◎</button>
+      {!startLocked && <button className={`site-start ${placingStart ? "active" : ""}`} aria-label={t("시작점")}
+        aria-pressed={placingStart} onClick={onToggleStart}>◎</button>}
     </div>
     <div className="generated-symbols" aria-label={t("만든 기호")}>
+      {materialLimit !== undefined && <span className="meeting-material-count" aria-label={`내 기호 ${materialCount} / ${materialLimit}`}>{materialCount} / {materialLimit}</span>}
       <div className="symbol-create">
         <button onClick={() => onCreateSymbol("image")} aria-label={t("이미지 만들기")}>{t("이미지")} <span aria-hidden="true">＋</span></button>
         <button onClick={() => onCreateSymbol("text")} aria-label={t("텍스트 만들기")}>{t("텍스트")} <span aria-hidden="true">＋</span></button>
         <button onClick={() => onCreateSymbol("sound")} aria-label={t("사운드 만들기")}>{t("사운드")} <span aria-hidden="true">＋</span></button>
       </div>
-      <div className="symbol-library">{symbols.map(symbol => <div key={symbol.id} className="symbol-library-item">
+      <div className="symbol-library">{symbols.map(symbol => <div key={symbol.id} className={`symbol-library-item${sharedSymbolIds?.has(symbol.id) ? " received-material" : ""}`}
+        data-material-origin={sharedSymbolIds?.has(symbol.id) ? "received" : "own"}>
         <button data-symbol-asset={symbol.id} className={selectedSymbol === symbol.id ? "active" : ""}
           aria-pressed={selectedSymbol === symbol.id} aria-label={`${t("배치")}: ${symbol.text ?? symbol.name}`}
           onClick={() => onSelectSymbol(symbol.id)}>
@@ -63,6 +73,7 @@ export function EditorPalette({ weather, timeOfDay, surface, terrainTool, placin
         </button>}
       </div>)}</div>
     </div>
+    {extraTools}
     <div className="palette-climate">
       <DaylightIndicator value={timeOfDay} onChange={onTimeOfDayChange} />
       <WeatherControls className="palette-weather" value={weather} onChange={onWeatherChange} />

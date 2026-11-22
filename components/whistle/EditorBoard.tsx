@@ -1,11 +1,11 @@
 "use client";
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import type { Actor, World } from "@/lib/world";
 import type { PlacementFeedback } from "@/lib/placement-feedback";
 import type { WorldDerivation } from "@/lib/world-derivation";
 import { tileAt, SURFACES, LEVEL } from "@/lib/terrain";
 import { WATER_INSET } from "@/lib/water";
-import { isHole } from "@/lib/tile";
+import { isGap, isHole, isVoid } from "@/lib/tile";
 import { PaintGrid } from "./PaintGrid";
 import { EnvironmentTile, environmentTileKind } from "./EnvironmentTile";
 import { HoleGlyph } from "./HoleGlyph";
@@ -16,6 +16,7 @@ import { SoundGlyph } from "./SoundGlyph";
 import { soundRangeAt } from "@/lib/audio/sound-range";
 import { SiteGlyph } from "./SiteGlyph";
 import { useLanguage } from "./Language";
+import type { WorldPortal } from "../../lib/portals.ts";
 
 type Props = {
   world: World;
@@ -32,11 +33,15 @@ type Props = {
   onOpenSymbol: (index: number, objectId?: string) => void;
   onUndo: () => void;
   onRedo: () => void;
+  portals?: WorldPortal[];
+  overlay?: ReactNode;
 };
 
 export function EditorBoard({
   world, actors, derivation, feedback, canHold, canUndo, canRedo,
   onPaint, onEnd, placingAsset, placingStart, onOpenSymbol, onUndo, onRedo,
+  portals = [],
+  overlay,
 }: Props) {
   const { t } = useLanguage();
   const { structures, environment } = derivation;
@@ -64,7 +69,15 @@ export function EditorBoard({
       <div className="canvas-area">
         <PaintGrid
           size={world.size}
-          overlay={<EnvironmentEffects regions={effectFeedback.markers} size={world.size} onAnimationEnd={effectFeedback.finish} />}
+          overlay={<>
+            {overlay}
+            <EnvironmentEffects regions={effectFeedback.markers} size={world.size} onAnimationEnd={effectFeedback.finish} />
+            <div className="portal-map-layer">{portals.map(portal => <span key={portal.id} className="portal-map-marker" role="img"
+              style={{ left: `${(portal.x + .5) / world.size * 100}%`, top: `${(portal.z + .5) / world.size * 100}%` }}
+              aria-label={`${portal.label} ${t("포털")}`} data-map-portal={portal.id}>
+              <span className="portal-glyph" aria-hidden="true" />
+            </span>)}</div>
+          </>}
           occupied={(i) =>
             world.objects.some(
               (o) =>
@@ -85,7 +98,7 @@ export function EditorBoard({
             const c = environment.cells[i];
             const sound = world.assets.find(a => a.id === placingAsset)?.sound;
             const inSoundRange = sound && world.objects.some(o => o.asset === placingAsset && Math.hypot(o.x - i % world.size, o.z - Math.floor(i / world.size)) < soundRangeAt(environment, o.x, o.z));
-            return `${inSoundRange ? "sound-range" : ""} surface-${effectCells.has(i) || environmentTileKind(c) ? "plain" : tile.surface} level-${c.water === null ? tile.height : 0} ${isHole(tile) ? "tile-void" : ""} ${effectCells.has(i) ? "has-effect" : ""} ${c.grass ? "has-grass" : ""} ${c.water !== null ? "has-water" : ""} ${c.tree ? "has-tree" : ""} ${c.fog > 0.05 ? "has-fog" : ""}`;
+            return `${inSoundRange ? "sound-range" : ""} surface-${effectCells.has(i) || environmentTileKind(c) ? "plain" : tile.surface} level-${c.water === null ? tile.height : 0} ${isVoid(tile) ? "tile-empty" : isHole(tile) ? "tile-void" : "tile-ground"} ${effectCells.has(i) ? "has-effect" : ""} ${c.grass ? "has-grass" : ""} ${c.water !== null ? "has-water" : ""} ${c.tree ? "has-tree" : ""} ${c.fog > 0.05 ? "has-fog" : ""}`;
           }}
           label={(i) => {
             const x = i % world.size,
@@ -96,7 +109,7 @@ export function EditorBoard({
             );
             const water = environment.cells[i].water;
             const height = water === null ? tile.height : Math.round((water + WATER_INSET) / LEVEL);
-            return `${String.fromCharCode(65 + x)}${z + 1} ${isHole(tile) ? t("꺼짐") : `${t("높이")} ${height} ${t(SURFACES.find((s) => s.id === tile.surface)!.name)}`} ${objects.map(object => world.assets.find(a => a.id === object.asset)?.name).filter(Boolean).join(" · ")}${x === world.start.x && z === world.start.z ? " " + t("시작점") : ""} ${environmentLabels(i)}`;
+            return `${String.fromCharCode(65 + x)}${z + 1} ${isVoid(tile) ? t("허공") : isHole(tile) ? t("꺼짐") : `${t("높이")} ${height} ${t(SURFACES.find((s) => s.id === tile.surface)!.name)}`} ${objects.map(object => world.assets.find(a => a.id === object.asset)?.name).filter(Boolean).join(" · ")}${x === world.start.x && z === world.start.z ? " " + t("시작점") : ""} ${environmentLabels(i)}`;
           }}
           renderCell={(i) => {
             const x = i % world.size,
@@ -119,10 +132,10 @@ export function EditorBoard({
                   aria-hidden="true"
                   style={{ opacity: (1 - conditions.light) * 0.2 }}
                 />
-                {!effectCells.has(i) && (isHole(tile)
+                {!isVoid(tile) && !effectCells.has(i) && (isHole(tile)
                   ? <HoleGlyph className="result-tile result-hole" />
                   : <EnvironmentTile cell={conditions} />)}
-                {height !== 0 && !isHole(tile) && (
+                {height !== 0 && !isGap(tile) && (
                   <span className="tile-height">{height}</span>
                 )}
                 {!effectCells.has(i) && generated.map((t) => (

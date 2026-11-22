@@ -58,7 +58,7 @@ test("UDP ranges reach the existing scene and Pd; height, invalid frames and tim
     await expect(page.locator("#rough")).toHaveText("1.000");
     expect((await messages(page))["whistle-player"]).toHaveLength(9);
     device.invalid();
-    await expect(page.locator("#device-status")).toContainText("앵커가 4개 이상");
+    await expect(page.locator("#device-status")).toHaveText("위치를 계산할 수 없습니다.");
     await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
     await expect(page.getByTestId("position-marker")).toHaveCount(0);
     device.valid();

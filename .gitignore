@@ -6,3 +6,4 @@ dist/
 output/playwright/
 output/performance/
 public/audio-test/
+.whistle-data/

@@ -8,6 +8,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { Asset, World, Simulation, Player } from "@/lib/world";
 import { softenEdges } from "./Atmosphere";
+import { createTerrainCache } from "./TerrainGround";
 import { makeTerrain } from "./TerrainScene";
 import { makeSurfaceImage } from "./SurfaceImage";
 import { makeWaterReflection } from "./WaterReflection";
@@ -21,6 +22,9 @@ import { environmentAt } from "@/lib/environment";
 import { environmentalDrift, environmentalFlight, stepEnvironmentalFlight, type EnvironmentalFlight } from "@/lib/environment-motion";
 import { makeWeather } from "./WeatherScene";
 import { WEATHER } from "@/lib/weather";
+import { createPortalScene } from "./PortalScene";
+import { createMeetingScene, type MeetingVisuals } from "./MeetingScene";
+import type { WorldPortal } from "@/lib/portals";
 import { daylightAt } from "@/lib/daylight";
 import {
   roughGroundMotion,
@@ -36,12 +40,14 @@ import {
   movementKey,
   fallFrame,
   blocksWalkingStep,
+  blocksVoidStep,
 } from "@/lib/navigation";
 import {
   feedbackRegions,
   type PlacementFeedback,
 } from "@/lib/placement-feedback";
 const EYE_HEIGHT = 1.35;
+const START_PITCH = -.45;
 type Props = {
   world: World;
   simulation: Simulation;
@@ -55,7 +61,14 @@ type Props = {
   feedback?: PlacementFeedback | null;
   clock?: () => Date;
   trackedPosition?: { x: number; y: number; z: number } | null;
+  portals?: WorldPortal[];
+  onPortal?: (id: string, player: Player) => void;
+  initialPlayer?: Player;
+  suspended?: boolean;
+  onReady?: (success: boolean) => void;
+  meeting?: MeetingVisuals;
 };
+const NO_PORTALS: WorldPortal[] = [];
 const deviceTime = () => new Date();
 function material(color: string) {
   return new THREE.MeshStandardMaterial({
@@ -133,8 +146,22 @@ export default function Scene({
   feedback = null,
   clock = deviceTime,
   trackedPosition = null,
+  portals = NO_PORTALS,
+  onPortal,
+  initialPlayer,
+  suspended = false,
+  onReady,
+  meeting,
 }: Props) {
+  const meetingRef = useRef(meeting);
+  meetingRef.current = meeting;
   const { t } = useLanguage();
+  const portalRef = useRef({ portals, onPortal, suspended });
+  portalRef.current = { portals, onPortal, suspended };
+  const readyRef = useRef(onReady);
+  readyRef.current = onReady;
+  const spawnRef = useRef(initialPlayer);
+  spawnRef.current = initialPlayer;
   const trackedRef = useRef(trackedPosition);
   trackedRef.current = trackedPosition;
   const audioCallback = useRef(onAudioFrame);
@@ -169,6 +196,7 @@ export default function Scene({
       });
     } catch {
       setFailed(true);
+      readyRef.current?.(false);
       return;
     }
     const scene = new THREE.Scene();
@@ -224,11 +252,14 @@ export default function Scene({
     horizon.name = "world-horizon";
     horizon.position.y = -18.01;
     horizon.receiveShadow = true;
+    horizon.visible = !world.terrain?.floating;
     softenEdges(horizon, world.size);
     scene.add(horizon);
     let structures = derivationRef.current.structures;
-    let terrain = makeTerrain(world, structures, derivationRef.current.environment);
-    applyPixelMaterials(terrain.group, graphicsDaylight);
+    const terrainCache = createTerrainCache();
+    let terrain = makeTerrain(world, structures, derivationRef.current.environment, terrainCache);
+    terrain.group.getObjectByName("terrain-bank")!.visible = mode === "play";
+    applyPixelMaterials(terrain.group, graphicsDaylight, world.terrain?.floating);
     softenEdges(terrain.group, world.size);
     scene.add(terrain.group);
     let terrainSignature = derivationRef.current.key;
@@ -237,7 +268,7 @@ export default function Scene({
         ? new THREE.PerspectiveCamera(66, 1, 0.08, 300)
         : new THREE.OrthographicCamera(-15, 15, 15, -15, 0.1, 400);
     if (mode === "overview") {
-      camera.position.set(20, 24, 25);
+      camera.position.set(16, 34, 22);
       camera.lookAt(0, 0, 0);
     }
     const toScene = (n: number) => n * 2 - world.size + 1;
@@ -271,7 +302,7 @@ export default function Scene({
       previewOrbit.dampingFactor = .1;
       previewOrbit.rotateSpeed = .65;
       previewOrbit.minPolarAngle = .2;
-      previewOrbit.maxPolarAngle = Math.PI * .47;
+      previewOrbit.maxPolarAngle = Math.PI * .32;
       renderer.domElement.tabIndex = 0;
       previewOrbit.addEventListener("start", () => { renderer.domElement.dataset.dragging = "true"; });
       previewOrbit.addEventListener("end", () => { delete renderer.domElement.dataset.dragging; });
@@ -295,7 +326,11 @@ export default function Scene({
       disposeGroup(pulses);
       pulses.clear();
     };
-    const player: Player = { ...world.start, yaw: 0 };
+    const player: Player = { ...world.start, yaw: 0, ...spawnRef.current, falling: false };
+    const portalScene = createPortalScene(world.size);
+    scene.add(portalScene.group);
+    const meetingScene = createMeetingScene(world.size);
+    scene.add(meetingScene.group);
     const symbolExperience = makeSymbolExperience();
     const contentPresentation = makeContentPresentation();
     let pointerStart: {id: number; x: number; y: number; time: number; moved: boolean} | null = null;
@@ -309,13 +344,13 @@ export default function Scene({
     let respawnFade = 0;
     let walkedDistance = 0, groundBob = 0, groundRoll = 0;
     let audioReport = 0;
-    let pitch = -0.12,
+    let pitch = player.pitch ?? START_PITCH,
       targetPitch = pitch,
       targetYaw = player.yaw,
       stepRemaining = 0,
       eyeY = playerEyeHeight(
-        floorHeight(world, world.start.x, world.start.z, structures) ?? 0,
-        environmentAt(terrain.environment, world.start.x, world.start.z).water,
+        floorHeight(world, player.x, player.z, structures) ?? 0,
+        environmentAt(terrain.environment, player.x, player.z).water,
         EYE_HEIGHT,
       ),
       velocity = 0,
@@ -343,6 +378,7 @@ export default function Scene({
       previousTerrain = worldRef.current.terrain;
       const nextDerivation = derivationRef.current;
       if (nextDerivation.key !== terrainSignature) {
+        horizon.visible = !worldRef.current.terrain?.floating;
         terrainSignature = nextDerivation.key;
         structures = nextDerivation.structures;
         for (const fog of fadingMist) {scene.remove(fog.mesh);disposeGroup(fog.mesh);}
@@ -355,8 +391,9 @@ export default function Scene({
         }
         scene.remove(terrain.group);
         disposeGroup(terrain.group);
-        terrain = makeTerrain(worldRef.current, structures, nextDerivation.environment);
-        applyPixelMaterials(terrain.group, graphicsDaylight);
+        terrain = makeTerrain(worldRef.current, structures, nextDerivation.environment, terrainCache);
+        terrain.group.getObjectByName("terrain-bank")!.visible = mode === "play";
+        applyPixelMaterials(terrain.group, graphicsDaylight, worldRef.current.terrain?.floating);
         softenEdges(terrain.group, world.size);
         scene.add(terrain.group);
       }
@@ -439,6 +476,7 @@ export default function Scene({
     ro.observe(el);
     resize();
     const blocked = (x: number, z: number) =>
+      (!!(jump || air) && blocksVoidStep(worldRef.current, player, { x, z }, structures)) ||
       ((!jump && !air) && blocksWalkingStep(worldRef.current, player, {x, z}, structures)) ||
       (jump || air
         ? blocksAirStep(air ? air.y : jumpFrame(jump!.origin, jump!.elapsed).y,
@@ -543,6 +581,7 @@ export default function Scene({
       renderer.domElement.addEventListener("pointerup", up);
       renderer.domElement.addEventListener("pointercancel", up);
     }
+    let rendered = false;
     const render = (time: number) => {
       const dt = Math.min((time - last) / 1000, 0.05);
       last = time;
@@ -581,6 +620,7 @@ export default function Scene({
       moon.intensity = currentDay.moon * 3;
       updateModels();
       updateTrackingMarker();
+      portalScene.sync(portalRef.current.portals, player);
       previewOrbit?.update();
       terrain.update(time, camera, mistColor, reducedMotion, weather, currentDay.daylight);
       if (mode === "overview") {
@@ -652,7 +692,7 @@ export default function Scene({
           if (picture) picture.material.opacity = 1;
         }
       }
-      if (mode === "play") {
+      if (mode === "play" && !portalRef.current.suspended) {
         const previousX = player.x, previousZ = player.z;
         let audioFeet: number | null = null;
         if (falling) {
@@ -665,7 +705,7 @@ export default function Scene({
             player.x = worldRef.current.start.x;
             player.z = worldRef.current.start.z;
             player.yaw = targetYaw = 0;
-            pitch = targetPitch = -0.12;
+            pitch = targetPitch = START_PITCH;
             const spawn = environmentAt(
               terrain.environment,
               player.x,
@@ -874,9 +914,23 @@ export default function Scene({
         camera.rotation.z = groundRoll;
         if (time - report > 80) {
           renderer.domElement.dataset.motion = air?.mode ?? (jump ? "jump" : falling ? "fall" : underfoot.water !== null ? "swim" : "walk");
-          callback.current?.({ ...player, pitch, falling: falling !== null });
+          renderer.domElement.dataset.playerX = String(player.x);
+          renderer.domElement.dataset.playerZ = String(player.z);
+          renderer.domElement.dataset.playerYaw = String(player.yaw);
+          callback.current?.({ ...player, pitch, falling: falling !== null,
+            grounded: !falling && !jump && !air && respawnFade === 0 && ground !== null });
           report = time;
         }
+        if (!falling && !jump && !air && respawnFade === 0) {
+          const entered = portalScene.enter(player, Math.max(ground ?? 0, underfoot.water ?? -Infinity));
+          if (entered) { clear(); portalRef.current.onPortal?.(entered, { ...player, pitch }); }
+        }
+      }
+      if (mode === "play" && portalRef.current.suspended) {
+        clear();
+        camera.position.set(toScene(player.x), eyeY + groundBob, toScene(player.z));
+        camera.rotation.order = "YXZ";
+        camera.rotation.set(pitch, -player.yaw, groundRoll);
       }
       if (mode === "play") symbolExperience.update({
         world: worldRef.current, actors: actors.current, models: models.current, camera,
@@ -885,6 +939,7 @@ export default function Scene({
         grounded: !falling && !jump && !air && respawnFade === 0,
         dt: document.hidden ? 0 : dt, time, reducedMotion, daylight: currentDay.daylight,
       });
+      meetingScene.sync(meetingRef.current, worldRef.current, camera, time);
       contentPresentation.update(camera, worldRef.current.size, time, mode === "overview", reducedMotion);
       weatherScene.update(time, worldRef.current.weather ?? "clear", camera, currentDay.daylight, mode === "overview");
       for(let i=fadingMist.length-1;i>=0;i--) {
@@ -896,12 +951,18 @@ export default function Scene({
       }
       waterReflection.update(renderer, scene, camera, terrain.group, time);
       pixelRenderer.render(scene, camera);
+      if (!rendered) {
+        rendered = true;
+        renderer.domElement.dataset.ready = "true";
+        readyRef.current?.(true);
+      }
       frame = requestAnimationFrame(render);
     };
     frame = requestAnimationFrame(render);
     const contextLost = (e: Event) => {
       e.preventDefault();
       setFailed(true);
+      readyRef.current?.(false);
     };
     renderer.domElement.addEventListener("webglcontextlost", contextLost);
     return () => {

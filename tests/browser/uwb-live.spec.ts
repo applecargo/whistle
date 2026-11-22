@@ -106,7 +106,7 @@ test("world replacement and reload stay connected; disconnect isolates later edi
 
 test("a failed editor load cannot replace the test world or enable live audio", async ({ page, context }) => {
   const editor = await openLive(page, context, "{broken-json");
-  await expect(page.locator("#live-status")).toContainText("불러오지 못");
+  await expect(page.locator("#live-status")).toHaveText("작업을 불러올 수 없습니다.");
   await expect(page.getByRole("button", { name: "오디오 시작", exact: true })).toBeDisabled();
   await expect(page.getByTestId("position-marker")).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem("whistle.world.v2"))).toBe("{broken-json");

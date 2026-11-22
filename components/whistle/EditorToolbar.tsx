@@ -5,21 +5,34 @@ import { useLanguage } from "./Language";
 type Props = {
   playing: boolean;
   saveStatus: string;
+  onlineCount: number | null;
+  connectionStatus: "connecting" | "online" | "offline";
   makeButton: RefObject<HTMLButtonElement | null>;
   onEnter: () => void;
   onExit: () => void;
   onNew: () => void;
   onImport: () => void;
   onSave: () => void;
+  onNewTab?: () => void;
 };
 
 export function EditorToolbar({
-  playing, saveStatus, makeButton, onEnter, onExit, onNew, onImport, onSave,
+  playing, saveStatus, onlineCount, connectionStatus, makeButton, onEnter, onExit, onNew, onImport, onSave, onNewTab,
 }: Props) {
   const { language, setLanguage, t } = useLanguage();
+  const presenceLabel = onlineCount === null
+    ? t(connectionStatus === "connecting" ? "연결 중" : "연결 끊김")
+    : `${t("접속 인원 (나 포함)")}: ${onlineCount}`;
   return (
     <header className="topbar" hidden={playing}>
-      <h1>Whistle</h1>
+      <div className="brand-lockup">
+        <h1>Whistle</h1>
+        <span className="presence-count" role="status" title={presenceLabel}>
+          <span className="presence-mark" aria-hidden="true" />
+          <span aria-hidden="true">{onlineCount ?? "—"}</span>
+          <span className="sr-only">{presenceLabel}</span>
+        </span>
+      </div>
       <nav className="view-tabs" aria-label={t("화면")}>
         <button
           ref={makeButton}
@@ -61,6 +74,7 @@ export function EditorToolbar({
           </button>
         </div>
         <div className="file-actions">
+          {onNewTab && <button onClick={onNewTab} aria-label="같은 방 새 탭 열기">새 탭</button>}
           <button onClick={onNew}>{t("다시 시작")}</button>
           <button onClick={onImport}>
             {t("불러오기")}

@@ -12,16 +12,33 @@ export function useGameAudio() {
   const recordings = useRef<ReturnType<typeof createPlacedSounds> | null>(null);
   const enabled = useRef(false);
   const paused = useRef(false);
+  const output = useRef<GainNode | null>(null);
+  const level = useRef(1);
   const api = useMemo(() => {
     const get = () => controller.current ??= createGameAudio(
       async () => {
         const session = await createPdSession(`${import.meta.env.BASE_URL}audio-test/`, () => {});
-        recordings.current = createPlacedSounds(session.context, () => {});
+        const gain = session.context.createGain();
+        gain.gain.value = level.current;
+        gain.connect(session.context.destination);
+        session.node.disconnect(session.context.destination);
+        session.node.connect(gain);
+        output.current = gain;
+        recordings.current = createPlacedSounds(session.context, () => {}, gain);
         return session;
       },
       () => {},
     );
     return {
+      fade: (value: number, seconds: number) => {
+        level.current = value;
+        const gain = output.current;
+        if (!gain) return;
+        const now = gain.context.currentTime;
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setValueAtTime(gain.gain.value, now);
+        gain.gain.linearRampToValueAtTime(value, now + seconds);
+      },
       edit: (sound: EditSound) => { enabled.current = false; recordings.current?.stop(); get().edit(sound); },
       play: () => { enabled.current = true; paused.current = false; recordings.current?.stop(); get().play(); },
       stop: () => { enabled.current = false; recordings.current?.stop(); controller.current?.stop(); },
@@ -57,6 +74,8 @@ export function useGameAudio() {
       recordings.current = null;
       controller.current?.dispose();
       controller.current = null;
+      output.current?.disconnect();
+      output.current = null;
     };
   }, []);
   return api;

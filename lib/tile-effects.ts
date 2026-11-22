@@ -1,7 +1,7 @@
 import type { World } from "./world.ts";
 import type { Environment, EnvironmentRegion } from "./environment.ts";
 import { LEVEL } from "./terrain.ts";
-import { isHole } from "./tile.ts";
+import { isHole, isVoid } from "./tile.ts";
 import { limitEffectAreas } from "./effect-limits.ts";
 
 export const tileEffectDefaults = {
@@ -19,8 +19,8 @@ export function applyTileEffects(world: World, environment: Environment) {
     return x < 0 || z < 0 || x >= size || z >= size ? -1 : z * size + x;
   };
   const adjacent = (i: number) => directions.map(([dx, dz]) => at(i, dx, dz)).filter(n => n >= 0);
-  const kind = (i: number) => i < 0 ? null : isHole(tiles[i]) ? "hole" : tiles[i].surface;
-  const solid = (i: number) => i >= 0 && kind(i) !== "hole";
+  const kind = (i: number) => i < 0 || isVoid(tiles[i]) ? null : isHole(tiles[i]) ? "hole" : tiles[i].surface;
+  const solid = (i: number) => i >= 0 && kind(i) !== null && kind(i) !== "hole";
   for (let i = 0; i < tiles.length; i++) {
     const type = kind(i);
     if (seen.has(i) || type === "plain" || type === null) continue;

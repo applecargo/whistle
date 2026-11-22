@@ -1,13 +1,13 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { clone, uid, type World } from "@/lib/world";
+import { clone, uid, type Asset, type World } from "@/lib/world";
 import { editTile, MIN_HEIGHT, MAX_HEIGHT, type TerrainTool } from "@/lib/tile";
 import { flatTerrain, LEVEL, type Surface } from "@/lib/terrain";
 import { WATER_INSET } from "@/lib/water";
 import { createWorldDeriver, samePlacement } from "@/lib/world-derivation";
 import { placementChanges, type PlacementFeedback } from "@/lib/placement-feedback";
 import { withSymbolColors } from "@/lib/symbol-color";
-import { contentKind, MAX_CONTENT_COUNT } from "@/lib/content-limits";
+import { contentKind, MAX_CONTENT_COUNT, mergeReceivedAssets } from "@/lib/content-limits";
 
 function copyDocument(world: World): World {
   return { ...clone({ ...world, assets: [] }), assets: world.assets.map(asset => ({
@@ -114,8 +114,9 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
       }
       for (const i of cells) {
         if (waterEdits.has(i)) continue;
-        if (terrainTool === "hole" && i === next.start.z * next.size + next.start.x)
+        if ((terrainTool === "hole" || terrainTool === "erase") && i === next.start.z * next.size + next.start.x)
           continue;
+        if (terrainTool === "erase") next.terrain.floating = true;
         next.terrain.tiles[i] = editTile(next.terrain.tiles[i], terrainTool, surface);
       }
     }
@@ -142,10 +143,24 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
 
   const endStroke = useCallback(() => { strokeBase.current = null; }, []);
 
+  const receiveAssets = useCallback((assets: Asset[]) => {
+    const result = mergeReceivedAssets(worldRef.current,assets);
+    if (!result.accepted.length) return [];
+    const merge = (w:World) => {
+      const next = mergeReceivedAssets(w,result.accepted);
+      return next.accepted.length === result.accepted.length ? [next.world] : [];
+    };
+    history.current = history.current.flatMap(merge);
+    future.current = future.current.flatMap(merge);
+    if (strokeBase.current) strokeBase.current = merge(strokeBase.current)[0] ?? null;
+    applyWorld(result.world);
+    return result.accepted;
+  }, [applyWorld]);
+
   return {
     world, getWorld, deriveWorld, feedback,
     canUndo: history.current.length > 0,
     canRedo: future.current.length > 0,
-    commit, edit, load, undo, redo, paint, endStroke,
+    commit, edit, load, undo, redo, paint, endStroke, receiveAssets,
   };
 }

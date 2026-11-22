@@ -1,6 +1,20 @@
 import type { World } from "./world.ts";
-import { floorHeight, ladderAt, type Structure } from "./terrain.ts";
-import { groundTileHeight, isHole } from "./tile.ts";
+import { floorHeight, ladderAt, tileAt, type Structure } from "./terrain.ts";
+import { groundTileHeight, isGap, isVoid } from "./tile.ts";
+
+export function blocksVoidStep(world: Pick<World, "size" | "terrain">, from: { x: number; z: number }, to: { x: number; z: number }, structures: Structure[] = []) {
+  if (!world.terrain?.floating) return false;
+  const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.z - from.z) / .08));
+  for (let i = 1; i <= steps; i++) {
+    const x = from.x + (to.x - from.x) * i / steps, z = from.z + (to.z - from.z) * i / steps;
+    for (const dx of [-.08, .08]) for (const dz of [-.08, .08]) {
+      const tile = tileAt(world, x + dx, z + dz);
+      const bridge = structures.some(s => s.kind === "bridge" && Math.abs(s.x - x - dx) <= .5 && Math.abs(s.z - z - dz) <= .5);
+      if (!bridge && (!tile || isVoid(tile))) return true;
+    }
+  }
+  return false;
+}
 
 export function blocksTerrainStep(
   world: Pick<World, "size" | "terrain">,
@@ -13,7 +27,7 @@ export function blocksTerrainStep(
     const bridge = structures.find(s => s.kind === "bridge" && s.x === x && s.z === z);
     if (bridge) return bridge.height;
     const tile = world.terrain?.tiles[z * world.size + x];
-    return isHole(tile) ? null : groundTileHeight(tile);
+    return isGap(tile) ? null : groundTileHeight(tile);
   };
   const steep = (ax: number, az: number, bx: number, bz: number) => {
     const a = height(ax, az), b = height(bx, bz);
@@ -42,6 +56,7 @@ export function blocksTerrainStep(
 }
 
 export function blocksWalkingStep(world: World, from: {x: number; z: number}, to: {x: number; z: number}, structures: Structure[]) {
+  if (blocksVoidStep(world, from, to, structures)) return true;
   if (blocksTerrainStep(world,from,to,structures)) return true;
   const ladder = ladderAt(structures,from.x,from.z);
   if (ladder && ladderAt(structures,to.x,to.z) === ladder) return false;

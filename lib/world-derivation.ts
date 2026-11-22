@@ -37,7 +37,7 @@ export function createWorldDeriver() {
 export function samePlacement(a: World, b: World) {
   const terrain = (world: World) => world.terrain && {
     ...world.terrain,
-    tiles: world.terrain.tiles.map((tile) => [tile.height, tile.surface, isHole(tile)]),
+    tiles: world.terrain.tiles.map((tile) => [tile.height, tile.surface, isHole(tile), !!tile.void]),
   };
   return JSON.stringify([a.size, terrain(a), a.objects]) === JSON.stringify([b.size, terrain(b), b.objects]);
 }

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { starterWorld, clone, validateWorld } from "../lib/world.ts";
+import { createTerrainWorld } from "../lib/create-world.ts";
 import {
   flatTerrain,
   deriveStructures,
@@ -27,6 +28,25 @@ function empty() {
   w.terrain = flatTerrain(w.size);
   return w;
 }
+test("starting terrain leaves room to build with three small, separate examples", () => {
+  for (let seed = 0; seed < 32; seed++) {
+    const world = createTerrainWorld(seed);
+    const terrain = world.terrain!;
+    const env = deriveEnvironment(world);
+    assert.equal(terrain.tiles.filter(t => !t.void && t.surface === "plain" && t.height === 0 && !t.hole).length, 4);
+    assert.equal(terrain.tiles.filter(t => t.void).length, 130);
+    assert.equal(env.cells.filter(c => c.grass > 0).length, 4);
+    assert.equal(env.ponds.length, 1);
+    assert.equal(env.ponds[0].cells.length, 3);
+    assert.equal(env.trees.length, 0);
+    assert.equal(deriveStructures(world).length, 0);
+    assert.equal(world.objects.length, 0);
+    for (const [dx, dz] of [[1, 0], [1, -1], [-2, 0], [-2, -1], [0, 1], [-1, 1], [0, -2], [-1, -2]])
+      assert.equal(terrain.tiles[(world.start.z + dz) * world.size + world.start.x + dx].void, true);
+    const loaded = validateWorld(JSON.parse(JSON.stringify(world)));
+    assert.deepEqual(loaded.terrain, terrain);
+  }
+});
 test("vegetation keeps its seeded appearance after reloads and unrelated placement changes", () => {
   const w = empty();
   for (let z = 1; z < 10; z++)

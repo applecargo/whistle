@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { PIXEL_PALETTE_GLSL } from "./PixelPalette.ts";
 
-export function applyPixelMaterials(root: THREE.Object3D, daylight = { value: 1 }) {
+export function applyPixelMaterials(root: THREE.Object3D, daylight = { value: 1 }, floating = false) {
   root.traverse(object => {
     if (!(object instanceof THREE.Mesh)) return;
     const ground = ["continuous-ground", "distant-ground", "terrain-bank"].includes(object.name);
@@ -12,6 +12,7 @@ export function applyPixelMaterials(root: THREE.Object3D, daylight = { value: 1 
     for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
       if (!(material instanceof THREE.MeshStandardMaterial) || material.userData.pixelInk) continue;
       material.userData.pixelInk = true;
+      material.userData.floatingGround = ground && floating;
       const previous = material.onBeforeCompile;
       const key = material.customProgramCacheKey();
       material.customProgramCacheKey = () => key + `|pixel-ink-${object.name}`;
@@ -72,7 +73,7 @@ export function makePixelRenderer(renderer: THREE.WebGLRenderer, daylight = {val
       const mesh = object as THREE.Mesh;
       if (!mesh.material) return;
       for (const surface of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-        const keep = ["symbol-content", "surface-image", "dithered-sky"].includes(object.name);
+        const keep = ["symbol-content", "surface-image", "dithered-sky", "connection-surface", "approach-outline"].includes(object.name);
         const stone = object.name === "scattered-stones" || object.name === "stones-surface-image";
         const kind = ["grass-understory", "hole-bottom", "world-horizon"].includes(object.name) ? 0
           : ["continuous-ground", "distant-ground", "terrain-bank"].includes(object.name) ? 1
@@ -217,13 +218,13 @@ export function makePixelRenderer(renderer: THREE.WebGLRenderer, daylight = {val
                     *mix(.65,1.0,pixelDaylight),.025,.98);
                 ` : ""}
                 if (surfaceKind == 1.0) {
-                  ${["continuous-ground", "distant-ground", "terrain-bank"].includes(object.name) ? `
+                  ${surface.userData.pixelInk && ["continuous-ground", "distant-ground", "terrain-bank"].includes(object.name) ? `
                     float groundDetail=max(smoothstep(.035,.22,inkSlope),(1.0-getShadowMask())*.65);
                     float groundNight=.18+smoothstep(.004,.42,surfaceLight)*.37;
                     float groundInk=mix(groundNight,surfaceLight,pixelDaylight);
                     shade=pixelTone(groundInk,dotThreshold,detailFade);
                     float nightGroundVisibility=1.0-smoothstep(18.0,60.0,length(vViewPosition));
-                    shade=mix(pixelHorizon(pixelDaylight),shade,
+                    shade=mix(${surface.userData.floatingGround ? "mix(.12,.9,pixelDaylight)" : "pixelHorizon(pixelDaylight)"},shade,
                       groundDetail*.7*mix(nightGroundVisibility,1.0,pixelDaylight));
                   ` : "shade=ink;"}
                 }
