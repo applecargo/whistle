@@ -54,6 +54,7 @@ Pd 엔진 하나(AudioContext 하나)에서 여러 패치를 실행한다. 소�
   사운드스케이프는 `scoped`로 열어 `whistle-region`을 `slotN-whistle-region`으로 보낸다.
   상호작용 패치(edit·player·event)는 하나씩만 뜨므로 `whistle-player` 같은 전역 이름 그대로.
 - 받는 객체가 없는 버스로 보내도 Pd가 조용히 버린다.
+- **패치에서 받을 수 있는 값(버스·순서·범위)은 [`pd-receive.md`](pd-receive.md)에 정리했다.** 전역 이름은 어느 패치에서나 받을 수 있다(예: 영역 패치에서 `[r whistle-player]`).
 - 전역 이름(`[delwrite~ b]`, `[s 이름]`, `[table 이름]`)은 같은 패치가 여러 번 뜨면 겹친다. 패치 안에서만 쓰는 이름은 `$0-`.
 - `whistle-ready`는 더 이상 쓰지 않는다(남아 있어도 무해).
 
@@ -92,7 +93,7 @@ edit.pd · player.pd(→ 이동음 게인) · event.pd ─┐
 ```
 
 - 상호작용 패치는 `edit`(whistle-edit), `player`(whistle-player·whistle-board-height),
-  `event`(whistle-event) 세 개로 나뉘며 각각 `whistle-ready`를 받은 뒤 사용한다.
+  `event`(whistle-event) 세 개로 나뉜다. 받는 값은 [`pd-receive.md`](pd-receive.md).
 - 음소거(편집 화면 복귀·blur·탭 숨김)는 `whistle-gate` 대신 마스터 게인 fade, 3D 이동음 정지는
   `whistle-player-stop` 대신 `player` 패치 뒤의 게인 fade로 한다. 두 버스는 더 이상 쓰지 않는다.
 - 소리의 단위는 **층별 영역**이다. 입력은 `world-derivation`의 결과(지형 타일 + `environment` + `structures`)이고,
@@ -120,7 +121,7 @@ edit.pd · player.pd(→ 이동음 게인) · event.pd ─┐
   - 패닝: width = 1 − d/2(`blend` 2타일). 0이면 패닝만, 1이면 방향 없이 좌우 모두 1.
     다가갈수록 양쪽이 강해지며 패닝 차이가 줄어 외곽에 닿으면 좌우 1, 안에서는 계속 좌우 1.
   - 농도(풀·안개·바람 세기)는 음량·위치에 쓰지 않는다. 가장 가까운 칸의 값을 영역 패치로 보낸다:
-    **`whistle-region` [농도 0~1]** (나머지 층은 1). 값이 바뀔 때만 보내고, 패치에 `r whistle-region`이 없으면 건너뛴다.
+    **`whistle-region` [농도 0~1]** (나머지 층은 1). 값이 바뀔 때만 보낸다.
   - 이미 켜진 영역은 d ≤ 3.5까지 유지하고, 거리 순위에서 0.5타일 가깝게 쳐서 경계에서 깜빡이지 않는다.
   - 여러 소리가 더해진 음량은 마지막 리미터가 받는다.
 - 편집 화면 복귀·일시정지 시 켜진 영역을 모두 fade out한다. fade가 끝난 노드는 오디오 시계 기준으로 정리된다.
