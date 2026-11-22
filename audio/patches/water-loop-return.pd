@@ -34,8 +34,8 @@
 #X obj 30 469 lop~ 2100;
 #X obj 30 508 *~ 2.4;
 #X obj 250 508 *~;
-#X obj 135 550 +~;
-#X obj 135 590 outlet~;
+#X obj 30 550 outlet~;
+#X obj 250 550 outlet~;
 #X obj 835 75 t b b;
 #X msg 865 160 0 12;
 #X obj 320 185 sel 0;
@@ -85,8 +85,7 @@
 #X connect 31 0 32 0;
 #X connect 32 0 33 0;
 #X connect 33 0 34 0;
-#X connect 34 0 35 1;
-#X connect 35 0 36 0;
+#X connect 34 0 36 0;
 #X connect 37 1 7 0;
 #X connect 37 0 38 0;
 #X connect 38 0 21 0;

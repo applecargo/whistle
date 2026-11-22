@@ -18,9 +18,10 @@ npm run dev  # Pd 자동 컴파일 · 서버 시작
 
 ## 사운드 수정
 
-- 합성음의 음색·리듬·볼륨 수정 → [player3.pd](audio/patches/player3.pd) 및 하위 패치
+- [격자 재질·물길·공간화와 Pd 입력값](docs/soundscape-design.md)
+- 플레이어 지형음·편집음·규칙 이벤트음 수정 → [player3.pd](audio/patches/player3.pd) 및 하위 패치
 - 업로드한 배치 음원의 효과 수정 → [placed-sound-fx.pd](audio/patches/placed-sound-fx.pd). [스테레오 입출력과 청음 방법](audio/README.md#배치-음원-효과)
-- [uwb-player.pd](audio/patches/uwb-player.pd)에서 두 패치와 앱 입력 연결
+- [uwb-player.pd](audio/patches/uwb-player.pd)에서 사운드스케이프·게임 합성·배치 음원 효과와 앱 입력 연결
 - 적용 순서 — Pd 저장 → `npm run audio:build` → 게임 새로고침 → **플레이**
 - 서버 재시작 시에도 자동 컴파일
 - 입력 파라미터 변경 시 연결 패치·앱 코드 확인

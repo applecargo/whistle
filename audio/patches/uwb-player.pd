@@ -30,7 +30,7 @@
 #X obj 420 370 s whistle-resonance;
 #X obj 620 370 s whistle-resonance-control;
 #X connect 25 0 26 0;
-#X connect 25 0 27 0;
+#X connect 25 1 27 0;
 #X connect 14 0 15 0;
 #X connect 14 1 15 1;
 #X connect 15 0 16 0;

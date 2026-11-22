@@ -15,10 +15,16 @@ let wasm, runtime;
 try {
   execFileSync(process.execPath, [join(webpd, "bin/cli.mjs"), "-i", join(root, "audio/patches/uwb-player.pd"), "-o", temporary, "-f", "app"], { stdio: "inherit" });
   wasm = await readFile(join(temporary, "patch.wasm"));
-  runtime = await readFile(join(temporary, "webpd-runtime.js"));
+  runtime = await readFile(join(temporary, "webpd-runtime.js"), "utf8");
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }
+// WebPd alpha.14 can grow WASM memory between blocks while receiving a Pd message.
+const inputCopy = "cache.wasmInput.set(input[channel], channel * cache.blockSize);";
+if (!runtime.includes(inputCopy)) throw new Error("Check WebPd WASM input buffer handling after upgrading the runtime");
+runtime = runtime.replace(inputCopy,
+  "if (!cache.wasmInput.byteLength) updateWasmInOuts(engineContext); " + inputCopy);
+
 const metadata = await readMetadata("assemblyscript", wasm);
 const ports = (specs) => Object.fromEntries(Object.entries(specs).flatMap(([id, portlets]) => {
   const node = metadata.customMetadata.graph[id];

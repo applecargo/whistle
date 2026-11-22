@@ -1,4 +1,5 @@
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createEngine } from "../node_modules/webpd/dist/node_modules/@webpd/compiler/dist/src/engine-assemblyscript/run/index.js";
@@ -17,12 +18,12 @@ async function renderer() {
       const { nodeId, portletId } = io.inputs[bus];
       engine.io.messageReceivers[nodeId][portletId](values);
     },
-    rms(ms) {
+    rms(ms, channel = 0) {
       let sum = 0;
       const blocks = ms * rate / (1000 * size);
       for (let b = 0; b < blocks; b++) {
         engine.dspLoop([], output);
-        for (const value of output[0]) sum += value * value;
+        for (const value of output[channel]) sum += value * value;
       }
       return Math.sqrt(sum / (blocks * size));
     },
@@ -264,4 +265,61 @@ test("the same strike returns as a breath, a single path echo, or no distant res
   const openedWhileBreathing = await render(3, 1, [8, 0], 400);
   assert.ok(peak(openedWhileBreathing, 400, 450) > .01);
   assert.ok(peak(openedWhileBreathing, 590, 1000) < .001);
+});
+
+test("stereo output locates the first strike at the grass and its breath at the ring", async () => {
+  async function listen(channel, grassPan, breathPan, breathGain = .53) {
+    const pd = await renderer();
+    pd.send("whistle-gate", 1);
+    pd.send("whistle-resonance", .53, .53, 1, 0, 3, 1, grassPan, breathGain, breathPan);
+    pd.rms(60);
+    pd.send("whistle-resonance-control", 2);
+    pd.rms(22);
+    const attack = pd.rms(4, channel);
+    pd.rms(354);
+    return { attack, breath: pd.rms(140, channel) };
+  }
+  for (const side of [-1, 1]) {
+    const grassChannel = side === -1 ? 0 : 1;
+    const grass = await listen(grassChannel, side, -side);
+    const ring = await listen(1 - grassChannel, side, -side);
+    assert.ok(grass.attack > .001 && grass.attack > ring.attack * 3);
+    assert.ok(ring.breath > .005 && ring.breath > grass.breath * 1.5);
+    const far = await listen(1 - grassChannel, side, -side, .1);
+    assert.ok(ring.breath > far.breath * 1.5);
+  }
+});
+
+test("the browser worklet keeps playing when WASM memory grows between stereo input blocks", async () => {
+  const assets = new URL("../public/audio-test/", import.meta.url);
+  const runtime = await readFile(new URL("webpd-runtime.js", assets), "utf8");
+  const api = runInNewContext(runtime + "\nWebPdRuntime", { AudioWorkletNode: class {}, Blob, URL, fetch });
+  let processor, memory;
+  await api.initialize({ audioWorklet: { async addModule(url) {
+    const script = await (await fetch(url)).text();
+    URL.revokeObjectURL(url);
+    runInNewContext(script, {
+      sampleRate: 48000, AudioWorkletProcessor: class { port = { postMessage() {} }; },
+      registerProcessor(_name, Processor) { processor = new Processor(); },
+      WebAssembly: { Module: WebAssembly.Module, compile: WebAssembly.compile, async instantiate(...args) {
+        const result = await WebAssembly.instantiate(...args);
+        memory = result.instance.exports.memory;
+        return result;
+      } },
+    });
+  } } });
+  await processor.setWasm(await readFile(new URL("patch.wasm", assets)));
+  const { inputs } = JSON.parse(await readFile(new URL("io.json", assets), "utf8"));
+  const send = (bus, message) => processor.onMessage({ data: {
+    type: "io:messageReceiver", payload: { ...inputs[bus], message },
+  } });
+  const input = [new Float32Array(128), new Float32Array(128)];
+  const output = input.map(channel => channel.slice());
+  const block = () => processor.process([input], [output]);
+  block();
+  send("whistle-gate", [1]);
+  send("whistle-event", [261.63, .09, 0]);
+  memory.grow(1);
+  for (let i = 0; i < 20; i++) block();
+  for (const channel of output) assert.ok(channel.some(value => Math.abs(value) > .005));
 });

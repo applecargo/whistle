@@ -5,7 +5,8 @@ const edges = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 const cornersAndEdges = [...edges, [-1, -1], [1, -1], [1, 1], [-1, 1]];
 
 export function traceWaterPath({ size, cells, terrain }: Environment, source: Position2D | null) {
-  const silent = { pathSteps: 0, loopArea: 0 };
+  let loopCenter: Position2D | null = null;
+  const silent = { pathSteps: 0, loopArea: 0, loopCenter };
   if (!source) return silent;
   function neighbors(index: number, offsets = edges) {
     const result: number[] = [];
@@ -60,8 +61,14 @@ export function traceWaterPath({ size, cells, terrain }: Environment, source: Po
     if (enclosed && (steps < closest || (steps === closest && interior.length > loopArea))) {
       closest = steps;
       loopArea = interior.length;
+      let x = 0, z = 0;
+      for (const index of interior) {
+        x += index % size;
+        z += Math.floor(index / size);
+      }
+      loopCenter = { x: x / loopArea, z: z / loopArea };
     }
   }
   const pathSteps = loopArea ? closest : distance[water[water.length - 1]];
-  return { pathSteps: !loopArea && pathSteps < 2 ? 0 : pathSteps, loopArea };
+  return { pathSteps: !loopArea && pathSteps < 2 ? 0 : pathSteps, loopArea, loopCenter };
 }

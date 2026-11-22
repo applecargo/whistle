@@ -107,10 +107,28 @@ export function waterConnectivity(environment: Environment) {
   return waterResonance(environment).extent;
 }
 
-export function resonanceAt(environment: Environment, point?: Position2D) {
-  const sources = locatePhraseSources(environment);
-  const grass = point ? phraseMix(sources, point).grass : Number(sources.grass !== null);
-  return { grass, water: environment.ponds.length ? grass : 0, ...waterResonance(environment) };
+type Listener = Position2D & { yaw?: number };
+
+function panAt(source: Position2D | null, listener?: Listener) {
+  if (!source || !listener) return 0;
+  const dx = source.x - listener.x, dz = source.z - listener.z;
+  const yaw = listener.yaw ?? 0;
+  return (dx * Math.cos(yaw) + dz * Math.sin(yaw)) / Math.max(1, Math.hypot(dx, dz));
+}
+
+function distanceGain(source: Position2D, listener: Position2D) {
+  return 1 / (1 + .22 * ((source.x - listener.x) ** 2 + (source.z - listener.z) ** 2));
+}
+
+export function resonanceAt(environment: Environment, point?: Listener) {
+  const source = locatePhraseSources(environment).grass;
+  const { loopCenter, ...material } = waterResonance(environment);
+  const grass = source && point ? distanceGain(source, point) : Number(source !== null);
+  return {
+    ...material, grass, water: environment.ponds.length ? grass : 0,
+    grassPan: panAt(source, point), breathPan: panAt(loopCenter, point),
+    breathGain: loopCenter && point ? distanceGain(loopCenter, point) : Number(loopCenter !== null),
+  };
 }
 export type ListeningZone = "away" | "grass" | "bank";
 
@@ -149,7 +167,7 @@ export function locatePhraseSources(environment: Environment): PhraseSources {
 
 export function phraseMix(sources: PhraseSources, point: Position2D) {
   const gain = (source: Position2D | null) => source
-    ? 1 / (1 + .22 * ((source.x - point.x) ** 2 + (source.z - point.z) ** 2)) : 0;
+    ? distanceGain(source, point) : 0;
   return { grass: gain(sources.grass), water: gain(sources.water) };
 }
 

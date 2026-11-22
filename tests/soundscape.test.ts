@@ -171,6 +171,26 @@ test("grass reaches a closed water ring by shared edges in game and virtual UWB"
     }
   }
   check(3, 1);
+  const env = derive(world).environment;
+  const middle = { x: 4, z: 5, yaw: 0 };
+  const front = resonanceAt(env, middle);
+  assert.equal(front.grassPan, -1);
+  assert.equal(front.breathPan, 1);
+  assert.equal(front.grass, front.breathGain);
+  const turned = resonanceAt(env, { ...middle, yaw: Math.PI });
+  assert.equal(turned.grassPan, 1);
+  assert.equal(turned.breathPan, -1);
+  assert.equal(turned.breathGain, front.breathGain);
+  for (const x of [2, 4, 6]) {
+    const game = resonanceAt(env, { ...middle, x });
+    const metres = roomPositionAt((x + .5) / world.size, 5.5 / world.size, mapping);
+    const tracked = sampleTrackedPosition(world, derive(world), metres, mapping).frame!;
+    const uwb = resonanceAt(env, tracked);
+    for (const field of ["grass", "grassPan", "breathGain", "breathPan"] as const)
+      assert.ok(Math.abs(game[field] - uwb[field]) < 1e-10);
+    if (x === 2) assert.ok(game.grass === 1 && game.grassPan === 0 && game.breathGain < .25);
+    if (x === 6) assert.ok(game.breathGain === 1 && game.breathPan === 0 && game.grass < .25);
+  }
   tile(4, 5).surface = "plain";
   check(0, 0);
   tile(4, 5).surface = "slick";
