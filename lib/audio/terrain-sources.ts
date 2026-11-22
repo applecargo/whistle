@@ -40,7 +40,7 @@ export const KIND_PATCHES: Record<string, string> = {
   tree: "environment_tree",
   fog: "environment_fog",
   wind: "environment_wind",
-  stairs: "structure_stairs",
+  stairs: "structure_ladder", // 게임 코드의 이름은 stairs, 화면에서는 사다리
   bridge: "structure_bridge",
   canopy: "structure_canopy",
 };
