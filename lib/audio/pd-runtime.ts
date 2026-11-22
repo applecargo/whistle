@@ -1,6 +1,7 @@
 // pd4web 엔진 하나에 패치를 "슬롯"으로 동적 생성하는 최소 계층.
 // - 엔진(pd4web.js/wasm, Pd 0.56)은 페이지당 하나. AudioContext도 엔진이 만든다(openEngine이 돌려준다).
-// - 패치 .pd 파일은 실행 중에 sendFile로 엔진 파일시스템에 넣는다(빌드 없음).
+// - 패치 폴더(audio/patches/)를 엔진이 켜질 때 하위 폴더째 엔진의 가상 디스크(/)에 복사한다. abstraction은 Pd가 알아서 찾는다.
+//   폴더는 tar 하나(audio/patches.tar, Vite가 묶어 줌)로 받아 푼다.
 // - 패치 하나 = 슬롯 하나: host의 [pd slotN] 안에 [<패치> slotN] → [dac~ 2N+1 2N+2]를 만들고 loadbang을 보낸다.
 //   패치는 최상위 [outlet~] 두 개(L, R)로 내보낸다. 엔진 출력(슬롯 수×2 채널)을 슬롯별 스테레오 노드로 나눠 돌려준다.
 // - 노드는 어디에도 연결하지 않고 돌려준다. 연결·게인·공간화는 호출하는 쪽 책임.
@@ -8,11 +9,6 @@
 //   start(..., { scoped: true })로 연다(send("whistle-region")이 "slotN-whistle-region"으로 간다).
 
 export type PdMessage = (string | number)[];
-export type PatchEntry = { hash: string; files: string[] };
-export type PatchManifest = {
-  engine: { pd4web: string; files: Record<string, string> };
-  patches: Record<string, PatchEntry>;
-};
 
 /** 동시에 띄울 수 있는 패치 수. 슬롯마다 2채널이고 Web Audio 노드 출력은 최대 32채널. */
 export const SLOTS = 16;
@@ -23,14 +19,14 @@ type Pd4Web = {
   init(): void;
   sendList(name: string, list: PdMessage): boolean;
   sendMessage(name: string, selector: string, list: PdMessage): boolean;
-  sendFile(data: ArrayBuffer, name: string): boolean;
 };
 type Pd4WebGlobals = {
-  Pd4WebModule(options: { locateFile(path: string): string }): Promise<{ Pd4Web: new () => Pd4Web }>;
+  Pd4WebModule(options: { locateFile(path: string): string }): Promise<{ Pd4Web: new () => Pd4Web; FS: EmscriptenFS }>;
   Pd4Web: Pd4Web | null;
   Pd4WebAudioContext?: AudioContext;
   Pd4WebAudioWorkletNode?: AudioWorkletNode;
 };
+type EmscriptenFS = { mkdirTree(path: string): void; writeFile(path: string, data: Uint8Array): void };
 const globals = () => window as unknown as Pd4WebGlobals & typeof globalThis;
 
 export type StartOptions = {
@@ -49,7 +45,8 @@ export type PatchInstance = {
 
 export type PdEngine = {
   context: AudioContext;
-  manifest: PatchManifest;
+  /** 엔진 가상 디스크에 복사한 패치 폴더의 파일(폴더 기준 경로) */
+  files: string[];
   start(name: string, options?: StartOptions): Promise<PatchInstance>;
   /** 지금 쓰는 슬롯 수 */
   slotsInUse(): number;
@@ -64,9 +61,32 @@ const loadScript = (url: string) => new Promise<void>((resolve, reject) => {
 });
 
 async function fetchOk(url: string) {
-  const response = await fetch(url);
+  // 캐시가 있어도 서버에 바뀌었는지 묻는다(안 바뀌었으면 304).
+  const response = await fetch(url, { cache: "no-cache" });
   if (!response.ok) throw new Error(`불러오지 못했습니다: ${url} (${response.status})`);
   return response;
+}
+
+/** tar(ustar)를 풀어 일반 파일마다 write(경로, 내용)를 부른다. 푼 경로 목록을 돌려준다. */
+function untar(bytes: Uint8Array, write: (path: string, data: Uint8Array) => void) {
+  const text = new TextDecoder();
+  const field = (header: Uint8Array, offset: number, length: number) =>
+    text.decode(header.subarray(offset, offset + length)).split("\0")[0];
+  const paths: string[] = [];
+  for (let offset = 0; offset + 512 <= bytes.length;) {
+    const header = bytes.subarray(offset, offset + 512);
+    if (header[0] === 0) break; // 끝 표시(빈 블록)
+    const path = [field(header, 345, 155), field(header, 0, 100)].filter(Boolean).join("/");
+    const size = parseInt(field(header, 124, 12), 8);
+    const type = header[156];
+    offset += 512;
+    if (type === 48 /* "0" */ || type === 0) {
+      write(path, bytes.slice(offset, offset + size));
+      paths.push(path);
+    }
+    offset += Math.ceil(size / 512) * 512;
+  }
+  return paths;
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -75,12 +95,9 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   if (!globalThis.crossOriginIsolated) {
     throw new Error("pd4web 엔진에는 교차 출처 격리(COOP/COEP)가 필요합니다. 페이지를 새로고침하세요.");
   }
-  const manifest = await (await fetchOk(`${baseUrl}patches/manifest.json`)).json() as PatchManifest;
-  const files = manifest.engine.files;
-  const engineUrl = (file: string) => `${baseUrl}pd4web/${file}?v=${files[file] ?? manifest.engine.pd4web}`;
   const g = globals();
-  if (!g.Pd4WebModule) await loadScript(engineUrl("pd4web.js"));
-  const module = await g.Pd4WebModule({ locateFile: (path) => engineUrl(path) });
+  if (!g.Pd4WebModule) await loadScript(`${baseUrl}engine/pd4web.js`);
+  const module = await g.Pd4WebModule({ locateFile: (path) => `${baseUrl}engine/${path}` });
   const pd = new module.Pd4Web();
   // pd4web의 GUI·콜백 코드는 전역 Pd4Web을 찾는다.
   g.Pd4Web = pd;
@@ -113,20 +130,12 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   // Pd → JS 메시지(onBangReceived 등)는 쓰지 않는다: 이 구성(pd4web 3.4.1, GUI 없음)에서는 콜백이 오지 않았다
   // (JS가 보낸 bang·list를 같은 이름으로 받아도 오지 않음, print만 옴). 시작 확인은 동기 생성으로 충분하다.
 
-  // --- 패치 파일: 패치 해시가 바뀐 경우에만 다시 보낸다 ---
-  const sent = new Map<string, Promise<void>>();
-  const sendFiles = (entry: PatchEntry) => Promise.all(entry.files.map((file) => {
-    const key = `${file}@${entry.hash}`;
-    let sending = sent.get(key);
-    if (!sending) {
-      sending = fetchOk(`${baseUrl}patches/${file}?v=${entry.hash}`).then((r) => r.arrayBuffer()).then((data) => {
-        if (!pd.sendFile(data, `/${file}`)) throw new Error(`패치 파일을 엔진에 넣지 못했습니다: ${file}`);
-      });
-      sending.catch(() => sent.delete(key));
-      sent.set(key, sending);
-    }
-    return sending;
-  }));
+  // --- 패치 폴더(tar 하나)를 엔진 가상 디스크(/)에 푼다 ---
+  const files = untar(new Uint8Array(await (await fetchOk(`${baseUrl}patches.tar`)).arrayBuffer()), (path, data) => {
+    const dir = path.slice(0, path.lastIndexOf("/") + 1);
+    if (dir) module.FS.mkdirTree(`/${dir}`);
+    module.FS.writeFile(`/${path}`, data);
+  });
 
   // --- 슬롯 ---
   const used = new Set<number>();
@@ -136,9 +145,6 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   };
 
   const start = async (name: string, options: StartOptions = {}): Promise<PatchInstance> => {
-    const entry = manifest.patches[name];
-    if (!entry) throw new Error(`패치 목록에 없는 패치입니다: ${name}`);
-    await sendFiles(entry);
     let index = 0;
     while (used.has(index)) index++;
     if (index >= SLOTS) throw new Error(`Pd 슬롯 ${SLOTS}개를 모두 쓰고 있습니다: ${name}`);
@@ -187,7 +193,7 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
     };
   };
 
-  return { context, manifest, start, slotsInUse: () => used.size };
+  return { context, files, start, slotsInUse: () => used.size };
 }
 
 let engine: Promise<PdEngine> | undefined;
@@ -199,9 +205,4 @@ export function openEngine(baseUrl: string, options: { latencyHint?: AudioContex
   engine ??= createEngine(baseUrl, options.latencyHint ?? "interactive", options.timeout ?? 30_000);
   engine.catch(() => { engine = undefined; });
   return engine;
-}
-
-/** 패치 목록만 필요할 때(엔진을 열지 않음) */
-export async function loadManifest(baseUrl: string) {
-  return (await fetchOk(`${baseUrl}patches/manifest.json`)).json() as Promise<PatchManifest>;
 }

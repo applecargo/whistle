@@ -5,7 +5,7 @@
 import type { Page } from "@playwright/test";
 
 export type PdProbe = { modules: number; starts: string[] };
-export const ENGINE_SCRIPT = /\/audio-test\/pd4web\/pd4web\.js(\?|$)/;
+export const ENGINE_SCRIPT = /\/audio\/engine\/pd4web\.js(\?|$)/;
 
 export async function probePd(page: Page) {
   await page.addInitScript(() => { (window as unknown as { pdProbe: PdProbe }).pdProbe = { modules: 0, starts: [] }; });

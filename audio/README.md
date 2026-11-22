@@ -20,11 +20,18 @@ Pd 엔진 하나(AudioContext 하나)에서 여러 패치를 실행한다. 소�
 - 엔진: [pd4web](https://github.com/charlesneimog/pd4web) 3.4.1(libpd, Pd 0.56의 vanilla 객체 전체를 C에서 wasm으로).
   빈 host 패치만 들어 있는 엔진을 한 번 빌드해 `audio/engine/`에 커밋해 둔다(pd4web.js·wasm·data, 약 2MB).
   **pdlua(GPL-2.0-or-later)는 빼고 빌드한다.** pd4web 3.4.1은 pdlua를 항상 링크하므로 빌드 스크립트가 CLI가 만든 빌드 폴더에서
-  pdlua 링크·호출·패키징(pd.lua 등)을 잘라 내고 다시 빌드한다(`engine.json`의 `"pdlua": false`). Lua 객체와 GUI는 쓸 수 없다.
+  pdlua 링크·호출·패키징(pd.lua 등)을 잘라 내고 다시 빌드한다. Lua 객체와 GUI는 쓸 수 없다.
   남은 구성 요소는 Pd·libpd·pd4web(BSD), ThorVG·Emscripten·musl(MIT), LLVM libc++(Apache-2.0 + LLVM 예외)이다.
   저작권·라이선스 고지는 `public/THIRD_PARTY_LICENSES.txt`(배포물 `/whistle/THIRD_PARTY_LICENSES.txt`). 엔진을 다시 빌드해 버전이 바뀌면 함께 고친다.
-  **패치는 엔진에 넣어 빌드하지 않는다.** 실행 중에 `.pd` 파일을 엔진 파일시스템으로 보내고(`sendFile`) 동적 패칭으로 만든다.
-  그래서 패치를 고치면 `npm run audio:build`(파일 복사, 수 초) 후 새로고침만 하면 된다. 개발 PC에 pd4web·Emscripten이 없어도 된다.
+  **패치는 엔진에 넣어 빌드하지 않는다.** 브라우저의 Pd는 서버 디스크가 아니라 브라우저 메모리 안의 가상 디스크를 본다.
+  엔진이 켜질 때 패치 폴더 `audio/patches/`를 하위 폴더째 그 가상 디스크(`/`)에 복사하고, 패치는 동적 패칭으로 만든다.
+  abstraction은 Pd가 가상 디스크에서 알아서 찾는다. 하위 폴더도 Pd와 같다(`[폴더/패치]`, 그 패치 안에서는 그 폴더 기준).
+  HTTP로는 폴더를 통째로 받을 수 없어서, 패치 폴더를 tar 하나(`audio/patches.tar`)로 묶어 보내고 브라우저가 푼다.
+  묶는 건 Vite가 한다: 개발 서버는 요청 때마다 지금 폴더를 묶고, `npm run build`는 결과물에 넣는다(엔진 `audio/engine/`도 함께).
+  안을 보려면 `tar tf patches.tar`. 관리할 목록은 없다. 개발 서버는 패치 폴더가 바뀌면 페이지를 새로고침한다.
+  없는 패치를 열면 Pd가 원래처럼 couldn't create를 낸다(따로 확인하지 않음).
+  그래서 패치를 고치면 Pd에서 저장만 하면 된다. 개발 PC에 pd4web·Emscripten이 없어도 된다.
+  파일은 매번 서버에 바뀌었는지 묻고 받는다(`cache: "no-cache"`). 페이지를 열 때 폴더 전체(지금 약 0.7MB)를 받는다.
 - 엔진을 다시 빌드할 때(pd4web 버전업, 외부 객체 추가 등)만 `npm run audio:engine`.
   pd4web CLI(파이썬 `pip install pd4web`, Python 3.12+)가 필요하다. `PD4WEB=/경로/pd4web npm run audio:engine`.
   첫 빌드는 Emscripten 등을 받아 수 분, 이후는 `output/pd4web-engine/` 캐시로 약 4~5분(CLI 빌드 + pdlua 제외 재빌드).
@@ -183,10 +190,7 @@ npm test
 npm run build
 ```
 
-오디오 테스트와 전체 브라우저 테스트, 빌드, `npm run dev`는 먼저 `audio:build`(엔진·패치 파일 복사)를 한다.
-패치를 수정한 뒤에는 `npm run audio:build` 후 페이지를 새로고침한다(컴파일 없음).
 빌드 결과에도 `/whistle/audio-lab/index.html` 테스트 페이지가 포함된다.
-생성 파일 `public/audio-test/`는 Git에서 제외하며 빌드로 재생성한다.
 
 ### 사운드스케이프 엔진
 
@@ -203,7 +207,7 @@ npm run build
     필터가 소리를 바꿀 수 있어 기본은 끔. 측정(정면, 잡음): 좌우 상관 width 0 → 1.00, 0.5 → 0.56, 1 → 0.31.
 - `messages`: 소스마다 패치로 보낼 메시지(버스 → 값). 값이 바뀔 때만 보낸다. 패치에 없는 버스는 건너뛴다.
 
-- `lib/audio/pd-runtime.ts`: 엔진은 페이지당 1개. 패치 파일은 한 번만 엔진에 보낸다(해시가 바뀌면 다시).
+- `lib/audio/pd-runtime.ts`: 엔진은 페이지당 1개. 패치 폴더는 엔진이 켜질 때 한 번 통째로 넣는다.
   만든 노드는 연결하지 않고 돌려준다.
 - `lib/audio/soundscape.ts`: 소스 등록(`set`)만으로는 노드를 만들지 않는다.
   `activate`에서 로드·연결하고 fade in, `deactivate`에서 fade out 후
@@ -216,15 +220,6 @@ npm run build
   HRTF에서 저음은 좌우 음량차가 작고 방향감은 주로 도달 시간차로 생긴다.
 - 실험 페이지: `audio-lab/soundscape.html` (`?panning=hrtf`로 비교).
   평면도를 클릭해 패치를 놓고 리스너 방향을 돌린다.
-
-### 패치 목록과 복사 (`npm run audio:build`)
-
-`audio/patch-targets.json`의 `patches` 배열에 등재한 패치와, 그것이 (재귀적으로) 불러오는 하위 패치 파일을
-`public/audio-test/patches/`에 그대로 복사한다. 하위 패치는 등재하지 않는다.
-
-- `patches/manifest.json`: 엔진 정보와 패치별 의존 파일·해시. 해시(엔진 버전 + 의존 파일 내용)는 브라우저 캐시를 넘기는 데 쓴다.
-- 엔진 파일은 `audio/engine/`에서 `public/audio-test/pd4web/`로 복사한다.
-- 목록에서 빠진 패치 파일과 예전 WebPd 결과물(wasm, 런타임)은 지운다.
 
 게임 화면(`/whistle/`)에서는 격자를 편집하거나 플레이를 시작하면 연결된다.
 실험 페이지에서는 같은 패치에 직접 입력한 파라미터를 보내 비교할 수 있다.

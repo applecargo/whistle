@@ -11,7 +11,7 @@ import { flatTerrain } from "@/lib/terrain";
 import type { Actor, World, Event, Player } from "@/lib/world";
 import type { WorldDerivation } from "@/lib/world-derivation";
 
-const BASE = `${import.meta.env.BASE_URL}audio-test/`;
+const BASE = `${import.meta.env.BASE_URL}audio/`;
 const log = (message: string) => console.log(`[Whistle:Audio] ${message}`);
 /** 전체 음소거 fade(초) */
 const MASTER_FADE = 0.05;

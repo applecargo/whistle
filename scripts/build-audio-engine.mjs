@@ -13,7 +13,6 @@
 import { mkdir, writeFile, copyFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -86,11 +85,6 @@ const work = join(root, "output/pd4web-engine");
     if (bytes.includes("pdlua") || bytes.includes("pd.lua")) throw new Error(`pdlua 제거 실패: ${name}에 pdlua 흔적이 있습니다`);
   }
   await mkdir(engineDir, { recursive: true });
-  const files = {};
-  for (const name of FILES) {
-    await copyFile(join(out, "WebPatch", name), join(engineDir, name));
-    files[name] = createHash("sha256").update(await readFile(join(engineDir, name))).digest("hex").slice(0, 16);
-  }
-  await writeFile(join(engineDir, "engine.json"), JSON.stringify({ pd4web: version, memoryMB: MEMORY_MB, pdlua: false, files }, null, 2) + "\n");
-  console.log(`pd4web 엔진 빌드 완료 (${((Date.now() - started) / 1000).toFixed(0)}s) → audio/engine/`);
+  for (const name of FILES) await copyFile(join(out, "WebPatch", name), join(engineDir, name));
+  console.log(`pd4web ${version} 엔진 빌드 완료 (${((Date.now() - started) / 1000).toFixed(0)}s) → audio/engine/`);
 }

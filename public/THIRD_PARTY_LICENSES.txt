@@ -4,7 +4,7 @@ Whistle — third-party licenses
 This file lists the third-party software that is distributed with Whistle,
 and reproduces the copyright notices and license texts they require.
 
-Pd audio engine (audio-test/pd4web/pd4web.js, pd4web.wasm, pd4web.data).
+Pd audio engine (audio/engine/pd4web.js, pd4web.wasm, pd4web.data).
 Prebuilt files are kept in the Whistle repository under audio/engine/ and are
 built by scripts/build-audio-engine.mjs. The engine contains:
 

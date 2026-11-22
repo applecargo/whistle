@@ -18,13 +18,11 @@ npm run dev  # Pd 자동 컴파일 · 서버 시작
 
 ## 사운드 수정
 
-- `audio/patches/player3.pd` 및 하위 패치: 음색·리듬·볼륨 수정
-- `audio/patches/uwb-player.pd`: 원본 패치 로드 · 앱/UWB 입력 연결(상호작용 named patch). 사운드만 수정할 때 유지
-- 적용: Pd 저장 → `npm run audio:build` → 페이지 새로고침 → 오디오 시작
-- 서버 재시작 시에도 자동 복사(컴파일 없음, 수 초)
+- 패치 폴더: `audio/patches/` (하위 폴더 가능, `[폴더/패치]`처럼 Pd와 같게). 엔진은 `audio/engine/`
+- 적용: Pd에서 저장 → 브라우저가 자동으로 새로고침 → 오디오 시작 (빌드·복사 없음)
+- 브라우저의 Pd는 패치 폴더를 통째로 받아 쓰므로 abstraction은 폴더에 두기만 하면 됨
 - 입력 파라미터 변경 시 연결 패치·앱 코드 확인
-- `audio/patch-targets.json`: 앱에서 쓰는 패치 목록 (하위 패치는 등재하지 않음). 패치 출력은 최상위 `[outlet~]` 두 개(L, R) — `audio/README.md` 참고
-- `public/audio-test/`: 자동 생성 파일, 직접 수정 금지
+- 패치 출력은 최상위 `[outlet~]` 두 개(L, R) — `audio/README.md` 참고
 - `whistle-board-height`: 보드 높이 수신만 연결, 소리 변화 없음
 
 ## UWB 테스트

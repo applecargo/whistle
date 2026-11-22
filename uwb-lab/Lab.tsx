@@ -100,7 +100,7 @@ export default function Lab() {
     setAudioError("");
     setReceived({});
     try {
-      const created = await createInteractionSession(await openEngine(`${import.meta.env.BASE_URL}audio-test/`), (bus, message) => {
+      const created = await createInteractionSession(await openEngine(`${import.meta.env.BASE_URL}audio/`), (bus, message) => {
         if (request === generation.current) setReceived((previous) => ({ ...previous, [bus]: message }));
       });
       if (request !== generation.current) { await created.close(); return; }

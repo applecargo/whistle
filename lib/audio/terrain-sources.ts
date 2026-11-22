@@ -29,7 +29,7 @@ export const forwardOf = (yaw: number): Vec3 => ({ x: Math.sin(yaw), y: 0, z: -M
 export const LAYERS = ["surface", "water", "grass", "tree", "fog", "wind", "structure"] as const;
 export type Layer = (typeof LAYERS)[number];
 
-/** 종류별 패치. 지금은 빌드된 지형 패치가 terrain_clock 하나뿐이라 모두 같은 패치. */
+/** 종류별 패치(audio/patches/<이름>.pd) */
 export const KIND_PATCHES: Record<string, string> = {
   plain: "terrain_plain",
   rough: "terrain_rough",
