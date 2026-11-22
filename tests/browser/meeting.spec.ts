@@ -1,3 +1,4 @@
+import { savedWorld } from "./world-storage";
 import { test, expect, chromium, type Page, type BrowserContext, type Browser } from "@playwright/test";
 import { createServer } from "node:http";
 import { once } from "node:events";
@@ -16,7 +17,7 @@ async function newPlayer(browser:Browser,baseURL?:string) {
 }
 test.afterEach(async()=>{await Promise.all(players.splice(0).map(context=>context.close()));});
 
-test("an unavailable relay shows an error and recovers when the server returns", async ({ page }) => {
+test("an unavailable relay keeps the editor usable and recovers when the server returns", async ({ page }) => {
   await page.addInitScript(()=>Object.defineProperty(crypto,"randomUUID",{value:undefined}));
   let attempts=0;
   await page.routeWebSocket(/\/whistle\/meeting\?/,socket=>{
@@ -24,7 +25,7 @@ test("an unavailable relay shows an error and recovers when the server returns",
     else socket.connectToServer();
   });
   await page.goto(`?meeting=retry-${Date.now()}`);
-  await expect(page.getByRole("alert")).toContainText("서버에 연결할 수 없습니다.");
+  await expect(page.getByRole("button",{name:"텍스트 만들기",exact:true})).toBeVisible();
   await ready(page);
   expect(attempts).toBe(3);
   await expect(page.getByRole("alert")).toHaveCount(0);
@@ -77,7 +78,7 @@ test("browser storage restores my world and edited gifts after both the browser 
   try {
     const a=await local.newPage(),b=await peer.newPage();let state=observe(a);
     await a.goto(url);await ready(a);await b.goto(url);await ready(b);
-    await makeText(a,"내가 만든 세계");await makeText(b,"받은 재료");
+    await makeText(a,"내가 만든 세계");await makeText(b,"받은 재료");await publishMaterials(b);
     await a.bringToFront();await a.getByRole("button",{name:"배치: 받은 재료",exact:true}).click();
     await a.getByRole("button",{name:"편집",exact:true}).click();
     await a.getByRole("textbox",{name:"텍스트 입력",exact:true}).fill("내가 바꾼 재료");
@@ -156,17 +157,75 @@ async function walk(page: Page, x:number,z:number) {
   } finally { await keys([]); }
 }
 
-async function makeText(page:Page,text:string) {
+async function publishMaterials(page:Page) {
+  await page.bringToFront();
+  await page.getByRole("button",{name:"플레이",exact:true}).click();
+  await expect(page.locator(".play-shell canvas")).toHaveAttribute("data-ready","true");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".live-preview canvas")).toHaveAttribute("data-ready","true");
+}
+async function makeText(page:Page,text:string,place=true) {
   await page.bringToFront();
   await page.getByRole("button",{name:"텍스트 만들기",exact:true}).click();
   await page.getByRole("textbox",{name:"텍스트 입력",exact:true}).fill(text);
   await page.getByRole("dialog").getByRole("button",{name:"저장",exact:true}).click();
+  if(place)await page.locator('[data-cell="126"]').click();
 }
 async function useText(page:Page,text:string) {
   await page.bringToFront();
   await page.getByRole("button",{name:`배치: ${text}`,exact:true}).click();
   await page.locator('[data-cell="126"]').click();
 }
+
+test("play shares only placed materials and a recipient edits one independent copy",async({browser,baseURL})=>{
+  const a=await newPlayer(browser,baseURL),b=await newPlayer(browser,baseURL),aa=observe(a),bb=observe(b);
+  const url=`?meeting=play-share-${Date.now()}`;
+  await a.goto(url);await ready(a);await b.goto(url);await ready(b);
+  await makeText(a,"목록에만 있는 재료",false);
+  await makeText(a,"시험 배치");
+  await expect.poll(()=>aa.view().ownWorld.objects.length).toBe(1);
+  await expect(b.locator(".received-material")).toHaveCount(0);
+  await a.getByRole("button",{name:"편집",exact:true}).click();
+  await a.getByRole("textbox",{name:"텍스트 입력",exact:true}).fill("완성한 재료");
+  await a.getByRole("dialog").getByRole("button",{name:"저장",exact:true}).click();
+  await expect.poll(()=>aa.view().ownWorld.assets.some(asset=>asset.text==="완성한 재료")).toBe(true);
+  await expect(b.locator(".received-material")).toHaveCount(0);
+  await publishMaterials(a);
+  await expect(b.getByRole("button",{name:"배치: 완성한 재료",exact:true})).toBeVisible();
+  await expect(b.locator(".received-material")).toHaveCount(1);
+  await expect(b.getByRole("button",{name:"배치: 목록에만 있는 재료",exact:true})).toHaveCount(0);
+  const gift=(await savedWorld(b)).assets.find(asset=>asset.received)!;
+  await b.bringToFront();
+  await b.getByRole("button",{name:"배치: 완성한 재료",exact:true}).click();
+  await b.getByRole("button",{name:"편집",exact:true}).click();
+  await b.getByRole("textbox",{name:"텍스트 입력",exact:true}).fill("내가 고친 재료");
+  await b.getByRole("dialog").getByRole("button",{name:"저장",exact:true}).click();
+  const empty=bb.view().ownWorld.terrain!.tiles.findIndex(tile=>tile.void);
+  await b.locator(`[data-cell="${empty}"]`).click();
+  await expect(b.locator(`[data-cell="${empty}"] [data-symbol-site]`)).toHaveCount(0);
+  expect((await savedWorld(b)).objects).toHaveLength(0);
+  await b.locator('[data-cell="126"]').click();
+  await expect.poll(()=>bb.view().connections.length).toBe(1);
+  await expect.poll(()=>bb.view().ownWorld.objects.length).toBe(1);
+  await expect.poll(async()=> (await savedWorld(b)).assets.find(asset=>asset.id===gift.id)?.text).toBe("내가 고친 재료");
+  await expect(b.locator(".received-material")).toHaveCount(1);
+  await a.bringToFront();
+  await a.getByRole("button",{name:"편집",exact:true}).click();
+  await a.getByRole("button",{name:"텍스트 삭제",exact:true}).click();
+  await publishMaterials(a);
+  await b.bringToFront();
+  await expect(b.getByRole("button",{name:"배치: 내가 고친 재료",exact:true})).toBeVisible();
+  await b.reload();await ready(b);
+  await expect(b.locator(".received-material")).toHaveCount(1);
+  expect((await savedWorld(b)).objects[0].asset).toBe(gift.id);
+  await b.getByRole("button",{name:"배치: 내가 고친 재료",exact:true}).click();
+  await b.getByRole("button",{name:"편집",exact:true}).click();
+  await b.getByRole("button",{name:"텍스트 삭제",exact:true}).click();
+  await expect.poll(()=>bb.view().ownWorld.objects.length).toBe(0);
+  await expect(b.locator("[data-connection]")).toHaveCount(1);
+  expect(bb.view().ownWorld.terrain!.tiles[126].void).not.toBe(true);
+  expect([...aa.errors,...bb.errors]).toEqual([]);
+});
 
 test("distant personal footings reveal worlds and return visitors silently after floor deletion or disconnect",async({browser,baseURL},info)=>{
   const a=await newPlayer(browser,baseURL),b=await newPlayer(browser,baseURL),aa=observe(a),bb=observe(b),link=`?meeting=walk-${Date.now()}`;
@@ -176,7 +235,7 @@ test("distant personal footings reveal worlds and return visitors silently after
   await expect(a.locator('[data-approach]')).toHaveCount(1);
   await expect(a.locator('.presence-mark')).toHaveCSS("background-color","rgb(243, 239, 145)");
   await expect(a.locator('.presence-count>span:nth-child(2)')).toHaveCSS("background-color","rgb(243, 239, 145)");
-  await makeText(a,"A의 재료");await makeText(b,"B의 재료");await useText(a,"B의 재료");
+  await makeText(a,"A의 재료");await makeText(b,"B의 재료");await publishMaterials(a);await publishMaterials(b);await useText(a,"B의 재료");
   await expect.poll(()=>aa.view().connections.length).toBe(1);
   const gate=aa.view().connections[0];expect([gate.x,gate.z]).toEqual([25,1]);
   expect(bb.view().connections).toHaveLength(0);await expect(b.locator('[data-approach]')).toHaveCount(1);
@@ -218,7 +277,6 @@ test("distant personal footings reveal worlds and return visitors silently after
 test("three original editors retain tools, undo, distinct documents after reload and a mobile layout",async({browser,baseURL},info)=>{
   const a=await newPlayer(browser,baseURL),b=await newPlayer(browser,baseURL),c=await newPlayer(browser,baseURL);
   const aa=observe(a),bb=observe(b),cc=observe(c),link=`?meeting=three-${Date.now()}`;
-  await a.addInitScript(()=>localStorage.setItem("whistle.world.v2","existing saved world"));
   await a.goto(link);await ready(a);await b.goto(link);await ready(b);await c.goto(link);await ready(c);
   expect([aa.view().slot,bb.view().slot,cc.view().slot]).toEqual([0,0,0]);
   for(const name of ["이미지 만들기","텍스트 만들기","사운드 만들기","높이기","낮추기"])
@@ -239,7 +297,6 @@ test("three original editors retain tools, undo, distinct documents after reload
   await a.setViewportSize({width:390,height:844});
   await a.screenshot({path:info.outputPath("mobile.png"),fullPage:true});
   expect(await a.evaluate(()=>document.documentElement.scrollWidth>innerWidth)).toBe(false);
-  expect(await a.evaluate(()=>localStorage.getItem("whistle.world.v2"))).toBe("existing saved world");
   expect([...aa.errors,...bb.errors,...cc.errors]).toEqual([]);
 });
 
@@ -276,12 +333,7 @@ test("neighbors share editable lemon materials without forwarding copies or rest
   const a=await newPlayer(browser,baseURL),b=await newPlayer(browser,baseURL),c=await newPlayer(browser,baseURL);
   const aa=observe(a),bb=observe(b),cc=observe(c),link=`?meeting=materials-${Date.now()}`;
   await a.goto(link);await ready(a);await b.goto(link);await ready(b);await c.goto(link);await ready(c);
-  const make=async(page:Page,text:string)=>{
-    await page.bringToFront();
-    await page.getByRole("button",{name:"텍스트 만들기",exact:true}).click();
-    await page.getByRole("textbox",{name:"텍스트 입력",exact:true}).fill(text);
-    await page.getByRole("dialog").getByRole("button",{name:"저장",exact:true}).click();
-  };
+  const make=async(page:Page,text:string)=>{await makeText(page,text);await publishMaterials(page);};
   await make(a,"물고기");
   await expect(b.locator('.received-material')).toHaveCount(1);
   await expect(c.locator('.received-material')).toHaveCount(0);
@@ -335,7 +387,7 @@ test("a fourth arrival preserves existing neighbors and only receives the adjace
   const pages=await Promise.all([0,1,2,3].map(()=>newPlayer(browser,baseURL))),states=pages.map(observe),link=`?meeting=four-${Date.now()}`;
   for(let i=0;i<3;i++){await pages[i].goto(link);await ready(pages[i]);}
   const original=states[0].view().approaches[0];
-  await makeText(pages[0],"첫 번째");await makeText(pages[2],"세 번째");
+  await makeText(pages[0],"첫 번째");await makeText(pages[2],"세 번째");await publishMaterials(pages[0]);await publishMaterials(pages[2]);
   await pages[3].goto(link);await ready(pages[3]);
   await expect(pages[3].getByRole('button',{name:'배치: 세 번째',exact:true})).toBeVisible();
   await expect(pages[3].getByRole('button',{name:'배치: 첫 번째',exact:true})).toHaveCount(0);

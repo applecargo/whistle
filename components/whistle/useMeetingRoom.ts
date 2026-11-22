@@ -1,10 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type MeetingMessage, type MeetingView, type MeetingPresence, type MeetingPosition, type MeetingWhistle } from "@/lib/meeting";
+import { localMeetingView, type MeetingMessage, type MeetingPresence, type MeetingPosition, type MeetingWhistle } from "@/lib/meeting";
 import { createMeetingCodec } from "@/lib/meeting-wire";
+import type { World } from "@/lib/world";
 import { meetingSocketURL } from "@/lib/meeting-client";
 
+const createId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2,"0")).join("");
+function identity(key:string, fresh=false) {
+  const storageKey=`whistle.meeting.${key}.id`;
+  let id=createId(),token=createId();
+  try {
+    if(!fresh){id=sessionStorage.getItem(storageKey)||id;token=sessionStorage.getItem(`${storageKey}.token`)||token;}
+    sessionStorage.setItem(storageKey,id);sessionStorage.setItem(`${storageKey}.token`,token);
+  } catch {}
+  return {id,token};
+}
 export function useMeetingRoom(key: string) {
-  const [view, setView] = useState<MeetingView | null>(null);
+  const [session,setSession]=useState(()=>identity(key));
+  const [documentId]=useState(()=>{
+    try {
+      const id=sessionStorage.getItem("whistle.document.tab")||session.id;
+      sessionStorage.setItem("whistle.document.tab",id);return id;
+    } catch {return session.id;}
+  });
+  const [view, setView] = useState(()=>localMeetingView(session.id));
   const [presence, setPresence] = useState<MeetingPresence>({ peers: [], canWhistle: false });
   const [status, setStatus] = useState<"connecting" | "online" | "offline">("connecting");
   const [error, setError] = useState("");
@@ -13,16 +31,9 @@ export function useMeetingRoom(key: string) {
   const resetId = useRef(0);
   const listeners = useRef(new Set<(event: MeetingWhistle) => void>());
   useEffect(() => {
-    let stopped = false, receivedState = false, delay = 1000;
+    let stopped = false, delay = 1000;
     let retry: ReturnType<typeof setTimeout> | undefined, connecting: ReturnType<typeof setTimeout> | undefined;
-    const storageKey = `whistle.meeting.${key}.id`;
-    const createId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2,"0")).join("");
-    let id: string, token: string;
-    try {
-      id = sessionStorage.getItem(storageKey) || createId();
-      token = sessionStorage.getItem(`${storageKey}.token`) || createId();
-      sessionStorage.setItem(storageKey,id);sessionStorage.setItem(`${storageKey}.token`,token);
-    } catch { id = createId(); token = createId(); }
+    const {id,token}=session;
     const connect = () => {
       if (stopped) return;
       setStatus("connecting");
@@ -48,12 +59,10 @@ export function useMeetingRoom(key: string) {
         setStatus("online"); setPresence(message.presence);
         if (message.type === "state") {
           clearTimeout(connecting);
-          receivedState = true; delay = 1000;
+          delay = 1000;
           resetId.current = message.view.reset.id;
           setError("");
-          id = message.view.id;
-          try { sessionStorage.setItem(storageKey, id); } catch { /* Memory session still works. */ }
-          setView(previous => previous?.revision === message.view.revision && previous.id === id ? previous : message.view);
+          setView(message.view);
         }
       };
       ws.onclose = event => {
@@ -61,8 +70,7 @@ export function useMeetingRoom(key: string) {
         if (stopped || socket.current !== ws) return;
         setStatus("offline");
         if (event.code === 4001) setError("다른 창에서 이 세계를 열었습니다.");
-        else if (!receivedState) setError(previous => previous || "서버에 연결할 수 없습니다. 다시 연결하고 있습니다.");
-        if (event.code !== 1008 && event.code !== 4001) {
+        if (event.code !== 1008 && event.code !== 4001 && event.code !== 4002) {
           retry = setTimeout(connect, delay);
           delay = Math.min(15_000, delay * 2);
         }
@@ -71,13 +79,21 @@ export function useMeetingRoom(key: string) {
     };
     connect();
     return () => { stopped = true; clearTimeout(retry); clearTimeout(connecting); socket.current?.close(); socket.current = null; };
-  }, [key]);
+  }, [key,session]);
   const send = useCallback((message: object) => {
     if (socket.current?.readyState === WebSocket.OPEN) {
       try { for (const frame of codec.current.encode(message)) socket.current.send(frame); }
       catch (error) { setError((error as Error).message); }
     }
   }, []);
+  const restart = useCallback((world:World) => {
+    send({type:"leave"});
+    socket.current?.close();socket.current=null;
+    const next=identity(key,true);
+    resetId.current=0;
+    setView(localMeetingView(next.id,world));
+    setPresence({peers:[],canWhistle:false});setStatus("connecting");setError("");setSession(next);
+  },[key,send]);
   const position = useCallback((player: MeetingPosition, playing: boolean) => {
     send({ type: "position", player, playing, resetId:resetId.current });
   }, [send]);
@@ -85,5 +101,5 @@ export function useMeetingRoom(key: string) {
     listeners.current.add(listener);
     return () => { listeners.current.delete(listener); };
   }, []);
-  return { key, view, presence, status, error, send, position, subscribeWhistle };
+  return { key, documentId, view, presence, status, error, send, restart, position, subscribeWhistle };
 }

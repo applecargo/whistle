@@ -1,6 +1,6 @@
 "use client";
 import { userErrorMessage } from "./Language";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { abstractWorld, validateWorld, type World } from "@/lib/world";
 import { upgradeTerrain } from "@/lib/terrain";
 import { createTerrainWorld } from "@/lib/create-world";
@@ -73,7 +73,7 @@ export function useWorldPersistence({ world, onLoad, onImport, notify, enabled =
     };
   }, [onLoad, resumeAutosave, enabled, libraryLimit, storage, fallbackWorld]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!ready || !enabled) return;
     setSaveStatus("저장 중");
     let pending = true, active = true;

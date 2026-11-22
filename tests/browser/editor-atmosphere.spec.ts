@@ -1,3 +1,4 @@
+import { savedWorld } from "./world-storage";
 import { test, expect, type Page } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
 
@@ -34,12 +35,12 @@ test("automatic daylight follows local time and its menu opens without changing 
   expect(await indicator.evaluate(el => el.tagName)).toBe("BUTTON");
   expect(await indicator.evaluate(el => (el as HTMLElement).tabIndex)).toBe(0);
   await expect(page.locator('.palette-weather button')).toHaveCount(3);
-  const before = await page.evaluate(() => localStorage.getItem("whistle.world.v2"));
+  const before = JSON.stringify(await savedWorld(page));
   await indicator.click();
   await expect(page.getByRole("button", { name: "현재 시간", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("Escape");
   await expect(indicator).toBeFocused();
-  expect(await page.evaluate(() => localStorage.getItem("whistle.world.v2"))).toBe(before);
+  expect(JSON.stringify(await savedWorld(page))).toBe(before);
   await page.clock.setSystemTime(new Date(2026, 10, 17, 23));
   await page.clock.fastForward(30_000);
   await expect(indicator).toHaveAttribute("data-time-of-day", "night");
@@ -55,7 +56,8 @@ for (const mobile of [false, true]) test(`preview rotates without editing the bo
   const errors = await setup(page);
   const canvas = page.locator(".live-preview canvas");
   await canvas.scrollIntoViewIfNeeded();
-  const before = await page.evaluate(() => ({ camera: (globalThis as any).__testCamera.position.toArray(), world: localStorage.getItem("whistle.world.v2") }));
+  const beforeWorld=JSON.stringify(await savedWorld(page));
+  const before = await page.evaluate(() => ({ camera: (globalThis as any).__testCamera.position.toArray() }));
   const box = (await canvas.boundingBox())!;
   if (mobile) {
     const session = await page.context().newCDPSession(page);
@@ -71,7 +73,7 @@ for (const mobile of [false, true]) test(`preview rotates without editing the bo
   }
   await expect.poll(() => page.evaluate(() => (globalThis as any).__testCamera.position.x)).not.toBe(before.camera[0]);
   await expect(canvas).not.toHaveAttribute("data-dragging", "true");
-  expect(await page.evaluate(() => localStorage.getItem("whistle.world.v2"))).toBe(before.world);
+  expect(JSON.stringify(await savedWorld(page))).toBe(beforeWorld);
   await expect(page.getByRole("button", { name: "되돌리기", exact: true })).toBeDisabled();
   if (!mobile) {
     const x = await page.evaluate(() => (globalThis as any).__testCamera.position.x);
@@ -129,7 +131,7 @@ test("time overrides update lighting and water, survive reload and play, and ret
   await expect(page.getByRole("button", { name: "비", exact: true })).toHaveAttribute("aria-pressed", "true");
   expect(await page.evaluate(() => (globalThis as any).__terrainBefore === (globalThis as any).__testScene.getObjectByName("continuous-ground"))).toBe(true);
   await expect.poll(() => page.evaluate(() => (globalThis as any).__testScene.getObjectByName("generated-water").material.uniforms.lightPower.value)).toBeCloseTo(.66, 2);
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("whistle.world.v2")!).timeOfDay)).toBe("midnight");
+  await expect.poll(async () => (await savedWorld(page)).timeOfDay).toBe("midnight");
   await page.reload();
   await expect(indicator).toHaveAttribute("data-time-mode", "midnight");
   await expect.poll(sunlight).toBeLessThan(.02);
@@ -141,7 +143,7 @@ test("time overrides update lighting and water, survive reload and play, and ret
   await expect.poll(sunlight).toBeGreaterThan(.28);
   await expect(indicator).toHaveAttribute("data-time-of-day", "day");
   await choose("현재 시간");
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("whistle.world.v2")!).timeOfDay)).toBe("auto");
+  await expect.poll(async () => (await savedWorld(page)).timeOfDay).toBe("auto");
   await expect(indicator).toHaveAccessibleName(/15:00/);
   await page.setViewportSize({ width: 390, height: 844 });
   await indicator.click();

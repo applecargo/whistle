@@ -6,9 +6,9 @@ import { WebSocket, WebSocketServer } from "ws";
 import { createMeetingCodec } from "../../lib/meeting-wire.ts";
 import { MEETING_PATH, createMeetingRoom, addMeetingMember, meetingView, meetingPresence,
   publishMeeting, moveMeeting, whistleMeeting, meetingWhistleRecipients, whistleForViewer,
-  disconnectMeetingMember, reconcileMeeting, meetingNeighbors, type MeetingRoom, type MeetingMessage } from "../../lib/meeting.ts";
+  disconnectMeetingMember, leaveMeetingMember, reconcileMeeting, meetingNeighbors, type MeetingRoom, type MeetingMessage } from "../../lib/meeting.ts";
 
-export function attachMeetingRelay(server: EventEmitter, options: {idleMs?: number; cleanupMs?: number; reconnectMs?: number} = {}) {
+export function attachMeetingRelay(server: EventEmitter, options: {cleanupMs?: number; reconnectMs?: number} = {}) {
   type Entry = {room:MeetingRoom; sockets:Map<string,WebSocket>; touched:number; queue:Promise<void>; presenceDirty?:boolean};
   const rooms = new Map<string, Entry>();
   let closing: Promise<void> | undefined;
@@ -68,14 +68,19 @@ export function attachMeetingRelay(server: EventEmitter, options: {idleMs?: numb
         if (Date.now() - frameStart > 1000) { frameStart = Date.now(); messages = 0; }
         if (++messages > 120) return;
         entry.queue = entry.queue.then(() => {
-        if (entry.sockets.has(id) && entry.sockets.get(id) !== ws) return;
+        if (entry.sockets.get(id) !== ws) return;
         try {
           const message = codecs.get(ws)!.decode<Record<string, any>>(data.toString());
           if (!message || typeof message !== "object") return;
           entry.touched = Date.now();
           let changed = false;
+          if(message.type === "leave") {
+            entry.sockets.delete(id);leaveMeetingMember(entry.room,id);
+            if(!entry.sockets.size && rooms.get(key)===entry)rooms.delete(key);
+            broadcast(entry,true);ws.close(4002,"World restarted");return;
+          }
           if(message.type === "publish")changed=publishMeeting(entry.room,id,message.world,
-            Array.isArray(message.received) ? message.received.filter((v: unknown) => typeof v === "string").slice(-10000) : []);
+            Array.isArray(message.received) ? message.received.filter((v: unknown) => typeof v === "string").slice(-10000) : [],message.share===true);
           else if (message.type === "whistle") {
             const whistle = whistleMeeting(entry.room, id);
             if (whistle) for (const peer of meetingWhistleRecipients(entry.room,id)) {
@@ -101,6 +106,7 @@ export function attachMeetingRelay(server: EventEmitter, options: {idleMs?: numb
         if (entry.sockets.get(id) !== ws) return;
         entry.sockets.delete(id);
         disconnectMeetingMember(entry.room,id);entry.touched=Date.now();
+        if(!entry.sockets.size && rooms.get(key)===entry)rooms.delete(key);
         entry.queue=entry.queue.then(()=>{
           if(entry.sockets.has(id))return;
           broadcast(entry,true);
@@ -117,7 +123,6 @@ export function attachMeetingRelay(server: EventEmitter, options: {idleMs?: numb
     for(const entry of rooms.values())if(entry.sockets.size)entry.queue=entry.queue.then(()=>{
       if(reconcileMeeting(entry.room,Date.now(),options.reconnectMs))broadcast(entry,true);
     }).catch(()=>{});
-    for (const [key, entry] of rooms) if (!entry.sockets.size && Date.now() - entry.touched > (options.idleMs ?? 30 * 60_000)) void entry.queue.then(() => { if (!entry.sockets.size && rooms.get(key) === entry) rooms.delete(key); });
   }, options.cleanupMs ?? 1_000);
   cleanup.unref();
   const close = () => {

@@ -1,8 +1,10 @@
+import { atFixedStart } from "./fixed-start";
 import { test, expect, type Page } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
 import type { World } from "../../lib/world";
 
 async function enter(page: Page, world: World) {
+  world=atFixedStart(world);
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
@@ -38,7 +40,7 @@ for (const timeOfDay of ["noon", "midnight"] as const) {
 
 test("hold jump from a windy ledge to glide, release to land", async ({ page }) => {
   const world = terrainFixtures().flat; world.start = { x: 3, z: 2 };
-  for (let z = 2; z <= 4; z++) {
+  for (let z = 0; z <= 2; z++) {
     world.terrain!.tiles[z * world.size + 3] = { height: 1, surface: "plain", hole: false };
     for (const x of [2, 4]) world.terrain!.tiles[z * world.size + x].height = 2;
   }

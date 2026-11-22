@@ -1,8 +1,9 @@
+import { savedWorld } from "./world-storage";
 import { test, expect, type Page } from "@playwright/test";
 import { createTerrainWorld } from "../../lib/create-world";
 
 test.setTimeout(60_000);
-const saved = (page: Page) => page.evaluate(() => JSON.parse(sessionStorage.getItem("whistle.world.tab.v1")!));
+const saved = savedWorld;
 
 async function open(page: Page) {
   const world = createTerrainWorld(17);
@@ -35,7 +36,7 @@ test("build and erase paths over void, undo and reload without losing the isolat
   await page.getByRole("button", { name: "바닥", exact: true }).click();
   await cell.click();
   await expect(cell).toHaveAccessibleName(/높이 0 바닥/);
-  await expect.poll(async () => (await saved(page)).terrain.tiles[next].void).toBeUndefined();
+  await expect.poll(async () => (await saved(page)).terrain!.tiles[next].void).toBeUndefined();
   await page.getByRole("button", { name: "타일 지우기", exact: true }).click();
   await page.locator(`[data-cell="${start}"]`).click();
   await expect(page.locator(`[data-cell="${start}"]`)).toHaveAccessibleName(/높이 0 바닥.*시작점/);
@@ -43,7 +44,7 @@ test("build and erase paths over void, undo and reload without losing the isolat
   await expect(cell).toHaveAccessibleName(/허공/);
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
   await expect(cell).toHaveAccessibleName(/높이 0 바닥/);
-  await expect.poll(async () => (await saved(page)).terrain.tiles[next].void).toBeUndefined();
+  await expect.poll(async () => (await saved(page)).terrain!.tiles[next].void).toBeUndefined();
   await page.reload();
   await expect(cell).toHaveAccessibleName(/높이 0 바닥/);
   const canvas = await play(page);

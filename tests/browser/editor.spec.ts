@@ -33,9 +33,8 @@ test("toolbar and palette keep language, dialogs, and file selection connected",
   await page.getByRole("button", { name: "저장", exact: true }).click();
   await page.locator('[data-cell="0"]').click();
   await expect(page.locator('[data-cell="0"] [data-symbol-site] g')).toHaveAttribute("fill", "currentColor");
-  await page.getByRole("button", { name: "시작점", exact: true }).click();
-  await page.locator('[data-cell="1"]').click();
-  await expect(page.locator('[data-cell="1"]')).toHaveAccessibleName(/시작점/);
+  await expect(page.getByRole("button", { name: "시작점", exact: true })).toHaveCount(0);
+  await expect(page.locator('[data-cell="126"]')).toHaveAccessibleName(/시작점/);
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "불러오기", exact: true }).click();
   const imported = terrainFixtures().flat;

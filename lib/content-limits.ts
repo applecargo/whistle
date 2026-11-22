@@ -24,10 +24,11 @@ export function validateContentCounts(world: World, libraryLimit = MAX_CONTENT_C
 
 export function mergeReceivedAssets(world: World, incoming: Asset[]) {
   const assets = [...world.assets], ids = new Set(assets.map(asset=>asset.id)), accepted:Asset[] = [];
+  const received=new Set(world.receivedMaterialIds??world.assets.filter(a=>a.received).map(a=>a.id));
   for (const asset of incoming) {
-    if (ids.has(asset.id)) { accepted.push(asset); continue; }
-    if (assets.length >= MAX_LIBRARY_SIZE) continue;
-    assets.push(asset);ids.add(asset.id);accepted.push(asset);
+    if (ids.has(asset.id)||received.has(asset.id)) { accepted.push(asset);received.add(asset.id);continue; }
+    if (assets.length >= MAX_LIBRARY_SIZE || received.size >= 10000) continue;
+    assets.push(asset);ids.add(asset.id);received.add(asset.id);accepted.push(asset);
   }
-  return {world:{...world,assets},accepted};
+  return {world:{...world,assets,...(received.size?{receivedMaterialIds:[...received]}:{})},accepted};
 }

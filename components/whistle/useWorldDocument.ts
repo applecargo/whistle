@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clone, uid, type Asset, type World } from "@/lib/world";
 import { editTile, MIN_HEIGHT, MAX_HEIGHT, type TerrainTool } from "@/lib/tile";
-import { flatTerrain, LEVEL, type Surface } from "@/lib/terrain";
+import { flatTerrain, floorHeight, LEVEL, type Surface } from "@/lib/terrain";
 import { WATER_INSET } from "@/lib/water";
 import { createWorldDeriver, samePlacement } from "@/lib/world-derivation";
 import { placementChanges, type PlacementFeedback } from "@/lib/placement-feedback";
@@ -68,6 +68,8 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
   }, [commit]);
 
   const load = useCallback((next: World, beforeUpgrade: World) => {
+    strokeBase.current = null;
+    setFeedback(null);
     history.current = next !== beforeUpgrade ? [copyDocument(beforeUpgrade)] : [];
     if (history.current[0]?.terrain) history.current[0].terrain.generatorVersion = 2;
     future.current = [];
@@ -122,10 +124,11 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
     }
     if (layer === "symbols") {
       const asset = next.assets.find(asset => asset.id === assetId)!;
+      const structures = deriveWorld(strokeBase.current!).structures;
       for (const i of cells) {
         const x = i % next.size, z = Math.floor(i / next.size);
         if (erase) next.objects = next.objects.filter(object => object.x !== x || object.z !== z || object.asset !== asset.id);
-        else if ((!contentKind(asset) || next.objects.filter(object => contentKind(next.assets.find(a => a.id === object.asset)) === contentKind(asset)).length < MAX_CONTENT_COUNT) &&
+        else if (floorHeight(next,x,z,structures)!==null && (!contentKind(asset) || next.objects.filter(object => contentKind(next.assets.find(a => a.id === object.asset)) === contentKind(asset)).length < MAX_CONTENT_COUNT) &&
           !next.objects.some(object => object.x === x && object.z === z && object.asset === asset.id))
           next.objects.push({ id: uid(), asset: asset.id, x, z, rotation: 0, scale: asset.defaultScale ?? 1 });
       }

@@ -13,11 +13,10 @@ type Props = {
   onNew: () => void;
   onImport: () => void;
   onSave: () => void;
-  onNewTab?: () => void;
 };
 
 export function EditorToolbar({
-  playing, saveStatus, onlineCount, connectionStatus, makeButton, onEnter, onExit, onNew, onImport, onSave, onNewTab,
+  playing, saveStatus, onlineCount, connectionStatus, makeButton, onEnter, onExit, onNew, onImport, onSave,
 }: Props) {
   const { language, setLanguage, t } = useLanguage();
   const presenceLabel = onlineCount === null
@@ -74,7 +73,6 @@ export function EditorToolbar({
           </button>
         </div>
         <div className="file-actions">
-          {onNewTab && <button onClick={onNewTab} aria-label="같은 방 새 탭 열기">새 탭</button>}
           <button onClick={onNew}>{t("다시 시작")}</button>
           <button onClick={onImport}>
             {t("불러오기")}

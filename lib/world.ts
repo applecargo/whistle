@@ -73,6 +73,7 @@ export type World = {
   description: string;
   size: number;
   assets: Asset[];
+  receivedMaterialIds?: string[];
   objects: Placed[];
   rules: Rule[];
   start: { x: number; z: number };
@@ -472,6 +473,7 @@ export function validateWorld(input: unknown, libraryLimit = MAX_CONTENT_COUNT):
     !Array.isArray(w.assets) ||
     w.assets.length < 1 ||
     w.assets.length > MAX_LIBRARY_SIZE ||
+    (w.receivedMaterialIds !== undefined && (!Array.isArray(w.receivedMaterialIds) || w.receivedMaterialIds.length > 10000 || w.receivedMaterialIds.some(id=>!text(id,100)))) ||
     !Array.isArray(w.objects) ||
     w.objects.length > 250 ||
     !Array.isArray(w.rules) ||
@@ -481,7 +483,7 @@ export function validateWorld(input: unknown, libraryLimit = MAX_CONTENT_COUNT):
   const ids = new Set<string>();
   for (const a of w.assets) {
     if (
-      !text(a.id, 80) ||
+      !text(a.id, a.received ? 100 : 80) ||
       ids.has(a.id) ||
       !text(a.name, 40) ||
       !shapes.includes(a.shape) ||

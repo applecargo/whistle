@@ -1,3 +1,4 @@
+import { atFixedStart } from "./fixed-start";
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { terrainFixtures } from "../terrain-fixtures";
@@ -9,6 +10,7 @@ type Probe = {
   contexts: AudioContext[]; rms: number; peak: number;
 };
 async function openWorld(page: Page, world: World) {
+  world=atFixedStart(world);
   const io = JSON.parse(readFileSync("public/audio-test/io.json", "utf8"));
   await page.addInitScript(({ world, io }) => {
     localStorage.setItem("whistle.world.v2", JSON.stringify(world));
@@ -126,7 +128,7 @@ test("walking sends spatial state at fixed volume; blur and exit silence it", as
   await expect(page.locator(".workspace")).toBeVisible();
   await expect.poll(async () => (await probe(page)).rms).toBeLessThan(0.0001);
   expect((await messages(page, "whistle-gate")).at(-1)).toEqual([0]);
-  expect((await probe(page)).contexts).toEqual(["running"]);
+  expect((await probe(page)).contexts).toEqual(["running","running"]);
 });
 
 test("failed audio loading leaves editing usable and retries on the next edit", async ({ page }) => {
@@ -155,5 +157,5 @@ test("existing approach sound rules use the same Pd session", async ({ page }) =
   await expect.poll(async () => (await probe(page)).peak).toBeGreaterThan(0.005);
   await page.keyboard.press("Escape");
   await expect.poll(async () => (await probe(page)).rms).toBeLessThan(0.0001);
-  expect((await probe(page)).contexts).toEqual(["running"]);
+  expect((await probe(page)).contexts).toEqual(["running","running"]);
 });

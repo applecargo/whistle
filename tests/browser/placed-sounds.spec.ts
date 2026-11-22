@@ -1,3 +1,4 @@
+import { savedWorld } from "./world-storage";
 import { test, expect, type Page } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
 
@@ -82,7 +83,7 @@ test("upload, place, save, reload, mix with Pd, pause, resume and remove", async
   await page.getByRole("button", { name: "플레이", exact: true }).click();
   await expect.poll(async () => (await probe(page)).active).toBe(1);
   await expect.poll(async () => (await probe(page)).rms).toBeGreaterThan(0.01);
-  expect((await probe(page)).contexts).toEqual(["running"]);
+  expect((await probe(page)).contexts).toEqual(["running","running"]);
   expect((await probe(page)).pd).toBe(1);
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
   await expect.poll(async () => (await probe(page)).active).toBe(0);
@@ -130,13 +131,13 @@ test("sound placement limit and portable world file roundtrip", async ({ page })
   await expect(page.getByRole("button", { name: "배치: 1", exact: true })).toBeVisible();
 });
 
-test("sound editor fits mobile and saves independent placement settings", async ({ page }) => {
+test("sound editor fits mobile and updates the existing material", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await upload(page, 5);
   for (const cell of [125, 126]) await page.locator(`[data-cell="${cell}"]`).click();
   await page.getByRole("button", { name: "배치: 1", exact: true }).click();
   await page.locator('[data-cell="126"] [data-symbol-site]').click();
-  await expect(page.getByLabel("사운드 이름", { exact: true })).toHaveValue("2");
+  await expect(page.getByLabel("사운드 이름", { exact: true })).toHaveValue("1");
   await expect(page.getByLabel("사운드 이름", { exact: true })).toHaveAttribute("maxlength", "12");
   await page.getByLabel("사운드 이름", { exact: true }).fill("물소리");
   await expect(page.getByRole("dialog")).not.toContainText("10MB");
@@ -158,11 +159,8 @@ test("sound editor fits mobile and saves independent placement settings", async 
   await page.screenshot({ path: "/tmp/whistle-sound-editor-mobile.png" });
   await page.getByRole("button", { name: "저장", exact: true }).click();
   await expect(page.getByRole("button", { name: "파일 저장", exact: true })).toHaveAttribute("aria-description", "이 브라우저에 저장됨");
-  const sounds = await page.evaluate(() => {
-    const world = JSON.parse(localStorage.getItem("whistle.world.v2")!);
-    return world.assets.filter((a: { sound?: unknown }) => a.sound).map((a: { name: string; sound: { radius?: number; mode: string; volume: number } }) => [a.name, a.sound.radius ?? null, a.sound.mode, a.sound.volume]);
-  });
-  expect(sounds).toEqual([["1", null, "loop", 0.7], ["물소리", null, "approach", 0.4]]);
+  const sounds = (await savedWorld(page)).assets.filter(a=>a.sound).map(a=>[a.name,null,a.sound!.mode,a.sound!.volume]);
+  expect(sounds).toEqual([["물소리", null, "approach", 0.4]]);
 });
 
 test("uploaded stereo WAV is compressed, keeps stereo and can be previewed", async ({ page }) => {

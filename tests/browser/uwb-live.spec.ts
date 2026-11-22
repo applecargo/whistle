@@ -33,11 +33,7 @@ test("live grid edits and undo reach the displayed world and Pd without relying 
   await expect(page.locator("#live-status")).toHaveText("편집기에 연결되었습니다.");
   await expect(editor.getByRole("button", { name: "파일 저장", exact: true })).toHaveAttribute("aria-description", "이 브라우저에 저장됨");
   await editor.evaluate(() => {
-    const original = Storage.prototype.setItem;
-    Storage.prototype.setItem = function(key, value) {
-      if (key === "whistle.world.v2") throw new DOMException("quota", "QuotaExceededError");
-      return original.call(this, key, value);
-    };
+    IDBObjectStore.prototype.put = function() { throw new DOMException("quota", "QuotaExceededError"); };
   });
   await expect(page.getByRole("heading", { name: world.title, exact: true })).toBeVisible();
   await page.bringToFront();
@@ -75,17 +71,16 @@ test("world replacement and reload stay connected; disconnect isolates later edi
   const world = terrainFixtures().flat;
   const editor = await openLive(page, context, JSON.stringify(world));
   await expect(page.locator("#live-status")).toHaveText("편집기에 연결되었습니다.");
+  const initialPosition=await data(page);
   const next = terrainFixtures().flat;
-  next.size = 6;
-  next.terrain = flatTerrain(6);
-  next.start = { x: 3, z: 5 };
+  next.terrain = flatTerrain(12);
   next.title = "새로 가져온 실제 세계";
   await editor.locator('input[type="file"]').setInputFiles({ name: "world.json", mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(next)) });
   await expect(page.getByRole("heading", { name: next.title, exact: true })).toBeVisible();
-  await expect(page.locator(".map rect")).toHaveCount(6 * 6);
-  expect((await data(page)).metres).toEqual({ x: 1, z: 3 });
-  expect((await data(page)).grid).toEqual({ x: 0.5, z: 2.5 });
+  await expect(page.locator(".map rect")).toHaveCount(12 * 12);
+  expect((await data(page)).metres).toEqual(initialPosition.metres);
+  expect((await data(page)).grid).toEqual(initialPosition.grid);
   await expect(editor.getByRole("button", { name: "파일 저장", exact: true })).toHaveAttribute("aria-description", "이 브라우저에 저장됨");
   await editor.reload();
   await expect(page.locator("#live-status")).toHaveText("편집기에 연결되었습니다.");

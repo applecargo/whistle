@@ -1,4 +1,4 @@
-import type { MeetingSession } from "./MeetingLab";
+import type { MeetingSession } from "./ConnectedWorld";
 import { meetingLocal } from "@/lib/meeting";
 import type { MeetingVisuals } from "./MeetingScene";
 

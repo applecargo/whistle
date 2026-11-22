@@ -1,4 +1,4 @@
-import { uid, validateWorld, type Asset, type Player, type World } from "./world.ts";
+import { validateWorld, type Asset, type Player, type World } from "./world.ts";
 import { contentKind, MAX_LIBRARY_SIZE } from "./content-limits.ts";
 import { createTerrainWorld } from "./create-world.ts";
 import { flatTerrain, floorHeight, deriveStructures, type Structure, type Tile } from "./terrain.ts";
@@ -42,7 +42,7 @@ type Member = MeetingPeer & {
   player: MeetingPosition; document: World; revision: number; leftAt?: number;
   reset: MeetingReset;
   ports: [NeighborSlot | null, NeighborSlot | null];
-  materials: Map<string, Asset>; received: Set<string>; shared: Map<string, string>;
+  materials: Map<string, Asset>; received: Set<string>; shared: Map<string, string>; published: Asset[];
   lastWhistle: number; resumeKey?: string;
 };
 export type MeetingRoom = {
@@ -57,7 +57,7 @@ export function fixMeetingStart(world: World) {
   return world;
 }
 export function createMeetingWorld(seed?: number): World {
-  const world = createTerrainWorld(seed); world.timeOfDay = "noon"; return fixMeetingStart(world);
+  return fixMeetingStart(createTerrainWorld(seed));
 }
 export function meetingLocal(slot: number, p: {x:number;z:number}) {
   const r=MEETING_REGIONS[slot]; return {x:p.x-r.x0,z:p.z-r.z0};
@@ -108,7 +108,14 @@ function syncNeighborSlots(room:MeetingRoom) {
 export function reconcileMeeting(room:MeetingRoom,now=Date.now(),graceMs=MEETING_RECONNECT_MS) {
   const chain=room.chain.filter(id=>{const m=room.members.get(id)!;return m.online || now-(m.leftAt??now)<graceMs;});
   let changed=chain.length!==room.chain.length;
-  if(changed){room.chain=chain;room.revision++;}
+  if(changed){
+    room.chain=chain;room.revision++;
+    for(const [id,member] of room.members)if(!member.online&&!chain.includes(id)) {
+      room.members.delete(id);
+      worldCache.get(room)?.delete(id);
+      room.links=room.links.filter(([from,to])=>from!==id&&to!==id);
+    }
+  }
   changed=syncNeighborSlots(room)||changed;
   if(changed){shareMeetingMaterials(room);discoverMeetingConnections(room);}
   return changed;
@@ -124,6 +131,15 @@ export function disconnectMeetingMember(room:MeetingRoom,id:string,now=Date.now(
   }
   m.online=false;m.playing=false;m.leftAt=now;room.revision++;
 }
+export function leaveMeetingMember(room:MeetingRoom,id:string) {
+  disconnectMeetingMember(room,id);
+  room.chain=room.chain.filter(member=>member!==id);
+  room.links=room.links.filter(([from,to])=>from!==id&&to!==id);
+  room.members.delete(id);
+  worldCache.get(room)?.delete(id);
+  room.revision++;
+  syncNeighborSlots(room);shareMeetingMaterials(room);discoverMeetingConnections(room);
+}
 function relocateMeeting(room:MeetingRoom,member:Member,point:{x:number;z:number},reason:MeetingReset["reason"]) {
   member.player=meetingReturnPosition(point,member.player.yaw,reason);
   member.reset={id:member.reset.id+1,player:{...member.player},reason};room.revision++;
@@ -132,15 +148,13 @@ export function meetingReturnPosition(point:{x:number;z:number},yaw:number,reaso
   return {...point,yaw:reason==="disconnect"?(point.x<13?Math.PI/2:-Math.PI/2):yaw,pitch:-.7,grounded:true,falling:false};
 }
 export function addMeetingMember(room:MeetingRoom,id:string,now=Date.now()) {
+  reconcileMeeting(room,now);
   let member=room.members.get(id);
-  // A returning neighbor may resume their reserved place. A new arrival can reuse
-  // vacant places immediately, without waiting behind disconnected members.
-  reconcileMeeting(room,now,member&&room.chain.includes(id)?MEETING_RECONNECT_MS:0);
   if(!member){
     const document=createMeetingWorld((room.seed+Math.imul(room.members.size,0x9e3779b9))>>>0);
     member={id,slot:0,online:true,playing:false,document,revision:0,ports:[null,null],
       reset:{id:0,player:{...meetingGlobal(0,MEETING_START),yaw:0,grounded:true}},
-      player:{...meetingGlobal(0,MEETING_START),yaw:0,grounded:true},materials:new Map(),received:new Set(),shared:new Map(),lastWhistle:-Infinity};
+      player:{...meetingGlobal(0,MEETING_START),yaw:0,grounded:true},materials:new Map(),received:new Set(),shared:new Map(),published:[],lastWhistle:-Infinity};
     room.members.set(id,member);
   }
   member.online=true;delete member.leftAt;
@@ -188,14 +202,34 @@ export function offlineMeetingWorld(view:MeetingView):World {
   return {...world,assets:world.assets.filter(a=>own(a.id)),objects:world.objects.filter(o=>own(o.id)),rules:world.rules.filter(r=>own(r.id)),
     terrain:{...world.terrain!,tiles:world.terrain!.tiles.map((tile,i)=>meetingOwner(i%MEETING_SIZE,Math.floor(i/MEETING_SIZE))===0||pads.has(i)?tile:emptyTile())}};
 }
+export function localMeetingView(id:string,document=createMeetingWorld()):MeetingView {
+  const room=createMeetingRoom(document.terrain?.seed);
+  addMeetingMember(room,id).document=document;
+  return meetingView(room,id);
+}
+export function withLocalMeetingWorld(view:MeetingView,document:World,online:boolean):World {
+  const world=online?view.world:offlineMeetingWorld(view),prefix=(id:string)=>`${view.id}:${id}`;
+  const other=(item:{id:string})=>!item.id.startsWith(`${view.id}:`);
+  const tiles=[...world.terrain!.tiles];
+  (document.terrain?.tiles??flatTerrain(LOCAL_SIZE).tiles).forEach((tile,i)=>{
+    const p=meetingGlobal(0,{x:i%LOCAL_SIZE,z:Math.floor(i/LOCAL_SIZE)});
+    tiles[meetingCell(p.x,p.z)]=tile;
+  });
+  return {...world,title:document.title,description:document.description,sky:document.sky,weather:document.weather,timeOfDay:document.timeOfDay,
+    terrain:{...world.terrain!,tiles},
+    assets:[...world.assets.filter(other),...document.assets.map(a=>({...a,id:prefix(a.id)}))],
+    objects:[...world.objects.filter(other),...document.objects.map(o=>({...o,id:prefix(o.id),asset:prefix(o.asset),...meetingGlobal(0,o),
+      ...(o.site?{site:{...o.site,cells:o.site.cells.map(i=>{const p=meetingGlobal(0,{x:i%LOCAL_SIZE,z:Math.floor(i/LOCAL_SIZE)});return meetingCell(p.x,p.z);})}}:{})}))],
+    rules:[...world.rules.filter(other),...document.rules.map(r=>({...r,id:prefix(r.id),subject:r.subject==="*"?"*":prefix(r.subject),source:r.source==="*"?"*":prefix(r.source),replacement:prefix(r.replacement)}))]};
+}
 export function authoredMaterialCount(world:World,received:ReadonlySet<string>) {
   return world.assets.filter(a=>contentKind(a)&&!a.received&&!received.has(a.id)).length;
 }
 function shareMeetingMaterials(room:MeetingRoom) {
-  for(const source of room.members.values())for(const asset of source.document.assets){
+  for(const source of room.members.values())for(const asset of source.published){
     if(!contentKind(asset)||asset.received||source.materials.has(asset.id))continue;
     let sharedId=source.shared.get(asset.id);
-    if(!sharedId){sharedId=`received-${uid()}`;source.shared.set(asset.id,sharedId);}
+    if(!sharedId){sharedId=`received-${asset.id}`;source.shared.set(asset.id,sharedId);}
     for(const id of meetingNeighbors(room,source.id)){
       const recipient=room.members.get(id)!;if(recipient.materials.has(sharedId))continue;
       const {originalImage:_,...copy}=asset;
@@ -213,7 +247,7 @@ export function discoverMeetingConnections(room:MeetingRoom) {
   }
   if(changed){syncConnections(room);room.revision++;}
 }
-export function publishMeeting(room:MeetingRoom,id:string,input:unknown,received:string[]=[]) {
+export function publishMeeting(room:MeetingRoom,id:string,input:unknown,received:string[]=[],share=false) {
   const world=validateWorld(input,MAX_LIBRARY_SIZE);
   if(world.size!==LOCAL_SIZE)throw Error("연결된 세계에서는 12×12 맵을 사용합니다.");
   if(world.start.x!==MEETING_START.x||world.start.z!==MEETING_START.z)throw Error("연결된 세계의 출발점은 고정되어 있습니다.");
@@ -221,11 +255,15 @@ export function publishMeeting(room:MeetingRoom,id:string,input:unknown,received
   if(authoredMaterialCount(world,new Set(member.materials.keys()))>MEETING_MATERIAL_LIMIT)throw Error(MEETING_MATERIAL_MESSAGE);
   if(JSON.stringify(world).length>32*1024*1024)throw Error("공유할 재료의 전체 용량이 너무 큽니다.");
   let acknowledged=false;
-  for(const assetId of received)if(member.materials.has(assetId)&&!member.received.has(assetId)){
-    member.received.add(assetId);acknowledged=true;const asset=member.materials.get(assetId)!;
-    member.materials.set(assetId,{id:asset.id,name:asset.name,shape:asset.shape,color:asset.color,solid:false});
+  for(const assetId of new Set([...received,...world.receivedMaterialIds??[],...world.assets.filter(a=>a.received).map(a=>a.id)]))if(!member.received.has(assetId)){
+    member.received.add(assetId);acknowledged=true;const asset=member.materials.get(assetId);
+    if(asset)member.materials.set(assetId,{id:asset.id,name:asset.name,shape:asset.shape,color:asset.color,solid:false,received:true});
   }
-  if(JSON.stringify(member.document)===JSON.stringify(world)&&!acknowledged)return false;
+  if(share) {
+    const placed=new Set(world.objects.map(o=>o.asset));
+    member.published=world.assets.filter(a=>placed.has(a.id)&&contentKind(a)&&!a.received&&!member.materials.has(a.id)).map(a=>structuredClone(a));
+  }
+  if(JSON.stringify(member.document)===JSON.stringify(world)&&!acknowledged&&!share)return false;
   member.document=world;member.revision++;room.revision++;
   shareMeetingMaterials(room);discoverMeetingConnections(room);
   for(const visitor of room.members.values()) {

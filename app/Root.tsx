@@ -1,9 +1,5 @@
-import { lazy, Suspense } from "react";
-import Home from "./page";
-const MeetingLab = lazy(() => import("@/components/whistle/MeetingLab"));
+import ConnectedWorld from "@/components/whistle/ConnectedWorld";
 
 export default function Root() {
-  return new URLSearchParams(location.search).has("meeting")
-    ? <Suspense fallback={null}><MeetingLab /></Suspense>
-    : <Home />;
+  return <ConnectedWorld />;
 }

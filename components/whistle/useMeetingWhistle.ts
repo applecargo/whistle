@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, type MutableRefObject } from "react";
-import type { MeetingSession } from "./MeetingLab";
+import type { MeetingSession } from "./ConnectedWorld";
 import type { Player } from "@/lib/world";
 import { createMeetingWhistle } from "@/lib/audio/meeting-whistle";
 
