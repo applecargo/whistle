@@ -12,6 +12,7 @@ import { makeTerrain } from "./TerrainScene";
 import { makeSurfaceImage } from "./SurfaceImage";
 import { makeWaterReflection } from "./WaterReflection";
 import { applyPixelMaterials, makePixelRenderer } from "./PixelGraphics";
+import { renderQuality } from "@/lib/render-quality";
 import { horizonTone } from "./PixelPalette";
 import { addSymbolVisuals, makeSymbolExperience } from "./SymbolExperience";
 import { floorHeight, tileAt, terrainSample, ladderAt, LEVEL, SURFACES } from "@/lib/terrain";
@@ -187,12 +188,13 @@ export default function Scene({
     const baseFog = mode === "play" ? 0.055 : 0.018;
     const atmosphere = new THREE.FogExp2(sky, baseFog * currentDay.fog);
     scene.fog = atmosphere;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1,2));
+    const quality = renderQuality();
+    renderer.setPixelRatio(quality.pixelRatio);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = quality.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.setClearColor("#000000");
-    const pixelRenderer = makePixelRenderer(renderer,graphicsDaylight);
+    const pixelRenderer = makePixelRenderer(renderer,graphicsDaylight,quality.samples);
     el.appendChild(renderer.domElement);
     const ambient = new THREE.HemisphereLight(
       "#ffffff",

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { pdOutputRms } from "./pd-probe";
 import { createLabWorld } from "../../uwb-lab/world";
 
 test.setTimeout(60_000);
@@ -84,48 +85,26 @@ test("two world menus show the existing world without a popup or overwriting sto
 });
 
 test("audio loading failure can retry and cancellation does not start a late session", async ({ page }) => {
-  await page.route("**/audio-test/patch.wasm", (route) => route.fulfill({ status: 503, body: "unavailable" }));
+  await page.route("**/audio-test/patches/player.pd*", (route) => route.fulfill({ status: 503, body: "unavailable" }));
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
   await expect(page.locator("#audio-status")).toContainText("불러오지 못했습니다");
-  await page.unroute("**/audio-test/patch.wasm");
+  await page.unroute("**/audio-test/patches/player.pd*");
   let release!: () => void;
   const hold = new Promise<void>((resolve) => { release = resolve; });
-  await page.route("**/audio-test/patch.wasm", async (route) => { await hold; await route.continue(); });
+  await page.route("**/audio-test/patches/player.pd*", async (route) => { await hold; await route.continue(); });
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
   await expect(page.locator("#audio-status")).toHaveText("패치 준비 중");
   await page.getByRole("button", { name: "오디오 종료", exact: true }).click();
   release();
   await expect(page.locator("#audio-status")).toHaveText("오디오 꺼짐");
-  await page.unroute("**/audio-test/patch.wasm");
+  await page.unroute("**/audio-test/patches/player.pd*");
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
   await expect(page.locator("#audio-status")).toHaveText("오디오 실행 중");
 });
 
 test("board height reaches Pd independently of virtual ground and survives restart", async ({ page }) => {
   test.setTimeout(90_000);
-  await page.route("**/audio-test/webpd-runtime.js", async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({ response, body: await response.text() + `
-      const originalRun = WebPdRuntime.run;
-      WebPdRuntime.run = async (...args) => {
-        const node = await originalRun(...args);
-        const context = args[0];
-        const analyser = context.createAnalyser();
-        analyser.fftSize = 4096;
-        analyser.smoothingTimeConstant = 0;
-        node.connect(analyser);
-        window.heightProbe = () => {
-          const wave = new Float32Array(4096);
-          analyser.getFloatTimeDomainData(wave);
-          return { rms: Math.sqrt(wave.reduce((sum, n) => sum + n * n, 0) / wave.length) };
-        };
-        return node;
-      };
-    ` });
-  });
-  const probe = () => page.evaluate(() => (window as typeof window & {
-    heightProbe: () => { rms: number };
-  }).heightProbe());
+  const probe = async () => ({ rms: await pdOutputRms(page) });
   const initial = await data(page);
   const height = page.getByLabel("보드 높이 (m)", { exact: true });
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();

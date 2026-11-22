@@ -11,13 +11,14 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "npm run test:unit && npm run test:browser",
-    "test:unit": "node --experimental-strip-types --test tests/engine.test.ts tests/environment.test.ts tests/effect-rules.test.ts tests/symbols.test.ts tests/derivation.test.ts tests/game-audio.test.ts tests/placed-sounds.test.ts tests/uwb-position.test.ts tests/uwb-bridge.test.ts",
+    "test:unit": "node --experimental-strip-types --test tests/audio-patches.test.ts tests/soundscape.test.ts tests/terrain-sources.test.ts tests/game-soundscape.test.ts tests/engine.test.ts tests/environment.test.ts tests/effect-rules.test.ts tests/symbols.test.ts tests/derivation.test.ts tests/game-audio.test.ts tests/placed-sounds.test.ts tests/uwb-position.test.ts tests/uwb-bridge.test.ts",
     "test:browser": "playwright test",
     "test:storage": "playwright test tests/browser/storage.spec.ts",
     "benchmark:editor": "node tests/performance/editor.mjs",
     "audio:build": "node scripts/build-audio.mjs",
+    "audio:engine": "node scripts/build-audio-engine.mjs",
     "dev:audio": "npm run dev",
-    "test:audio": "npm run audio:build && playwright test tests/browser/audio.spec.ts tests/browser/game-audio.spec.ts",
+    "test:audio": "npm run audio:build && playwright test tests/browser/soundscape-lab.spec.ts && playwright test tests/browser/soundscape-lab.spec.ts --browser=firefox",
     "pretest:browser": "npm run audio:build",
     "prebuild": "npm run audio:build",
     "predev": "npm run audio:build",
@@ -42,7 +43,6 @@
     "serialport": "^13.0.0",
     "typescript": "5.9.3",
     "vite": "8.0.13",
-    "webpd": "1.0.0-alpha.14",
     "ws": "^8.23.0"
   }
 }

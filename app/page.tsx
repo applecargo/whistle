@@ -21,6 +21,7 @@ import { useWorldDocument } from "@/components/whistle/useWorldDocument";
 import { SoundMaker } from "@/components/whistle/SoundMaker";
 import { contentKind, contentLimitMessage, MAX_CONTENT_COUNT, validateContentCounts } from "@/lib/content-limits";
 import { useGameAudio } from "@/components/whistle/useGameAudio";
+import { DebugOverlay } from "@/components/whistle/DebugOverlay";
 import { editSound } from "@/lib/audio/game-parameters";
 import { useWorldPersistence } from "@/components/whistle/useWorldPersistence";
 import { useLiveWorldPublisher } from "@/components/whistle/useLiveWorldPublisher";
@@ -309,7 +310,7 @@ export default function Home() {
             derivation={derivation}
             mode="play"
             onPlayer={(p) => (player.current = p)}
-            onAudioFrame={frame => audio.movement(frame, getWorld(), simulationRef.current.actors, derivation.environment)}
+            onAudioFrame={frame => audio.movement(frame, getWorld(), simulationRef.current.actors, derivation)}
             controls={controls}
             onControlsReset={() => setMovementMode("walk")}
           />
@@ -317,6 +318,7 @@ export default function Home() {
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle className="return-outline" cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="8" /></svg>
           </button>
           <div className="crosshair" />
+          <DebugOverlay audio={audio} getWorld={getWorld} derivation={derivation} />
           <PlayControls
             controls={controls}
             padPressedAt={padPressedAt}
