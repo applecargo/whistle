@@ -2071,11 +2071,10 @@ p {
 .topbar[hidden],
 .workspace[hidden] { display: none; }
 .studio.playing .play-shell { height: 100dvh; }
-.play-return {
+.play-return,
+.meeting-whistle {
   position: absolute;
-  z-index: 3;
   top: max(12px, env(safe-area-inset-top));
-  left: max(12px, env(safe-area-inset-left));
   width: 44px;
   height: 44px;
   padding: 0;
@@ -2084,10 +2083,12 @@ p {
   background: transparent;
   border: 0;
   opacity: 1;
-  color: #fff;
   mix-blend-mode: normal;
 }
-.play-return svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.play-return { z-index: 3; left: max(12px, env(safe-area-inset-left)); color: #fff; }
+.play-return svg,
+.meeting-whistle svg { width: 18px; height: 18px; }
+.play-return svg { fill: none; stroke: currentColor; stroke-width: 1.6; }
 .play-return .return-outline { stroke: #111; stroke-width: 4; }
 .play-return[data-visiting="true"] svg { width: 22px; height: 22px; }
 .play-return .visit-dot { fill: #fff; stroke: #111; stroke-width: 2; paint-order: stroke fill; }

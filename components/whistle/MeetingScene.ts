@@ -39,9 +39,12 @@ export function createMeetingScene(size: number) {
         const geometry = new THREE.BufferGeometry().setFromPoints([[-.95,-.95],[.95,-.95],[.95,.95],[-.95,.95],[-.95,-.95]].map(([x,z])=>new THREE.Vector3(x,.035,z)));
         const line = new THREE.Line(geometry,new THREE.LineDashedMaterial({color:MEETING_LEMON,dashSize:.15,gapSize:.1}));
         line.name="approach-outline";line.computeLineDistances();g.add(line);
+        const base=new THREE.Mesh(new THREE.PlaneGeometry(1.94,1.94),ink);
+        base.rotation.x=-Math.PI/2;base.position.y=.025;base.name="disconnected-base";g.add(base);
       });
       g.position.set(toScene(approach.x),0,toScene(approach.z));
       (g.children[0] as THREE.Line<THREE.BufferGeometry,THREE.LineDashedMaterial>).material.color.set(approach.online===false?"#111111":MEETING_LEMON);
+      g.getObjectByName("disconnected-base")!.visible=approach.online===false&&!!approach.built;
     }
     for (const original of state.connections) for (const [index, cell] of connectionCells(original).entries()) {
       const connection = {...original,...cell,id:`${original.id}-${index}`};

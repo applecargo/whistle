@@ -6,13 +6,14 @@ import { WebSocket } from "ws";
 import { createMeetingRoom, addMeetingMember, publishMeeting, moveMeeting, meetingNeighbors,
   meetingView, meetingWorld, offlineMeetingWorld, meetingVisibleMembers, meetingPresence, meetingOwner, meetingCell, meetingGlobal, meetingLocal,
   connectionCandidates, createMeetingWorld, whistleMeeting, meetingWhistleRecipients, whistleForViewer,
-  disconnectMeetingMember, reconcileMeeting, MEETING_START, MEETING_SIZE,
+  disconnectMeetingMember, leaveMeetingMember, reconcileMeeting, MEETING_START, MEETING_SIZE,
   type MeetingMessage, type MeetingRoom } from "../lib/meeting.ts";
 import { attachMeetingRelay } from "../scripts/meeting/relay.ts";
 import { attachPortalRelay } from "../scripts/portals/relay.ts";
 import { isVoid } from "../lib/tile.ts";
 import { meetingSocketURL } from "../lib/meeting-client.ts";
-const setup=(ids=["a","b"])=>{const room=createMeetingRoom(3);ids.forEach(id=>addMeetingMember(room,id));return room;};
+const join=(room:MeetingRoom,id:string,now?:number)=>{const member=addMeetingMember(room,id,now);if(!member.ready)publishMeeting(room,id,member.document);return member;};
+const setup=(ids=["a","b"])=>{const room=createMeetingRoom(3);ids.forEach(id=>join(room,id));return room;};
 const move=(r:MeetingRoom,id:string,x:number,z:number,grounded=true,playing=true,resetId?:number)=>moveMeeting(r,id,{x,z,yaw:0,grounded},playing,resetId);
 const author=(r:MeetingRoom,id:string,name=`material-${id}`)=>{
   const w=structuredClone(r.members.get(id)!.document);w.assets.push({...w.assets[0],id:name,text:name,solid:false});
@@ -33,12 +34,73 @@ const paint=(r:MeetingRoom,id:string,x:number,z:number,erase=false)=>{
 };
 const disconnected=(r:MeetingRoom)=>{for(const id of r.members.keys())disconnectMeetingMember(r,id);return r;};
 
+test("new neighbors use matching distant rows and only reuse the oldest footing after every row is occupied",()=>{
+  const r=setup(["a"]),seen:{id:string;x:number;z:number}[]=[];
+  for(let i=0;i<5;i++){
+    const peer=`neighbor-${i}`;join(r,peer);
+    const outline=meetingView(r,"a").approaches.find(c=>!c.retired)!;
+    assert.ok(!seen.some(c=>c.x===outline.x&&c.z===outline.z));
+    const local=meetingLocal(0,outline);
+    assert.ok(Math.hypot(local.x-MEETING_START.x,local.z-MEETING_START.z)>=8);
+    assert.equal(meetingView(r,peer).approaches.find(c=>c.members[1]==="a")!.z,outline.z);
+    use(r,"a",author(r,peer));seen.push(outline);leaveMeetingMember(r,peer);
+    const view=meetingView(r,"a");
+    assert.equal(view.connections.length,i+1);
+    assert.ok(view.connections.every(c=>!c.online));
+    assert.ok(seen.every(c=>!isVoid(view.world.terrain!.tiles[meetingCell(c.x,c.z)])));
+  }
+  join(r,"next");
+  const view=meetingView(r,"a"),outline=view.approaches.find(c=>!c.retired)!;
+  assert.deepEqual([outline.x,outline.z],[seen[0].x,seen[0].z]);
+  assert.equal(view.connections.length,4);
+  assert.equal(view.ownWorld.connectionFootings!.length,5);
+  assert.ok(!view.ownWorld.connectionFootings!.some(p=>p.id===seen[0].id));
+  assert.equal(isVoid(view.world.terrain!.tiles[meetingCell(outline.x,outline.z)]),false);
+});
+
+test("saved footing history is loaded before pairing and survives a new relay room without keeping the old world visible",()=>{
+  const r=setup();use(r,"a",author(r,"b"));const gate=open(r,"a","b");
+  const saved=JSON.parse(JSON.stringify(meetingView(r,"a").ownWorld));
+  const restored=createMeetingRoom(91);addMeetingMember(restored,"returning");join(restored,"new-neighbor");
+  assert.equal(meetingView(restored,"new-neighbor").approaches.length,0);
+  publishMeeting(restored,"returning",saved);
+  const view=meetingView(restored,"returning"),outline=view.approaches.find(c=>!c.retired)!;
+  assert.ok(view.connections.some(c=>c.id===gate.id&&!c.online&&c.retired));
+  assert.notDeepEqual([outline.x,outline.z],[gate.x,gate.z]);
+  assert.deepEqual(view.joined,["returning"]);
+  assert.equal(isVoid(view.world.terrain!.tiles[meetingCell(gate.x,gate.z)]),false);
+});
+
+test("stale editor publishes cannot remove built history or restore a reused older footing",()=>{
+  const r=setup();const draft=structuredClone(meetingView(r,"a").ownWorld);
+  use(r,"a",author(r,"b"));const gate=open(r,"a","b");
+  publishMeeting(r,"a",draft);
+  assert.equal(meetingView(r,"a").ownWorld.connectionFootings!.find(p=>p.id===gate.id)!.built,true);
+  leaveMeetingMember(r,"b");
+  const stale=structuredClone(meetingView(r,"a").ownWorld);
+  for(let i=0;i<5;i++){const peer=`reuse-${i}`;join(r,peer);leaveMeetingMember(r,peer);}
+  publishMeeting(r,"a",stale);
+  const footings=meetingView(r,"a").ownWorld.connectionFootings!;
+  assert.equal(footings.length,5);assert.ok(!footings.some(p=>p.id===gate.id));
+});
+
+test("restart uses a fresh document without old footings, symbols or receipts",()=>{
+  const r=setup();use(r,"a",author(r,"b"));open(r,"a","b");leaveMeetingMember(r,"a");
+  join(r,"fresh");
+  const view=meetingView(r,"fresh");
+  assert.equal(view.connections.length,0);
+  assert.equal(view.ownWorld.objects.length,0);
+  assert.deepEqual(view.ownWorld.receivedMaterialIds??[],[]);
+  assert.ok(view.ownWorld.connectionFootings?.every(p=>!p.built));
+  assert.equal(view.ownWorld.terrain!.tiles.filter(t=>!isVoid(t)).length,14);
+});
+
 test("only playing publishes placed originals, and later arrivals receive the last played version",()=>{
   const r=setup(["a"]),w=structuredClone(r.members.get("a")!.document);
   w.assets.push({...w.assets[0],id:"draft",text:"draft"},{...w.assets[0],id:"placed",text:"before play"});
   w.objects.push({id:"placed-symbol",asset:"placed",x:6,z:10,rotation:0,scale:1});
   publishMeeting(r,"a",w);
-  addMeetingMember(r,"b");assert.deepEqual(meetingView(r,"b").materials,[]);
+  join(r,"b");assert.deepEqual(meetingView(r,"b").materials,[]);
   w.assets.at(-1)!.text="played version";
   publishMeeting(r,"a",w,[],true);
   const gift=meetingView(r,"b").materials[0];
@@ -47,7 +109,7 @@ test("only playing publishes placed originals, and later arrivals receive the la
   publishMeeting(r,"a",w);
   assert.equal(meetingView(r,"b").materials[0].text,"played version");
   disconnectMeetingMember(r,"b",0);reconcileMeeting(r,60_000);
-  addMeetingMember(r,"c");assert.equal(meetingView(r,"c").materials[0].text,"played version");
+  join(r,"c");assert.equal(meetingView(r,"c").materials[0].text,"played version");
   publishMeeting(r,"a",w,[],true);
   assert.equal(meetingView(r,"c").materials[0].text,"played version");
 });
@@ -108,20 +170,20 @@ test("fixed detached starts and two distant border slots keep every 2D document 
   v.ownWorld.terrain!.tiles.forEach((tile,i)=>{const p=meetingGlobal(0,{x:i%12,z:Math.floor(i/12)});assert.deepEqual(v.world.terrain!.tiles[meetingCell(p.x,p.z)],tile);});
   for(const region of [1,2]){
     const p=connectionCandidates(0,region)[0],local=meetingLocal(0,p);
-    assert.ok(Math.hypot(local.x-MEETING_START.x,local.z-MEETING_START.z)>10);assert.equal(meetingOwner(p.x,p.z),-1);
+    assert.ok(Math.hypot(local.x-MEETING_START.x,local.z-MEETING_START.z)>=8);assert.equal(meetingOwner(p.x,p.z),-1);
   }
   const changed=structuredClone(v.ownWorld);changed.start={x:11,z:1};changed.terrain!.tiles[23]={height:0,surface:"plain"};
   assert.throws(()=>publishMeeting(r,"a",changed),/고정/);
-  addMeetingMember(r,"a");assert.deepEqual(meetingView(r,"a").ownWorld,v.ownWorld);
+  join(r,"a");assert.deepEqual(meetingView(r,"a").ownWorld,v.ownWorld);
   publishMeeting(r,"a",createMeetingWorld(29));assert.equal(meetingView(r,"a").world.terrain!.tiles.filter(t=>!isVoid(t)).length,14);
 });
 
 test("arrivals form a stable chain, including odd attendance and a fourth person without splitting an existing pair",()=>{
   const r=setup();const ab=meetingView(r,"a").approaches[0];
-  addMeetingMember(r,"c");assert.deepEqual(meetingNeighbors(r,"a"),["b"]);assert.deepEqual(meetingNeighbors(r,"b"),["a","c"]);
-  addMeetingMember(r,"d");assert.deepEqual(r.chain,["a","b","c","d"]);assert.deepEqual(meetingNeighbors(r,"c"),["b","d"]);
+  join(r,"c");assert.deepEqual(meetingNeighbors(r,"a"),["b"]);assert.deepEqual(meetingNeighbors(r,"b"),["a","c"]);
+  join(r,"d");assert.deepEqual(r.chain,["a","b","c","d"]);assert.deepEqual(meetingNeighbors(r,"c"),["b","d"]);
   assert.equal(meetingView(r,"a").approaches[0].id,ab.id);
-  for(let i=0;i<17;i++)addMeetingMember(r,`extra-${i}`);
+  for(let i=0;i<17;i++)join(r,`extra-${i}`);
   for(const id of r.chain){const v=meetingView(r,id);assert.ok(v.recipients.length>=1&&v.recipients.length<=2);assert.ok(v.approaches.length<=2);assert.equal(v.world.size,MEETING_SIZE);assert.deepEqual(v.joined,[id]);}
   assert.equal(meetingPresence(r,"a").onlineCount,21);assert.equal(meetingPresence(r,"a").peers.length,2);
 });
@@ -131,7 +193,7 @@ test("only neighbors receive original materials; edited copies stay local and pr
   assert.equal(meetingView(r,"b").materials[0].id,gift);assert.equal(meetingView(r,"c").materials.length,0);
   use(r,"b",gift);assert.equal(meetingView(r,"c").materials.length,0);assert.equal(meetingView(r,"a").materials.length,0);
   const own=structuredClone(r.members.get("a")!.document);own.assets=own.assets.filter(a=>a.id!=="material-a");own.objects=own.objects.filter(o=>o.asset!=="material-a");publishMeeting(r,"a",own);
-  const saved=disconnected(r);addMeetingMember(saved,"a");addMeetingMember(saved,"b");
+  const saved=disconnected(r);join(saved,"a");join(saved,"b");
   assert.equal(meetingView(saved,"b").connections[0].members[1],"a");
   const b=structuredClone(saved.members.get("b")!.document);b.objects=[];b.assets=b.assets.filter(a=>a.id!==gift);publishMeeting(saved,"b",b,[gift]);
   assert.ok(meetingView(saved,"b").received.includes(gift));assert.equal(meetingView(saved,"b").connections.length,1);
@@ -143,7 +205,7 @@ test("a neighbor starts as a nonphysical outline; only placing that neighbor's m
   paint(r,"a",11,1);assert.equal(r.connections.length,0);
   const w=structuredClone(r.members.get("a")!.document);w.assets.push({...r.members.get("a")!.materials.get(gift)!,text:"edited"});publishMeeting(r,"a",w,[gift]);
   assert.equal(r.connections.length,0);use(r,"a",gift);
-  const gate=meetingView(r,"a").connections[0];assert.equal(gate.id,outline.id);assert.deepEqual([gate.x,gate.z],[25,1]);
+  const gate=meetingView(r,"a").connections[0];assert.equal(gate.id,outline.id);assert.equal(gate.x,25);assert.equal(gate.z,outline.z);
   assert.equal(meetingView(r,"a").approaches.length,0);assert.equal(meetingView(r,"b").connections.length,0);assert.equal(meetingView(r,"b").approaches.length,2);
   use(r,"a",gift);assert.equal(meetingView(r,"a").connections.length,1);
 });
@@ -153,20 +215,20 @@ test("one grounded visitor reveals only their view, with no simultaneous standin
   assert.equal(move(r,"a",gate.x,gate.z,false),false);assert.equal(move(r,"a",gate.x,gate.z,true,false),false);
   assert.deepEqual(meetingView(r,"a").joined,["a"]);assert.equal(r.members.get("b")!.playing,false);
   assert.equal(move(r,"a",gate.x,gate.z),true);assert.deepEqual(meetingView(r,"a").joined,["a","b"]);assert.deepEqual(meetingView(r,"b").joined,["b"]);
-  assert.equal(isVoid(meetingWorld(r,"a").terrain!.tiles[meetingCell(26,1)]),true);
-  paint(r,"b",0,1);assert.equal(isVoid(meetingWorld(r,"a").terrain!.tiles[meetingCell(26,1)]),false);
-  move(r,"a",26,1);assert.equal(r.members.get("a")!.player.x,26);
+  assert.equal(isVoid(meetingWorld(r,"a").terrain!.tiles[meetingCell(26,gate.z)]),true);
+  paint(r,"b",0,gate.z);assert.equal(isVoid(meetingWorld(r,"a").terrain!.tiles[meetingCell(26,gate.z)]),false);
+  move(r,"a",26,gate.z);assert.equal(r.members.get("a")!.player.x,26);
   const before={...r.members.get("b")!.player};move(r,"b",6,10,false);assert.deepEqual(r.members.get("b")!.player,before);
   use(r,"b",author(r,"c"));open(r,"b","c");assert.deepEqual(meetingView(r,"a").joined,["a","b"]);
   assert.ok(meetingView(r,"a").world.assets.every(a=>!a.id.startsWith("c:")));
-  use(r,"b",author(r,"a"));const reverse=open(r,"b","a");assert.deepEqual([reverse.x,reverse.z],[12,1]);
-  const saved=disconnected(r);r.chain.forEach(id=>addMeetingMember(saved,id));assert.deepEqual(saved.links,r.links);
+  use(r,"b",author(r,"a"));const reverse=open(r,"b","a");assert.equal(reverse.x,12);assert.equal(reverse.z,gate.z);
+  const saved=disconnected(r);r.chain.forEach(id=>join(saved,id));assert.deepEqual(saved.links,r.links);
 });
 
 test("editing elsewhere leaves a visitor alone; removing their support returns them to the lemon footing and keeps the world visible",()=>{
-  const r=setup();use(r,"a",author(r,"b"));const gate=open(r,"a","b");paint(r,"b",0,1);move(r,"a",26,1);
+  const r=setup();use(r,"a",author(r,"b"));const gate=open(r,"a","b");paint(r,"b",0,gate.z);move(r,"a",26,gate.z);
   const reset=r.members.get("a")!.reset.id;paint(r,"b",3,3);assert.equal(r.members.get("a")!.reset.id,reset);
-  paint(r,"b",0,1,true);const v=meetingView(r,"a");
+  paint(r,"b",0,gate.z,true);const v=meetingView(r,"a");
   assert.deepEqual([v.reset.player.x,v.reset.player.z],[gate.x,gate.z]);assert.equal(v.reset.reason,"floor");assert.equal(v.reset.id,reset+1);
   assert.equal(v.connections[0].online,true);assert.equal(v.connections[0].opened,true);assert.deepEqual(v.joined,["a","b"]);
   move(r,"a",32,10,true,true,reset);assert.equal(r.members.get("a")!.player.x,gate.x);
@@ -179,28 +241,28 @@ test("disconnect returns a visitor to the black footing and hides the world; a q
   assert.deepEqual([v.reset.player.x,v.reset.player.z],[gate.x,gate.z]);assert.equal(v.connections[0].online,false);assert.deepEqual(v.joined,["a"]);
   assert.equal(isVoid(v.world.terrain!.tiles[meetingCell(32,10)]),true);assert.equal(isVoid(v.world.terrain!.tiles[meetingCell(gate.x,gate.z)]),false);
   reconcileMeeting(r,now+59_999);assert.deepEqual(r.chain,["a","b"]);
-  addMeetingMember(r,"b",now+59_999);assert.equal(meetingView(r,"a").connections[0].id,gate.id);assert.deepEqual(meetingView(r,"a").joined,["a","b"]);
+  join(r,"b",now+59_999);assert.equal(meetingView(r,"a").connections[0].id,gate.id);assert.deepEqual(meetingView(r,"a").joined,["a","b"]);
 });
 
-test("departures splice the chain after grace; reused slots start as outlines and old materials cannot open the new neighbor",()=>{
+test("departures keep black footings and assign different outlines without old materials opening the new neighbor",()=>{
   const r=setup(["a","b","c","d"]),oldGift=author(r,"b");use(r,"a",oldGift);const gate=open(r,"a","b");move(r,"a",32,10);
   const cd=meetingView(r,"c").approaches.find(c=>c.members[1]==="d")!;
   const now=Date.now();disconnectMeetingMember(r,"b",now);reconcileMeeting(r,now+60_000);
   assert.deepEqual(r.chain,["a","c","d"]);assert.deepEqual(meetingNeighbors(r,"c"),["a","d"]);
-  const v=meetingView(r,"a"),replacement=v.approaches[0];assert.equal(v.connections.length,0);assert.deepEqual(v.joined,["a"]);
-  assert.deepEqual([replacement.x,replacement.z],[gate.x,gate.z]);assert.equal(replacement.online,true);assert.notEqual(replacement.id,gate.id);
+  const v=meetingView(r,"a"),replacement=v.approaches.find(c=>!c.retired)!;assert.equal(v.connections.length,1);assert.deepEqual(v.joined,["a"]);
+  assert.notDeepEqual([replacement.x,replacement.z],[gate.x,gate.z]);assert.equal(replacement.online,true);assert.notEqual(replacement.id,gate.id);
   assert.ok(v.ownWorld.assets.some(a=>a.id===oldGift));assert.equal(meetingView(r,"c").approaches.find(c=>c.members[1]==="d")!.id,cd.id);
   assert.equal(isVoid(v.world.terrain!.tiles[meetingCell(gate.x,gate.z)]),false); // the occupied base does not vanish
   move(r,"a",gate.x,gate.z);assert.deepEqual(meetingView(r,"a").joined,["a"]);
   use(r,"a",author(r,"c"));open(r,"a","c");assert.deepEqual(meetingView(r,"a").joined,["a","c"]);
-  addMeetingMember(r,"b",now+60_001);assert.deepEqual(r.chain,["a","c","d","b"]);assert.deepEqual(meetingNeighbors(r,"a"),["c"]);
+  join(r,"b",now+60_001);assert.deepEqual(r.chain,["a","c","d","b"]);assert.deepEqual(meetingNeighbors(r,"a"),["c"]);
 });
 
-test("an empty end keeps its black slot and the next arrival reuses exactly that slot",()=>{
+test("an empty end keeps its black footing and the next arrival uses another distant slot",()=>{
   const r=setup();use(r,"a",author(r,"b"));const gate=open(r,"a","b"),now=Date.now();disconnectMeetingMember(r,"b",now);reconcileMeeting(r,now+60_000);
-  assert.equal(meetingView(r,"a").connections[0].online,false);addMeetingMember(r,"c",now+60_001);
-  const v=meetingView(r,"a");assert.equal(v.connections.length,0);assert.equal(v.approaches.length,1);
-  assert.deepEqual([v.approaches[0].x,v.approaches[0].z],[gate.x,gate.z]);assert.equal(v.approaches[0].online,true);
+  assert.equal(meetingView(r,"a").connections[0].online,false);join(r,"c",now+60_001);
+  const v=meetingView(r,"a");assert.equal(v.connections.length,1);assert.equal(v.approaches.length,1);
+  assert.notDeepEqual([v.approaches[0].x,v.approaches[0].z],[gate.x,gate.z]);assert.equal(v.approaches[0].online,true);
 });
 
 test("spatial whistles translate the same physical world into each listener's coordinates",()=>{
@@ -233,14 +295,14 @@ test("relay isolates rooms, handles arrivals during disconnects, and coexists wi
     const ws=new WebSocket(`ws://127.0.0.1:${port}/whistle/meeting?room=${room}&id=${id}&token=${id}-private-resume-token`);clients.push(ws);
     const messages:MeetingMessage[]=[];ws.on("message",data=>messages.push(JSON.parse(data.toString())));
     const wait=async(predicate:(m:MeetingMessage)=>boolean)=>{for(let i=0;i<400;i++){const n=messages.findIndex(predicate);if(n>=0)return messages.splice(n,1)[0];await new Promise(r=>setTimeout(r,5));}throw Error("Missing meeting message");};
-    await once(ws,"open");const initial=await wait(m=>m.type==="state");assert.equal(initial.type,"state");return {ws,wait,initial};
+    await once(ws,"open");ws.send(JSON.stringify({type:"publish",world:createMeetingWorld()}));const initial=await wait(m=>m.type==="state");assert.equal(initial.type,"state");return {ws,wait,initial};
   }
   const a=await connect("same","aaaaaaaa"),b=await connect("same","bbbbbbbb"),c=await connect("same","cccccccc"),d=await connect("same","dddddddd"),other=await connect("other","zzzzzzzz");
   assert.equal(other.initial.presence.onlineCount,1);assert.deepEqual(d.initial.view.recipients,["cccccccc"]);
   b.ws.close();await once(b.ws,"close");
   await connect("same","eeeeeeee");
   const reassigned=await a.wait(m=>m.type==="state"&&m.view.recipients.includes("cccccccc"));assert.equal(reassigned.type,"state");
-  assert.equal(reassigned.view.approaches[0].online,true);assert.equal(reassigned.presence.onlineCount,4);
+  assert.equal(reassigned.view.approaches.find(c=>!c.retired)!.online,true);assert.equal(reassigned.presence.onlineCount,4);
   const next=await connect("same","bbbbbbbb");assert.deepEqual(next.initial.view.recipients,["eeeeeeee"]);
 });
 
@@ -253,23 +315,23 @@ test("the visitor's own socket disconnect also returns them to their black footi
   assert.ok(offline.assets.every(a=>a.id.startsWith("a:")));
   disconnectMeetingMember(r,"a");const v=meetingView(r,"a");
   assert.deepEqual([v.reset.player.x,v.reset.player.z],[gate.x,gate.z]);assert.equal(v.connections[0].online,false);
-  assert.ok(v.reset.player.pitch!<0);addMeetingMember(r,"a");assert.equal(meetingView(r,"a").connections[0].online,true);
+  assert.ok(v.reset.player.pitch!<0);join(r,"a");assert.equal(meetingView(r,"a").connections[0].online,true);
 });
 
 test("resuming a visit before its host reconnects places the visitor on their own footing",()=>{
   const r=setup();use(r,"a",author(r,"b"));const gate=open(r,"a","b");move(r,"a",32,10);
-  const saved=disconnected(r);addMeetingMember(saved,"a");const v=meetingView(saved,"a");
+  const saved=disconnected(r);join(saved,"a");const v=meetingView(saved,"a");
   assert.deepEqual([saved.members.get("a")!.player.x,saved.members.get("a")!.player.z],[gate.x,gate.z]);
   assert.equal(v.reset.reason,"disconnect");assert.deepEqual(v.joined,["a"]);
 });
 
 test("a new arrival preserves a disconnected neighbor during the reconnect grace",()=>{
   const r=setup();use(r,"a",author(r,"b"));const gate=open(r,"a","b"),now=Date.now();
-  disconnectMeetingMember(r,"b",now);addMeetingMember(r,"c",now+1);
+  disconnectMeetingMember(r,"b",now);join(r,"c",now+1);
   assert.deepEqual(r.chain,["a","b","c"]);
   const v=meetingView(r,"a");assert.equal(v.connections[0].id,gate.id);
   assert.equal(v.connections[0].online,false);
-  addMeetingMember(r,"b",now+2);
+  join(r,"b",now+2);
   assert.deepEqual(meetingView(r,"a").recipients,["b"]);
   assert.equal(meetingView(r,"a").connections[0].id,gate.id);
 });

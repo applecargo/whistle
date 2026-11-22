@@ -28,7 +28,7 @@ import { EditorBoard } from "@/components/whistle/EditorBoard";
 import { PlayControls } from "@/components/whistle/PlayControls";
 import type { MeetingSession } from "@/components/whistle/ConnectedWorld";
 import { MeetingOverlay, meetingVisuals } from "@/components/whistle/MeetingTools";
-import { createMeetingWorld, fixMeetingStart, withLocalMeetingWorld, meetingGlobal, meetingLocal, meetingOwner, connectionCandidates, meetingReturnPosition, authoredMaterialCount, MEETING_MATERIAL_LIMIT, MEETING_MATERIAL_MESSAGE } from "@/lib/meeting";
+import { createMeetingWorld, fixMeetingStart, withLocalMeetingWorld, withLocalMeetingFootings, meetingGlobal, meetingLocal, meetingOwner, meetingReturnPosition, authoredMaterialCount, MEETING_MATERIAL_LIMIT, MEETING_MATERIAL_MESSAGE } from "@/lib/meeting";
 import { useMeetingWhistle } from "@/components/whistle/useMeetingWhistle";
 import { portalWorld } from "@/lib/portal-protocol";
 import {
@@ -96,7 +96,7 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
     toastTimer.current = setTimeout(() => setToast(""), 4200);
   }, []);
   const audio = useGameAudio();
-  const whistle = useMeetingWhistle(meeting, playing, player, notify);
+  const whistle = useMeetingWhistle(meeting, playing, player);
   const meetingReset = useRef(meeting.view.reset.id);
   useLayoutEffect(() => {
     const reset=meeting.view.reset;
@@ -105,7 +105,7 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
       controls.current.clear();setMovementMode("walk");setPlayKey(k=>k+1);
     }else if(meeting.status!=="online"){
       const owner=meetingOwner(Math.round(player.current.x),Math.round(player.current.z));
-      const gate=connectionCandidates(0,owner)[0];
+      const gate=meeting.view.connections.find(c=>!c.retired&&c.x===(owner===1?12:owner===2?25:-1));
       if(gate){const next=meetingReturnPosition(gate,player.current.yaw,"disconnect");player.current=next;setSpawn(next);controls.current.clear();setPlayKey(k=>k+1);}
     }
   },[meeting.view.reset,meeting.status]);
@@ -120,12 +120,13 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
   const {
     world, getWorld, deriveWorld, feedback, canUndo, canRedo,
     commit: updateWorld, edit: change, load: loadDocument,
-    undo: undoDocument, redo: redoDocument, paint: paintDocument, endStroke, receiveAssets,
+    undo: undoDocument, redo: redoDocument, paint: paintDocument, endStroke, receiveAssets, syncConnectionFootings,
   } = useWorldDocument(initialWorld, resetSimulation);
   const sharedIds = useMemo(() => new Set([
     ...(meeting.view.materials.map(a => a.id) ?? []),...world.assets.filter(a=>a.received).map(a=>a.id),
   ]), [meeting.view.materials,world.assets]);
   const ownActors = simulation.actors;
+  const visibleMeeting=useMemo(()=>({...meeting,view:withLocalMeetingFootings(meeting.view,world)}),[meeting,world]);
   const derivation = useMemo(
     () => deriveWorld(world, ownActors),
     [deriveWorld, world, ownActors],
@@ -196,6 +197,10 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
     storage:browserStorage,fallbackWorld:initialWorld,
   });
   useLiveWorldPublisher(world,ready);
+  useEffect(()=>{
+    if(ready&&meeting.status==="online"&&meeting.view.documentReady)
+      syncConnectionFootings(meeting.view.ownWorld.connectionFootings);
+  },[ready,meeting.status,meeting.view.documentReady,meeting.view.ownWorld.connectionFootings,syncConnectionFootings]);
   useEffect(() => {
     if(!ready)return;
     const incoming = meeting.view.materials.filter(a => !receivedMaterials.current.has(a.id)) ?? [];
@@ -225,7 +230,7 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
     meeting.send({type:"publish",world:portalWorld(sharedWorld.current),share:true,received:[...receivedMaterials.current]});
     const p=player.current;
     const next=floorHeight(activeWorld,p.x,p.z,deriveWorld(activeWorld).structures)!==null?{...p,falling:false}:{...activeWorld.start,yaw:0};
-    setSpawn(next);player.current=next;audio.play();whistle.start();setPlaying(true);setPlayKey(k=>k+1);
+    setSpawn(next);player.current=next;audio.play();setPlaying(true);setPlayKey(k=>k+1);
     controls.current.clear();setMovementMode("walk");
     meeting.position({...next,grounded:true},true);
   };
@@ -349,18 +354,15 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
             controls={controls}
             onControlsReset={() => setMovementMode("walk")}
             initialPlayer={spawn}
-            meeting={meetingVisuals(meeting)}
+            meeting={meetingVisuals(visibleMeeting)}
           />
           <button className="play-return" aria-label={t("만들기로 돌아가기")} onClick={exit}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle className="return-outline" cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="8" /></svg>
           </button>
-          {<button className="meeting-whistle" aria-label="휘슬" disabled={!whistle.enabled}
+          <button className="meeting-whistle" aria-label="휘슬" disabled={!whistle.enabled}
             onKeyDown={event => { if (event.repeat) event.preventDefault(); }} onClick={whistle.blow}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-              <path d="M4 11h8l7-4v6l-7 2a4 4 0 1 1-8-4Z" /><circle cx="8" cy="15" r="1.5" />
-              <path d="m18 3 1-2M22 6l2-1" />
-            </svg>
-          </button>}
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /></svg>
+          </button>
           <div className="crosshair" />
           <PlayControls
             controls={controls}
@@ -407,7 +409,7 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
             onEnd={endStroke}
             onUndo={undo}
             onRedo={redo}
-            overlay={<MeetingOverlay meeting={meeting} />}
+            overlay={<MeetingOverlay meeting={visibleMeeting} />}
           />
           <aside className="preview-panel" aria-label={t("배치 결과")}>
             <div className="live-preview">
@@ -417,7 +419,7 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
                 derivation={derivation}
                 mode="overview"
                 feedback={feedback}
-                    meeting={meetingVisuals(meeting,true)}
+                    meeting={meetingVisuals(visibleMeeting,true)}
               />}
               <button onClick={enter} aria-label={t("들어가기")}>
                 <span aria-hidden="true">↗</span>

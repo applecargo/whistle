@@ -1,7 +1,7 @@
-import { validateWorld, type Asset, type Player, type World } from "./world.ts";
+import { validateWorld, type Asset, type ConnectionFooting, type Player, type World } from "./world.ts";
 import { contentKind, MAX_LIBRARY_SIZE } from "./content-limits.ts";
 import { createTerrainWorld } from "./create-world.ts";
-import { flatTerrain, floorHeight, deriveStructures, type Structure, type Tile } from "./terrain.ts";
+import { flatTerrain, floorHeight, deriveStructures, randomSequence, type Structure, type Tile } from "./terrain.ts";
 import { isGap } from "./tile.ts";
 
 export const LOCAL_SIZE = 12;
@@ -20,7 +20,7 @@ export const MEETING_REGIONS = [
 ] as const;
 export type MeetingPosition = Player & { grounded: boolean };
 export type MeetingSignal = { id: string; from: string; to: string; x: number; z: number; collected: boolean };
-export type ConnectionTile = { id: string; members: [string, string]; x: number; z: number; cells?: {x:number;z:number}[]; opened?: boolean; online?: boolean };
+export type ConnectionTile = { id: string; members: [string, string]; x: number; z: number; cells?: {x:number;z:number}[]; opened?: boolean; online?: boolean; retired?: boolean; built?: boolean };
 export type MeetingPeer = { id: string; slot: number; online: boolean; playing: boolean; player?: MeetingPosition };
 export type MeetingPresence = { peers: MeetingPeer[]; canWhistle: boolean; onlineCount?: number };
 type MeetingReset = { id:number; player:MeetingPosition; reason?:"disconnect"|"floor" };
@@ -30,6 +30,7 @@ export type MeetingView = {
   ownWorld: World; recipients: string[];
   materials: Asset[]; received: string[]; pendingMaterials: number;
   reset: MeetingReset;
+  documentReady: boolean;
 };
 export type MeetingWhistle = { id: string; from: string; x: number; z: number };
 export type MeetingMessage =
@@ -37,10 +38,11 @@ export type MeetingMessage =
   | { type: "presence"; presence: MeetingPresence }
   | { type: "whistle"; whistle: MeetingWhistle }
   | { type: "error"; message: string };
-type NeighborSlot = { peer: string; key: string; active: boolean; used: boolean; built?: boolean };
+type NeighborSlot = { peer: string; key: string; row: number; active: boolean; used: boolean };
 type Member = MeetingPeer & {
   player: MeetingPosition; document: World; revision: number; leftAt?: number;
   reset: MeetingReset;
+  ready: boolean;
   ports: [NeighborSlot | null, NeighborSlot | null];
   materials: Map<string, Asset>; received: Set<string>; shared: Map<string, string>; published: Asset[];
   lastWhistle: number; resumeKey?: string;
@@ -72,10 +74,25 @@ export function meetingOwner(x:number,z:number) {
 export function connectionCandidates(a:number,b:number) {
   if (a!==0 && b!==0) return [];
   const other=a===0?b:a;
-  return other===1?[{x:12,z:1}]:other===2?[{x:25,z:1}]:[];
+  return other===1||other===2?Array.from({length:5},(_,z)=>({x:other===1?12:25,z})):[];
 }
 export function connectionCells(connection:ConnectionTile) { return connection.cells ?? [connection]; }
-const portPoint = (index:number) => connectionCandidates(0,index+1)[0];
+const portPoint = (index:number,row:number) => ({x:index===0?12:25,z:row});
+const footingPoint = (footing:ConnectionFooting) => portPoint(footing.side,footing.row);
+function mergeFootings(incoming:ConnectionFooting[]=[],current:ConnectionFooting[]=[]) {
+  const occupied=new Set(current.map(p=>`${p.side}:${p.row}`));
+  return [...incoming.filter(p=>!occupied.has(`${p.side}:${p.row}`)&&!current.some(c=>c.id===p.id)),
+    ...current.map(p=>({...p,built:p.built||incoming.some(c=>c.id===p.id&&c.built)}))];
+}
+function assignPort(room:MeetingRoom,member:Member,peer:Member,side:0|1,row:number) {
+  const key=`connection-${room.seed.toString(36)}-${++room.sequence}`;
+  const previous=member.document.connectionFootings??[];
+  const created=Math.max(Date.now(),...previous.map(p=>p.created+1));
+  member.document={...member.document,connectionFootings:[...previous.filter(p=>p.side!==side||p.row!==row),
+    {id:key,side,row,built:previous.some(p=>p.side===side&&p.row===row&&p.built),created}]};
+  member.ports[side]={peer:peer.id,key,row,active:true,used:false};
+  member.revision++;
+}
 export function meetingNeighbors(room:MeetingRoom,id:string) {
   const i=room.chain.indexOf(id); return i<0?[]:[room.chain[i-1],room.chain[i+1]].filter((id):id is string=>!!id);
 }
@@ -84,7 +101,7 @@ export function createMeetingRoom(seed=Math.floor(Math.random()*0xffffffff)):Mee
 }
 function syncConnections(room:MeetingRoom) {
   room.connections=[...room.members.values()].flatMap(m=>m.ports.flatMap((p,i)=>p?.used?
-    [{id:p.key,members:[m.id,p.peer] as [string,string],...portPoint(i)}]:[]));
+    [{id:p.key,members:[m.id,p.peer] as [string,string],...portPoint(i,p.row)}]:[]));
 }
 function syncNeighborSlots(room:MeetingRoom) {
   let changed=false;
@@ -97,10 +114,22 @@ function syncNeighborSlots(room:MeetingRoom) {
       if (!peer && !port) return;
       if (!peer && port && !port.active && !room.links.some(([a,b])=>a===member.id&&b===port.peer)) return;
       if (port) room.links=room.links.filter(([a,b])=>a!==member.id||b!==port.peer);
-      if (peer) member.ports[i]={peer,key:`connection-${++room.sequence}`,active:true,used:false,built:!!(port?.built||port?.used)};
-      else if (port) port.active=false;
-      changed=true;
+      if(port?.active){port.active=false;changed=true;}
     });
+  }
+  for(let index=1;index<room.chain.length;index++){
+    const a=room.members.get(room.chain[index-1])!,b=room.members.get(room.chain[index])!;
+    if(!a.ready||!b.ready)continue;
+    if(a.ports[1]?.active&&a.ports[1].peer===b.id&&b.ports[0]?.active&&b.ports[0].peer===a.id)continue;
+    const candidates=connectionCandidates(0,2).map(p=>p.z);
+    const history=(member:Member,side:number,row:number)=>member.document.connectionFootings?.find(p=>p.side===side&&p.row===row);
+    const free=candidates.filter(row=>!history(a,1,row)&&!history(b,0,row));
+    const rows=free.length?free:candidates.filter(row=>{
+      const age=(z:number)=>Math.max(history(a,1,z)?.created??0,history(b,0,z)?.created??0);
+      return age(row)===Math.min(...candidates.map(age));
+    });
+    const row=rows[Math.floor(randomSequence((room.seed+room.sequence)>>>0)()*rows.length)];
+    assignPort(room,a,b,1,row);assignPort(room,b,a,0,row);changed=true;
   }
   if(changed){syncConnections(room);room.revision++;}
   return changed;
@@ -126,7 +155,7 @@ export function disconnectMeetingMember(room:MeetingRoom,id:string,now=Date.now(
     const occupied=layout(room,visitor.id).find(r=>r.slot===meetingOwner(Math.round(visitor.player.x),Math.round(visitor.player.z)));
     if(occupied && (occupied.id===id&&visitor.id!==id || visitor.id===id&&occupied.id!==id)) {
       const port=visitor.ports.findIndex(p=>!!p&&p.peer===occupied?.id&&p.used);
-      relocateMeeting(room,visitor,port<0?meetingGlobal(0,MEETING_START):portPoint(port),"disconnect");
+      relocateMeeting(room,visitor,port<0?meetingGlobal(0,MEETING_START):portPoint(port,visitor.ports[port]!.row),"disconnect");
     }
   }
   m.online=false;m.playing=false;m.leftAt=now;room.revision++;
@@ -152,7 +181,7 @@ export function addMeetingMember(room:MeetingRoom,id:string,now=Date.now()) {
   let member=room.members.get(id);
   if(!member){
     const document=createMeetingWorld((room.seed+Math.imul(room.members.size,0x9e3779b9))>>>0);
-    member={id,slot:0,online:true,playing:false,document,revision:0,ports:[null,null],
+    member={id,slot:0,online:true,playing:false,document,revision:0,ready:false,ports:[null,null],
       reset:{id:0,player:{...meetingGlobal(0,MEETING_START),yaw:0,grounded:true}},
       player:{...meetingGlobal(0,MEETING_START),yaw:0,grounded:true},materials:new Map(),received:new Set(),shared:new Map(),published:[],lastWhistle:-Infinity};
     room.members.set(id,member);
@@ -162,7 +191,7 @@ export function addMeetingMember(room:MeetingRoom,id:string,now=Date.now()) {
   room.revision++;syncNeighborSlots(room);shareMeetingMaterials(room);discoverMeetingConnections(room);
   const occupied=meetingOwner(Math.round(member.player.x),Math.round(member.player.z));
   if(occupied>0&&!layout(room,id).some(r=>r.slot===occupied))
-    relocateMeeting(room,member,portPoint(occupied-1),"disconnect");
+    relocateMeeting(room,member,member.ports[occupied-1]?portPoint(occupied-1,member.ports[occupied-1]!.row):meetingGlobal(0,MEETING_START),"disconnect");
   return member;
 }
 export function meetingVisibleMembers(room:MeetingRoom,id:string) {
@@ -192,7 +221,7 @@ export function meetingWorld(room:MeetingRoom,id:string):World {
       ...(o.site?{site:{...o.site,cells:o.site.cells.map(i=>{const p=meetingGlobal(region.slot,{x:i%LOCAL_SIZE,z:Math.floor(i/LOCAL_SIZE)});return meetingCell(p.x,p.z);})}}:{})})));
     rules.push(...peer.document.rules.map(r=>({...r,id:prefix(r.id),subject:r.subject==="*"?"*":prefix(r.subject),source:r.source==="*"?"*":prefix(r.source),replacement:prefix(r.replacement)})));
   }
-  member.ports.forEach((p,i)=>{if(p?.used||p?.built){const cell=portPoint(i);terrain.tiles[meetingCell(cell.x,cell.z)]={height:0,surface:"plain"};}});
+  for(const p of member.document.connectionFootings??[])if(p.built){const cell=footingPoint(p);terrain.tiles[meetingCell(cell.x,cell.z)]={height:0,surface:"plain"};}
   const world={...member.document,size:MEETING_SIZE,assets,objects,rules,start:meetingGlobal(0,MEETING_START),terrain};
   cache.set(id,{key,world});return world;
 }
@@ -204,8 +233,18 @@ export function offlineMeetingWorld(view:MeetingView):World {
 }
 export function localMeetingView(id:string,document=createMeetingWorld()):MeetingView {
   const room=createMeetingRoom(document.terrain?.seed);
-  addMeetingMember(room,id).document=document;
+  const member=addMeetingMember(room,id);member.document=document;member.ready=true;
   return meetingView(room,id);
+}
+export function withLocalMeetingFootings(view:MeetingView,document:World):MeetingView {
+  const connections=[...view.connections],approaches=[...view.approaches];
+  const visible=[...connections,...approaches];
+  for(const p of document.connectionFootings??[]){
+    const point=footingPoint(p);
+    if(visible.some(c=>c.id===p.id||c.x===point.x&&c.z===point.z))continue;
+    (p.built?connections:approaches).push({id:p.id,members:[view.id,""],...point,online:false,retired:true,built:p.built});
+  }
+  return {...view,connections,approaches};
 }
 export function withLocalMeetingWorld(view:MeetingView,document:World,online:boolean):World {
   const world=online?view.world:offlineMeetingWorld(view),prefix=(id:string)=>`${view.id}:${id}`;
@@ -215,6 +254,9 @@ export function withLocalMeetingWorld(view:MeetingView,document:World,online:boo
     const p=meetingGlobal(0,{x:i%LOCAL_SIZE,z:Math.floor(i/LOCAL_SIZE)});
     tiles[meetingCell(p.x,p.z)]=tile;
   });
+  for(const p of document.connectionFootings??[])if(p.built){
+    const point=footingPoint(p);tiles[meetingCell(point.x,point.z)]={height:0,surface:"plain"};
+  }
   return {...world,title:document.title,description:document.description,sky:document.sky,weather:document.weather,timeOfDay:document.timeOfDay,
     terrain:{...world.terrain!,tiles},
     assets:[...world.assets.filter(other),...document.assets.map(a=>({...a,id:prefix(a.id)}))],
@@ -243,7 +285,11 @@ export function discoverMeetingConnections(room:MeetingRoom) {
     if(!port?.active||port.used)continue;
     const source=room.members.get(port.peer)!;
     const originals=new Set(source.shared.values());
-    if(member.document.objects.some(o=>member.materials.has(o.asset)&&originals.has(o.asset))){port.used=true;port.built=true;changed=true;}
+    if(member.document.objects.some(o=>member.materials.has(o.asset)&&originals.has(o.asset))){
+      port.used=true;changed=true;
+      member.document={...member.document,connectionFootings:member.document.connectionFootings?.map(p=>p.id===port.key?{...p,built:true}:p)};
+      member.revision++;
+    }
   }
   if(changed){syncConnections(room);room.revision++;}
 }
@@ -252,6 +298,8 @@ export function publishMeeting(room:MeetingRoom,id:string,input:unknown,received
   if(world.size!==LOCAL_SIZE)throw Error("연결된 세계에서는 12×12 맵을 사용합니다.");
   if(world.start.x!==MEETING_START.x||world.start.z!==MEETING_START.z)throw Error("연결된 세계의 출발점은 고정되어 있습니다.");
   const member=room.members.get(id)!;
+  const footings=mergeFootings(world.connectionFootings,member.document.connectionFootings);
+  if(footings.length)world.connectionFootings=footings;
   if(authoredMaterialCount(world,new Set(member.materials.keys()))>MEETING_MATERIAL_LIMIT)throw Error(MEETING_MATERIAL_MESSAGE);
   if(JSON.stringify(world).length>32*1024*1024)throw Error("공유할 재료의 전체 용량이 너무 큽니다.");
   let acknowledged=false;
@@ -263,8 +311,9 @@ export function publishMeeting(room:MeetingRoom,id:string,input:unknown,received
     const placed=new Set(world.objects.map(o=>o.asset));
     member.published=world.assets.filter(a=>placed.has(a.id)&&contentKind(a)&&!a.received&&!member.materials.has(a.id)).map(a=>structuredClone(a));
   }
-  if(JSON.stringify(member.document)===JSON.stringify(world)&&!acknowledged&&!share)return false;
-  member.document=world;member.revision++;room.revision++;
+  if(member.ready&&JSON.stringify(member.document)===JSON.stringify(world)&&!acknowledged&&!share)return false;
+  member.document=world;member.ready=true;member.revision++;room.revision++;
+  syncNeighborSlots(room);
   shareMeetingMaterials(room);discoverMeetingConnections(room);
   for(const visitor of room.members.values()) {
     if(visitor.id===id||!visitor.playing||!visitor.player.grounded||visitor.player.falling)continue;
@@ -273,7 +322,7 @@ export function publishMeeting(room:MeetingRoom,id:string,input:unknown,received
     const p=meetingLocal(occupied.slot,visitor.player);
     if(floorHeight(world,p.x,p.z)!==null)continue;
     const port=visitor.ports.findIndex(p=>p?.peer===id&&p.used);
-    relocateMeeting(room,visitor,port<0?meetingGlobal(0,MEETING_START):portPoint(port),"floor");
+    relocateMeeting(room,visitor,port<0?meetingGlobal(0,MEETING_START):portPoint(port,visitor.ports[port]!.row),"floor");
   }
   return true;
 }
@@ -290,9 +339,14 @@ export function meetingView(room:MeetingRoom,id:string):MeetingView {
     if(slots>0&&bytes>=size){materials.push(asset);slots--;bytes-=size;}else pendingMaterials++;
   }
   const connections:ConnectionTile[]=[],approaches:ConnectionTile[]=[];
-  member.ports.forEach((p,i)=>{if(p){const c:ConnectionTile={id:p.key,members:[id,p.peer],...portPoint(i),opened:group.has(p.peer),online:onlinePort(room,id,p)};(p.used?connections:approaches).push(c);}});
+  for(const footing of member.document.connectionFootings??[]){
+    const p=member.ports.find(p=>p?.key===footing.id);
+    const c:ConnectionTile={id:footing.id,members:[id,p?.peer??""],...footingPoint(footing),
+      opened:!!p?.active&&group.has(p.peer),online:!!p&&onlinePort(room,id,p),retired:!p?.active,built:footing.built};
+    (p?.active?p.used:footing.built)?connections.push(c):approaches.push(c);
+  }
   return {id,slot:0,revision:room.revision,world:meetingWorld(room,id),signals:[],connections,approaches,joined:[...group],
-    ownWorld:member.document,materials,pendingMaterials,received:[...member.received],recipients:meetingNeighbors(room,id),reset:member.reset};
+    ownWorld:member.document,materials,pendingMaterials,received:[...member.received],recipients:meetingNeighbors(room,id),reset:member.reset,documentReady:member.ready};
 }
 // Translate a player's location through the world they occupy, not their viewer's coordinate system.
 const structureCache = new WeakMap<World, Structure[]>();
@@ -349,7 +403,8 @@ export function moveMeeting(room:MeetingRoom,id:string,player:MeetingPosition,pl
   member.playing=playing;member.player={x:player.x,z:player.z,yaw:player.yaw,pitch:player.pitch??0,grounded:player.grounded,falling:!!player.falling};
   let changed=syncNeighborSlots(room);
   if(playing&&player.grounded&&!player.falling)member.ports.forEach((p,i)=>{
-    const point=portPoint(i);
+    if(!p)return;
+    const point=portPoint(i,p.row);
     if(p?.used&&onlinePort(room,id,p)&&Math.abs(player.x-point.x)<.42&&Math.abs(player.z-point.z)<.42&&!room.links.some(([a,b])=>a===id&&b===p.peer)){
       room.links.push([id,p.peer]);room.revision++;changed=true;
     }

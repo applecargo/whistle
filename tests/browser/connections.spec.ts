@@ -77,6 +77,7 @@ test("restart clears received materials and undo history and rejoins with a fres
     await expect(b.locator("[data-approach]")).toHaveCount(1);
     await expect(b.getByRole("button",{name:"되돌리기",exact:true})).toBeDisabled();
     expect((await savedWorld(b)).objects).toHaveLength(0);
-    await expect(a.locator("[data-approach]")).not.toHaveAttribute("data-approach",aPort!);
+    await expect(a.locator(`[data-approach="${aPort}"]`)).toHaveAttribute("data-approach-online","false");
+    await expect(a.locator('[data-approach-online="true"]')).not.toHaveAttribute("data-approach",aPort!);
   } finally {await Promise.all(contexts.map(context=>context.close()));}
 });

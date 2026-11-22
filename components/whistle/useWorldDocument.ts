@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { clone, uid, type Asset, type World } from "@/lib/world";
+import { clone, uid, type Asset, type ConnectionFooting, type World } from "@/lib/world";
 import { editTile, MIN_HEIGHT, MAX_HEIGHT, type TerrainTool } from "@/lib/tile";
 import { flatTerrain, floorHeight, LEVEL, type Surface } from "@/lib/terrain";
 import { WATER_INSET } from "@/lib/water";
@@ -160,10 +160,19 @@ export function useWorldDocument(initialWorld: World, onChange: (world: World) =
     return result.accepted;
   }, [applyWorld]);
 
+  const syncConnectionFootings = useCallback((footings: ConnectionFooting[] = []) => {
+    if (JSON.stringify(worldRef.current.connectionFootings ?? []) === JSON.stringify(footings)) return;
+    const sync = (w: World): World => ({ ...w, connectionFootings: footings.map(p => ({ ...p })) });
+    history.current = history.current.map(sync);
+    future.current = future.current.map(sync);
+    if (strokeBase.current) strokeBase.current = sync(strokeBase.current);
+    applyWorld(sync(worldRef.current));
+  }, [applyWorld]);
+
   return {
     world, getWorld, deriveWorld, feedback,
     canUndo: history.current.length > 0,
     canRedo: future.current.length > 0,
-    commit, edit, load, undo, redo, paint, endStroke, receiveAssets,
+    commit, edit, load, undo, redo, paint, endStroke, receiveAssets, syncConnectionFootings,
   };
 }

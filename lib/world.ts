@@ -67,6 +67,7 @@ export type Rule = {
 };
 export type Weather = "clear" | "cloud" | "rain" | "snow";
 export type TimeOfDay = "auto" | "noon" | "midnight";
+export type ConnectionFooting = { id: string; side: 0 | 1; row: number; built: boolean; created: number };
 export type World = {
   version: 1;
   title: string;
@@ -74,6 +75,7 @@ export type World = {
   size: number;
   assets: Asset[];
   receivedMaterialIds?: string[];
+  connectionFootings?: ConnectionFooting[];
   objects: Placed[];
   rules: Rule[];
   start: { x: number; z: number };
@@ -481,6 +483,16 @@ export function validateWorld(input: unknown, libraryLimit = MAX_CONTENT_COUNT):
   )
     throw Error("지원하지 않는 파일 형식입니다.");
   const ids = new Set<string>();
+  if (w.connectionFootings !== undefined) {
+    const footings = w.connectionFootings;
+    if (!Array.isArray(footings) || footings.length > w.size * 2 || footings.some(p =>
+      !p || !text(p.id, 100) || !p.id || ![0, 1].includes(p.side) ||
+      !Number.isInteger(p.row) || !number(p.row, 0, w.size - 1) || typeof p.built !== "boolean" ||
+      !Number.isSafeInteger(p.created) || p.created < 0) ||
+      new Set(footings.map(p => p.id)).size !== footings.length ||
+      new Set(footings.map(p => `${p.side}:${p.row}`)).size !== footings.length)
+      throw Error("연결 발판 데이터가 올바르지 않습니다.");
+  }
   for (const a of w.assets) {
     if (
       !text(a.id, a.received ? 100 : 80) ||
