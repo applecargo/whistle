@@ -861,6 +861,8 @@ export default function Scene({
               rough: dry && ground !== null
                 ? (grounded ? roughness : terrainSample(worldRef.current, player.x, player.z).weights.rough) : 0,
               water: dry ? 0 : 1, grounded: onGround, falling: falling !== null, yaw: player.yaw,
+              crouch: keys.has("crouch") || !!controls?.current.has("crouch"),
+              run: keys.has("run") || !!controls?.current.has("run"),
             });
             audioReport = time;
           }

@@ -99,7 +99,7 @@ element("edit").onclick = () => act(() => session?.edit({
 }));
 element("player").onclick = () => act(() => session?.player({
   x: number("player-x"), y: number("player-y"), z: number("player-z"),
-  grass: number("grass"), rough: number("rough"),
+  grass: number("grass"),
 }));
 document.addEventListener("visibilitychange", () => {
   if (document.hidden && session) {

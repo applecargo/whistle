@@ -136,7 +136,7 @@ test("환경(derivation)이 바뀌면 다시 등록하고, 켜진 영역에는 w
   const tiles = flatTerrain(24).tiles;
   game.frame(frame(10, 10, 24), field(tiles));
   assert.equal(scape.sources.get("surface-0")!.width, 1);
-  assert.deepEqual(scape.sources.get("surface-0")!.messages, { "whistle-region": [1] });
+  assert.deepEqual(scape.sources.get("surface-0")!.messages, { "whistle-region": [["amount", 1], ["distance", 0]] });
   const environment = {
     size: 24, regions: [], trees: [], ponds: [],
     cells: tiles.map((_, i) => ({ grass: i % 24 < 12 ? 1 : 0, water: null, tree: false, fog: 0, windX: 0, windZ: 0 })),
@@ -147,5 +147,5 @@ test("환경(derivation)이 바뀌면 다시 등록하고, 켜진 영역에는 w
   assert.deepEqual(new Set(game.activeIds()), new Set(["surface-0", "grass-0"]));
   // (10, 10)은 풀(x < 12) 안: 음량 1, 농도는 메시지로
   assert.equal(scape.sources.get("grass-0")!.gain, 1);
-  assert.deepEqual(scape.sources.get("grass-0")!.messages, { "whistle-region": [1] });
+  assert.deepEqual(scape.sources.get("grass-0")!.messages, { "whistle-region": [["amount", 1], ["distance", 0]] });
 });

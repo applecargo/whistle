@@ -38,10 +38,11 @@ test("simulated coordinates update the scene, mapping and environment", async ({
 test("Pd receives mapped values and stops for invalid input and blur", async ({ page }) => {
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
   await expect(page.locator("#audio-status")).toHaveText("오디오 실행 중");
-  await expect.poll(async () => (await messages(page))["whistle-player"]?.[0]).toBe(1 / 6);
+  await expect.poll(async () => (await messages(page))["whistle-player position"]?.[0]).toBe(1 / 6);
   await page.getByRole("button", { name: "중앙 위치", exact: true }).click();
-  await expect.poll(async () => (await messages(page))["whistle-player"]?.slice(2, 5)).toEqual([0.5, 0, 1]);
-  expect((await messages(page))["whistle-player"]).toHaveLength(9);
+  await expect.poll(async () => (await messages(page))["whistle-player position"]?.[2]).toBe(0.5);
+  expect((await messages(page))["whistle-player footed"]).toEqual([0, 0]);
+  await expect(page.locator("#rough")).toHaveText("1.000");
   await page.getByLabel("가로 (m)", { exact: true }).fill("0");
   await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
   await expect(page.locator("#tracking-status")).toContainText("0보다 큰 값");
@@ -115,8 +116,8 @@ test("board height reaches Pd independently of virtual ground and survives resta
     await expect.poll(async () => (await probe()).rms).toBeGreaterThan(0.000001);
     expect((await data(page)).grid).toEqual(initial.grid);
     expect((await data(page)).pd).toEqual(initial.pd);
-    expect((await messages(page))["whistle-player"]).toHaveLength(9);
-    expect((await messages(page))["whistle-player"][1]).toBe(initial.pd.y);
+    expect((await messages(page))["whistle-player position"]).toHaveLength(3);
+    expect((await messages(page))["whistle-player position"][1]).toBe(initial.pd.y);
   }
   for (const invalid of ["", "-1", "11"]) {
     await height.fill(invalid);

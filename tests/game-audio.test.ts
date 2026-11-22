@@ -5,7 +5,7 @@ import { editSound, playerSound } from "../lib/audio/game-parameters.ts";
 import { createWorldDeriver } from "../lib/world-derivation.ts";
 import { starterWorld } from "../lib/world.ts";
 import { flatTerrain } from "../lib/terrain.ts";
-import type { InteractionSession, PlayerSound } from "../lib/audio/pd-session.ts";
+import { interactionMessages, type InteractionSession, type PlayerSound } from "../lib/audio/pd-session.ts";
 import { validateBoardHeight } from "../lib/audio/pd-session.ts";
 
 test("board height accepts metres within the test range and rejects invalid measurements", () => {
@@ -34,7 +34,7 @@ function session() {
   };
 }
 const sound = { x: 0.5, z: 0.5, overlap: 0 };
-const moving: PlayerSound = { x: 0.5, y: 0, z: 0.5, grass: 1, rough: 0 };
+const moving: PlayerSound = { x: 0.5, y: 0, z: 0.5, grass: 1 };
 
 test("edit parameters identify terrain combinations and ignore regenerated IDs in cumulative strokes", () => {
   const before = starterWorld();
@@ -145,4 +145,18 @@ test("pause: 잠시 뒤 AudioContext를 멈추고(패치 처리 중단), 그 전
   await new Promise((resolve) => setTimeout(resolve, 250));
   assert.equal(stub.suspends, 1, "곧바로 다시 켜면 suspend하지 않는다");
   audio.dispose();
+});
+
+test("player state goes to Pd as four route-able messages", () => {
+  const sent: string[] = [];
+  const to = { send: (bus: string, message: (string | number)[]) => { sent.push(`${bus} ${message.join(" ")}`); } };
+  interactionMessages({ edit: to, player: to, event: to }).player({
+    x: 0.25, y: 1.5, z: 0.75, yaw: 2, crouch: true, run: false, grounded: true, falling: false, grass: 0.4, water: 1,
+  });
+  assert.deepEqual(sent, [
+    "whistle-player position 0.25 1.5 0.75",
+    "whistle-player yaw 2",
+    "whistle-player stat 1 0 1 0",
+    "whistle-player footed 0.4 1",
+  ]);
 });

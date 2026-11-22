@@ -191,8 +191,11 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
       send(bus: string, values: PdMessage) {
         if (closed) throw new Error(`${name}: 종료된 패치입니다.`);
         const target = options.scoped ? `${slot}-${bus}` : bus;
+        // 글자로 시작하면 Pd 메시지 상자처럼 그 글자가 선택자다(`position 0.5 0 0.5` → [route position]으로 받음).
         // 받는 객체가 없는 버스로 보내도 Pd는 조용히 버린다(pd4web도 true를 돌려준다). 비용이 작아 따로 거르지 않는다.
-        if (!pd.sendList(target, values)) throw new Error(`${name}: Pd 메시지 실패: ${target}`);
+        const [head, ...rest] = values;
+        const ok = typeof head === "string" ? pd.sendMessage(target, head, rest) : pd.sendList(target, values);
+        if (!ok) throw new Error(`${name}: Pd 메시지 실패: ${target}`);
       },
       destroy,
     };

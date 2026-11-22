@@ -121,7 +121,7 @@ edit.pd · player.pd(→ 이동음 게인) · event.pd ─┐
   - 패닝: width = 1 − d/2(`blend` 2타일). 0이면 패닝만, 1이면 방향 없이 좌우 모두 1.
     다가갈수록 양쪽이 강해지며 패닝 차이가 줄어 외곽에 닿으면 좌우 1, 안에서는 계속 좌우 1.
   - 농도(풀·안개·바람 세기)는 음량·위치에 쓰지 않는다. 가장 가까운 칸의 값을 영역 패치로 보낸다:
-    **`whistle-region` [농도 0~1]** (나머지 층은 1). 값이 바뀔 때만 보낸다.
+    **`whistle-region`의 `amount` [농도 0~1]** (나머지 층은 1)와 `distance` [타일]. 값이 바뀔 때만 보낸다(받는 법은 `pd-receive.md`).
   - 이미 켜진 영역은 d ≤ 3.5까지 유지하고, 거리 순위에서 0.5타일 가깝게 쳐서 경계에서 깜빡이지 않는다.
   - 여러 소리가 더해진 음량은 마지막 리미터가 받는다.
 - 편집 화면 복귀·일시정지 시 켜진 영역을 모두 fade out한다. fade가 끝난 노드는 오디오 시계 기준으로 정리된다.
@@ -144,23 +144,7 @@ edit.pd · player.pd(→ 이동음 게인) · event.pd ─┐
 - 수동 테스트: `audio-lab/index.html`
 - 다중 패치 실험: `audio-lab/soundscape.html`, 회귀 테스트 `tests/browser/soundscape-lab.spec.ts`
 
-| Pd 버스 | 입력 | 테스트 패치의 반응 |
-| --- | --- | --- |
-| `whistle-edit` | `[x, z, overlap]` | `440 + 220 × overlap` Hz, 짧은 엔벌로프. X/Z는 수신 확인용 |
-| `whistle-player` | `[x, y, z, grass, rough]` | `220 + 220z + 220grass + 440rough` Hz, 고정 진폭 0.02, X에 따른 좌우 출력. Y는 수신 확인용 |
-| `whistle-board-height` | `[heightMetres]` | UWB 테스트 전용. 0~10m, 위 플레이 시험음에 `110 × heightMetres` Hz 추가. 초기값 0 |
-| `whistle-player-stop` | `bang` | 3D 음만 정지. 편집 화면 복귀·일시정지에서 사용 |
-| `whistle-event` | `[frequency, gain, pan]` | 기존 규칙 이벤트용 사인파, 25ms 어택·1100ms 감쇠 |
-| `whistle-gate` | `[0 또는 1]` | 전체 음소거/해제, 20ms 변화 |
-| `whistle-ready` | 패치 → 브라우저 `bang` | DSP 초기화 확인 |
-
-게임에서 보내는 메시지는 기본 값 뒤에 문맥을 덧붙인다.
-
-- `whistle-edit`: `[x, z, overlap, assetId, action, surface]`
-- `whistle-player`: `[x, y, z, grass, rough, grounded, falling, yaw, water]`
-
-접지·낙하·물은 0/1이고 yaw는 라디안이다. 기존 실험 페이지는 앞의 기본 값만 전송한다.
-현재 패치는 뒤의 문맥 값을 수신·반환하며 음색 합성에는 기본 값만 사용한다.
+패치가 받는 버스와 값의 순서·범위·뜻은 [`pd-receive.md`](pd-receive.md)에 정리했다(`whistle-gate`, `whistle-player-stop`, `whistle-ready`는 더 이상 쓰지 않는다).
 
 UWB 테스트의 보드 높이는 현실 바닥 기준 미터 값이며, 가상 지면/발 높이 `y`와 별개다.
 `InteractionSession.boardHeight()`로 별도 버스에 보내며 유한하지 않거나 0~10m 범위 밖이면 거부한다.

@@ -28,8 +28,8 @@ export type Vec3 = { x: number; y: number; z: number };
 export type PdMessage = (string | number)[];
 export type SoundscapeSource = {
   id: string; patch: string; position: Vec3; gain?: number; width?: number;
-  /** 패치로 보낼 메시지(수신 버스 이름 → 값). 값이 바뀔 때만 보낸다. 패치에 그 버스가 없으면 건너뛴다. */
-  messages?: Record<string, PdMessage>;
+  /** 패치로 보낼 메시지(수신 버스 이름 → 메시지들). 버스의 값이 하나라도 바뀌면 그 버스의 메시지를 다시 보낸다. */
+  messages?: Record<string, PdMessage[]>;
 };
 export type SoundscapeEvent =
   | { type: "loading" | "active" | "releasing" | "released"; id: string; patch: string }
@@ -207,12 +207,12 @@ export function createSoundscape(options: SoundscapeOptions) {
     const send = voice.patch?.send;
     if (!send || !voice.source.messages) return;
     voice.sent ??= new Map();
-    for (const [bus, message] of Object.entries(voice.source.messages)) {
+    for (const [bus, messages] of Object.entries(voice.source.messages)) {
       const last = voice.sent.get(bus);
-      const key = JSON.stringify(message);
+      const key = JSON.stringify(messages);
       if (last === null || last === key) continue;
       try {
-        send.call(voice.patch, bus, message);
+        for (const message of messages) send.call(voice.patch, bus, message);
         voice.sent.set(bus, key);
       } catch {
         voice.sent.set(bus, null);
