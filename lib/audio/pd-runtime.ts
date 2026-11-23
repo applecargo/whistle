@@ -102,11 +102,27 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   engineStage = "엔진 스크립트";
   if (!g.Pd4WebModule) await loadScript(`${baseUrl}engine/pd4web.js`);
   engineStage = "wasm";
-  const module = await g.Pd4WebModule({
-    locateFile: (path) => `${baseUrl}engine/${path}`,
-    // 엔진이 준비를 마치기 전에 기다리는 것(wasm, 작업자 4개, 데이터 파일)의 남은 개수. 멈춘 곳을 보려고 단계에 적는다.
-    monitorRunDependencies: (left: number) => { engineStage = `wasm (남은 준비 ${left})`; },
-  });
+  // 엔진은 시작 전에 작업자(Web Worker) 4개가 응답하기를 기다린다. 폰에서 여기서 멈춰서, 응답 수와 작업자 오류를 남긴다.
+  let left = 0, workers = 0, answered = 0;
+  const show = () => { engineStage = `wasm (남은 준비 ${left} · 작업자 응답 ${answered}/${workers})`; };
+  const OriginalWorker = g.Worker;
+  g.Worker = class extends OriginalWorker {
+    constructor(url: string | URL, options?: WorkerOptions) {
+      super(url, options);
+      workers++; show();
+      this.addEventListener("message", () => { answered++; show(); }, { once: true });
+      this.addEventListener("error", (e) => console.error(`pd4web 작업자 오류: ${e.message || "(이유 없음)"}`));
+      this.addEventListener("messageerror", () => console.error("pd4web 작업자 messageerror(공유 메모리를 못 받음?)"));
+    }
+  };
+  let module: Awaited<ReturnType<Pd4WebGlobals["Pd4WebModule"]>>;
+  try {
+    module = await g.Pd4WebModule({
+      locateFile: (path) => `${baseUrl}engine/${path}`,
+      // 엔진이 준비를 마치기 전에 기다리는 것(wasm, 작업자 4개, 데이터 파일)의 남은 개수.
+      monitorRunDependencies: (n: number) => { left = n; show(); },
+    });
+  } finally { g.Worker = OriginalWorker; }
   const pd = new module.Pd4Web();
   // pd4web의 GUI·콜백 코드는 전역 Pd4Web을 찾는다.
   g.Pd4Web = pd;

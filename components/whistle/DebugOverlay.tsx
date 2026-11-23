@@ -88,7 +88,7 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
   const slots = info.interaction.length + info.voices.length;
   lines.push(c
     ? `오디오 ${c.state} · ${c.sampleRate} Hz · 지연(${c.latencyHint}) ${f(c.baseLatency * 1000, 1)}+${f((c.outputLatency ?? NaN) * 1000, 1)} ms · 비상관 ${info.diffuse ? "켬" : "끔"}`
-    : `오디오 시작 전${info.stage ? ` · 단계 ${info.stage}` : " · 아직 시작 안 함"}`);
+    : `오디오 시작 전${info.stage ? ` · 단계 ${info.stage}` : " · 아직 시작 안 함"} · 격리 ${crossOriginIsolated ? "됨" : "안 됨"}`);
   // 상호작용 패치는 항상 edit·player·event 세 개라 이름은 생략(줄이 길어지면 폭을 넘는다)
   lines.push(`Pd 슬롯 ${slots}개 = 상호작용 ${info.interaction.length} + 사운드스케이프 ${info.voices.length}` +
     (info.voices.length ? ` (${Object.entries(byState).map(([s, n]) => `${s} ${n}`).join(", ")})` : ""));
