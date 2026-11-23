@@ -89,6 +89,9 @@ function untar(bytes: Uint8Array, write: (path: string, data: Uint8Array) => voi
   return paths;
 }
 
+/** 엔진을 여는 중 지금 단계(디버그 표시용). 다 열리면 "열림". */
+export let engineStage = "";
+
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCategory, timeout: number): Promise<PdEngine> {
@@ -96,7 +99,9 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
     throw new Error("pd4web 엔진에는 교차 출처 격리(COOP/COEP)가 필요합니다. 페이지를 새로고침하세요.");
   }
   const g = globals();
+  engineStage = "엔진 스크립트";
   if (!g.Pd4WebModule) await loadScript(`${baseUrl}engine/pd4web.js`);
+  engineStage = "wasm";
   const module = await g.Pd4WebModule({ locateFile: (path) => `${baseUrl}engine/${path}` });
   const pd = new module.Pd4Web();
   // pd4web의 GUI·콜백 코드는 전역 Pd4Web을 찾는다.
@@ -113,6 +118,7 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   g.AudioContext = class extends Original {
     constructor(options?: AudioContextOptions) { super({ ...options, latencyHint }); }
   };
+  engineStage = "오디오 워클릿";
   try { pd.init(); } finally { g.AudioContext = Original; }
 
   // 오디오 워클릿 노드는 비동기로 생긴다. pd4web가 전역에 두고 destination에 바로 연결한다.
@@ -132,6 +138,7 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
 
   // --- 패치 폴더(tar.gz 하나)를 엔진 가상 디스크(/)에 푼다 ---
   // 서버에 따라 .gz를 Content-Encoding: gzip으로 보내 브라우저가 먼저 풀어 버리기도 한다. gzip 머리(1f 8b)가 있을 때만 푼다.
+  engineStage = "패치 묶음";
   let archive = new Uint8Array(await (await fetchOk(`${baseUrl}patches.tar.gz`)).arrayBuffer());
   if (archive[0] === 0x1f && archive[1] === 0x8b) {
     archive = new Uint8Array(await new Response(new Blob([archive]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
@@ -201,6 +208,7 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
     };
   };
 
+  engineStage = "열림";
   return { context, files, start, slotsInUse: () => used.size };
 }
 
@@ -211,6 +219,6 @@ let engine: Promise<PdEngine> | undefined;
  */
 export function openEngine(baseUrl: string, options: { latencyHint?: AudioContextLatencyCategory; timeout?: number } = {}) {
   engine ??= createEngine(baseUrl, options.latencyHint ?? "interactive", options.timeout ?? 30_000);
-  engine.catch(() => { engine = undefined; });
+  engine.catch(() => { engine = undefined; engineStage += " 실패"; });
   return engine;
 }

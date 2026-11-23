@@ -4,7 +4,7 @@ import { createInteractionSession, type EditSound } from "@/lib/audio/pd-session
 import { createGameAudio } from "@/lib/audio/game-audio";
 import { playerSound, type PlayerAudioFrame } from "@/lib/audio/game-parameters";
 import { createPlacedSounds } from "@/lib/audio/placed-sounds";
-import { openEngine } from "@/lib/audio/pd-runtime";
+import { engineStage, openEngine } from "@/lib/audio/pd-runtime";
 import { createSoundscape } from "@/lib/audio/soundscape";
 import { createGameSoundscape, type GameSoundscape } from "@/lib/audio/game-soundscape";
 import { flatTerrain } from "@/lib/terrain";
@@ -104,6 +104,8 @@ async function createGameMix() {
 const INTERACTION_PATCH_NAMES = ["edit", "player", "event"];
 
 export type GameAudioDebug = {
+  /** 엔진을 여는 중 지금 단계(아직 안 열렸을 때 무엇을 기다리는지) */
+  stage: string;
   context: { state: AudioContextState; sampleRate: number; latencyHint: AudioContextLatencyCategory; baseLatency: number; outputLatency?: number } | null;
   /** 시작된 상호작용 패치(오디오가 시작되면 3개가 계속 돈다) */
   interaction: string[];
@@ -162,6 +164,7 @@ export function useGameAudio(notify: (message: string) => void) {
       debug: (): GameAudioDebug => {
         const mix = mixRef.current;
         return {
+          stage: engineStage,
           context: mix ? { state: mix.context.state, sampleRate: mix.context.sampleRate, latencyHint: latencyHint(),
             baseLatency: mix.context.baseLatency, outputLatency: mix.context.outputLatency } : null,
           interaction: mix ? INTERACTION_PATCH_NAMES : [],

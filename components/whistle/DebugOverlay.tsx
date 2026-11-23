@@ -74,7 +74,7 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
   const slots = info.interaction.length + info.voices.length;
   lines.push(c
     ? `오디오 ${c.state} · ${c.sampleRate} Hz · 지연(${c.latencyHint}) ${f(c.baseLatency * 1000, 1)}+${f((c.outputLatency ?? NaN) * 1000, 1)} ms · 비상관 ${info.diffuse ? "켬" : "끔"}`
-    : "오디오 시작 전");
+    : `오디오 시작 전${info.stage ? ` · 단계 ${info.stage}` : " · 아직 시작 안 함"}`);
   // 상호작용 패치는 항상 edit·player·event 세 개라 이름은 생략(줄이 길어지면 폭을 넘는다)
   lines.push(`Pd 슬롯 ${slots}개 = 상호작용 ${info.interaction.length} + 사운드스케이프 ${info.voices.length}` +
     (info.voices.length ? ` (${Object.entries(byState).map(([s, n]) => `${s} ${n}`).join(", ")})` : ""));
@@ -100,7 +100,7 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
     }
     const here = derivation.structures.filter((s) => Math.round(s.x) === tx && Math.round(s.z) === tz);
     if (here.length) lines.push(`구조물 ${here.map((s) => s.kind).join(", ")}`);
-    lines.push(`whistle-player  grass ${f(p.grass)} · rough ${f(p.rough)} · water ${f(p.water)}`);
+    lines.push(`whistle-player  footed grass ${f(p.grass)} · water ${f(p.water)}`);
   }
 
   // 실행 중인 패치 전체(Pd 엔진 슬롯): 상호작용 패치 + 사운드스케이프 패치(이번 프레임에 고른 영역 + 꺼지는 중인 영역)
