@@ -36,19 +36,25 @@ const tilesOf = (world: World) => world.terrain?.tiles ?? flatTiles.get(world.si
  *   사운드스케이프(층별 영역 패치들) ──┼─→ 마스터 게인(음소거 fade) → 리미터 → 출력
  *   배치한 녹음 사운드 ───────────────┘
  */
-/** 소리 켜기를 이만큼(ms) 기다려도 안 되면 알린다(계속 기다리고, 다음 터치·키에서 켜진다: unlockAudio). */
-const RESUME_NOTICE_MS = 3000;
+/**
+ * 엔진 열기부터 소리 켜기까지 이만큼(ms) 지나도 안 끝나면 알린다(멈춘 채 오류가 나지 않을 때도 알 수 있게).
+ * 알린 뒤에도 계속 기다린다. 소리 켜기가 막힌 것이면 다음 터치·키에서 켜진다(unlockAudio).
+ */
+const START_NOTICE_MS = 8000;
 
 async function createGameMix(onBlocked: () => void) {
   const started = performance.now();
   const hint = latencyHint();
-  const engine = await openEngine(BASE, { latencyHint: hint });
+  const notice = setTimeout(onBlocked, START_NOTICE_MS);
+  let engine: Awaited<ReturnType<typeof openEngine>>;
+  try {
+    engine = await openEngine(BASE, { latencyHint: hint });
+    // 엔진은 터치가 끝난 뒤에 열리므로, 폰 브라우저는 이 resume()을 다음 터치까지 미룬다.
+    await engine.context.resume();
+  } finally { clearTimeout(notice); }
   const context = engine.context;
   let master: GainNode | undefined;
   try {
-    // 엔진은 터치가 끝난 뒤에 열리므로, 폰 브라우저는 이 resume()을 다음 터치까지 미룬다.
-    const notice = setTimeout(onBlocked, RESUME_NOTICE_MS);
-    try { await context.resume(); } finally { clearTimeout(notice); }
     master = context.createGain();
     const limiter = context.createDynamicsCompressor();
     limiter.threshold.value = -3;
