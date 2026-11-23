@@ -33,8 +33,9 @@ if (typeof window === "undefined") {
                       credentials: "omit",
                   })
                 : r;
-        event.respondWith(
-            fetch(request)
+        // [whistle 수정] 받기가 실패하면 한 번 더 받는다. 그래도 실패하면 이유를 페이지 콘솔에 보낸다.
+        // (폰 Firefox에서 pd4web 작업자 4개의 스크립트 요청이 여기서 실패해 엔진이 멈췄다.)
+        const forward = () => fetch(request)
                 .then((response) => {
                     if (response.status === 0) {
                         return response;
@@ -55,8 +56,16 @@ if (typeof window === "undefined") {
                         statusText: response.statusText,
                         headers: newHeaders,
                     });
-                })
-                .catch((e) => console.error(e)),
+                });
+        event.respondWith(
+            forward()
+                .catch(forward)
+                .catch((e) => {
+                    console.error(e);
+                    const message = `coi-serviceworker: ${r.destination || "?"} ${r.mode} ${r.url} 받기 실패: ${e && e.name}: ${e && e.message}`;
+                    self.clients.matchAll().then((clients) => clients.forEach((c) => c.postMessage({ type: "coiFetchError", message })));
+                    throw e;
+                }),
         );
     });
 } else {
@@ -77,6 +86,10 @@ if (typeof window === "undefined") {
         };
 
         const n = navigator;
+        // [whistle 수정] 서비스 워커에서 받기가 실패한 이유를 페이지 콘솔에 남긴다.
+        n.serviceWorker && n.serviceWorker.addEventListener("message", (ev) => {
+            if (ev.data && ev.data.type === "coiFetchError") console.error(ev.data.message);
+        });
         const controlling = n.serviceWorker && n.serviceWorker.controller;
 
         // Record the failure if the page is served by serviceWorker.
