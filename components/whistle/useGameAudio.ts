@@ -4,7 +4,7 @@ import { createInteractionSession, type EditSound } from "@/lib/audio/pd-session
 import { createGameAudio } from "@/lib/audio/game-audio";
 import { playerSound, type PlayerAudioFrame } from "@/lib/audio/game-parameters";
 import { createPlacedSounds } from "@/lib/audio/placed-sounds";
-import { engineStage, openEngine } from "@/lib/audio/pd-runtime";
+import { engineStage, openEngine, unlockAudio } from "@/lib/audio/pd-runtime";
 import { createSoundscape } from "@/lib/audio/soundscape";
 import { createGameSoundscape, type GameSoundscape } from "@/lib/audio/game-soundscape";
 import { flatTerrain } from "@/lib/terrain";
@@ -36,20 +36,19 @@ const tilesOf = (world: World) => world.terrain?.tiles ?? flatTiles.get(world.si
  *   사운드스케이프(층별 영역 패치들) ──┼─→ 마스터 게인(음소거 fade) → 리미터 → 출력
  *   배치한 녹음 사운드 ───────────────┘
  */
-const RESUME_TIMEOUT_MS = 3000;
+/** 소리 켜기를 이만큼(ms) 기다려도 안 되면 알린다(계속 기다리고, 다음 터치·키에서 켜진다: unlockAudio). */
+const RESUME_NOTICE_MS = 3000;
 
-async function createGameMix() {
+async function createGameMix(onBlocked: () => void) {
   const started = performance.now();
   const hint = latencyHint();
   const engine = await openEngine(BASE, { latencyHint: hint });
   const context = engine.context;
   let master: GainNode | undefined;
   try {
-    // 브라우저가 소리 켜기를 막으면 resume()이 끝나지 않을 수 있다. 기다리지 않고 실패로 알려 다음 클릭에 다시 시도한다.
-    await Promise.race([
-      context.resume(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error(`소리 켜기가 막혔어요(${context.state})`)), RESUME_TIMEOUT_MS)),
-    ]);
+    // 엔진은 터치가 끝난 뒤에 열리므로, 폰 브라우저는 이 resume()을 다음 터치까지 미룬다.
+    const notice = setTimeout(onBlocked, RESUME_NOTICE_MS);
+    try { await context.resume(); } finally { clearTimeout(notice); }
     master = context.createGain();
     const limiter = context.createDynamicsCompressor();
     limiter.threshold.value = -3;
@@ -129,18 +128,16 @@ export function useGameAudio(notify: (message: string) => void) {
   const enabled = useRef(false);
   const paused = useRef(false);
   const api = useMemo(() => {
+    const failed = () => report.current("오디오를 시작하지 못했어요. 다음 클릭에서 다시 시도합니다.");
     const get = () => controller.current ??= createGameAudio(
       async () => {
-        const mix = await createGameMix();
+        const mix = await createGameMix(failed);
         mixRef.current = mix;
         recordings.current = createPlacedSounds(mix.context, () => {}, mix.master);
         soundscape.current = mix.game;
         return mix.session;
       },
-      (error) => {
-        console.warn("[Whistle:Audio] 오류", error);
-        report.current("오디오를 시작하지 못했어요. 다음 클릭에서 다시 시도합니다.");
-      },
+      (error) => { console.warn("[Whistle:Audio] 오류", error); failed(); },
     );
     const quiet = () => soundscape.current?.stop();
     return {
@@ -194,10 +191,19 @@ export function useGameAudio(notify: (message: string) => void) {
       controller.current?.pause();
     };
     const visibility = () => { if (document.hidden) pause(); };
-    const resume = () => { if (!document.hidden) { paused.current = false; controller.current?.resume(); } };
+    const resume = () => {
+      if (document.hidden) return;
+      // 폰 브라우저는 터치·키 처리 중에만 소리를 켜 준다. 엔진의 AudioContext가 막혀 있으면 여기서 켠다.
+      unlockAudio();
+      paused.current = false;
+      controller.current?.resume();
+    };
     window.addEventListener("blur", pause);
     document.addEventListener("visibilitychange", visibility);
     window.addEventListener("pointerdown", resume);
+    // 터치는 누를 때(pointerdown)가 아니라 뗄 때(pointerup·touchend)만 브라우저가 사용자 조작으로 친다.
+    window.addEventListener("pointerup", unlockAudio);
+    window.addEventListener("touchend", unlockAudio);
     window.addEventListener("keydown", resume);
     const toggleDiffuse = (event: KeyboardEvent) => {
       if (event.code !== DIFFUSE_TOGGLE_CODE || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -213,6 +219,8 @@ export function useGameAudio(notify: (message: string) => void) {
       window.removeEventListener("blur", pause);
       document.removeEventListener("visibilitychange", visibility);
       window.removeEventListener("pointerdown", resume);
+      window.removeEventListener("pointerup", unlockAudio);
+      window.removeEventListener("touchend", unlockAudio);
       window.removeEventListener("keydown", resume);
       recordings.current?.stop();
       recordings.current = null;

@@ -212,6 +212,12 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   return { context, files, start, slotsInUse: () => used.size };
 }
 
+/** 터치·키 처리 안에서 부른다. 엔진의 AudioContext가 막혀(suspended) 있으면 켠다. 엔진이 아직 없으면 아무것도 안 한다. */
+export function unlockAudio() {
+  const context = globals().Pd4WebAudioContext;
+  if (context?.state === "suspended") void context.resume().catch(() => {});
+}
+
 let engine: Promise<PdEngine> | undefined;
 /**
  * 페이지의 pd4web 엔진을 연다(처음 한 번만 실제로 만든다. 이후에는 같은 엔진).
