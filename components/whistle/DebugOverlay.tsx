@@ -127,7 +127,8 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
 }
 
 export function DebugOverlay({ audio, getWorld, derivation }: Props) {
-  const [visible, setVisible] = useState(false);
+  // 키보드가 없는 폰에서는 주소에 ?debug를 붙여 켠다.
+  const [visible, setVisible] = useState(() => new URLSearchParams(location.search).has("debug"));
   const [text, setText] = useState("");
   const frame = useFrameStats();
   const latest = useRef({ audio, getWorld, derivation });
