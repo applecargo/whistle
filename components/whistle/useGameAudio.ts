@@ -36,6 +36,8 @@ const tilesOf = (world: World) => world.terrain?.tiles ?? flatTiles.get(world.si
  *   사운드스케이프(층별 영역 패치들) ──┼─→ 마스터 게인(음소거 fade) → 리미터 → 출력
  *   배치한 녹음 사운드 ───────────────┘
  */
+const RESUME_TIMEOUT_MS = 3000;
+
 async function createGameMix() {
   const started = performance.now();
   const hint = latencyHint();
@@ -43,7 +45,11 @@ async function createGameMix() {
   const context = engine.context;
   let master: GainNode | undefined;
   try {
-    await context.resume();
+    // 브라우저가 소리 켜기를 막으면 resume()이 끝나지 않을 수 있다. 기다리지 않고 실패로 알려 다음 클릭에 다시 시도한다.
+    await Promise.race([
+      context.resume(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`소리 켜기가 막혔어요(${context.state})`)), RESUME_TIMEOUT_MS)),
+    ]);
     master = context.createGain();
     const limiter = context.createDynamicsCompressor();
     limiter.threshold.value = -3;
@@ -110,7 +116,9 @@ export type GameAudioDebug = {
   frame: PlayerAudioFrame | null;
 };
 
-export function useGameAudio() {
+export function useGameAudio(notify: (message: string) => void) {
+  const report = useRef(notify);
+  report.current = notify;
   const controller = useRef<ReturnType<typeof createGameAudio> | null>(null);
   const recordings = useRef<ReturnType<typeof createPlacedSounds> | null>(null);
   const soundscape = useRef<GameSoundscape | null>(null);
@@ -127,7 +135,10 @@ export function useGameAudio() {
         soundscape.current = mix.game;
         return mix.session;
       },
-      (error) => console.warn("[Whistle:Audio] 오류", error),
+      (error) => {
+        console.warn("[Whistle:Audio] 오류", error);
+        report.current("오디오를 시작하지 못했어요. 다음 클릭에서 다시 시도합니다.");
+      },
     );
     const quiet = () => soundscape.current?.stop();
     return {

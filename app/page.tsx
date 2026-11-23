@@ -88,7 +88,7 @@ export default function Home() {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(""), 4200);
   }, []);
-  const audio = useGameAudio();
+  const audio = useGameAudio(notify);
   const resetSimulation = useCallback((w: World) => {
     audio.reset();
     const next = createSimulation(w);
