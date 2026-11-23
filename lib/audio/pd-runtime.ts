@@ -21,7 +21,7 @@ type Pd4Web = {
   sendMessage(name: string, selector: string, list: PdMessage): boolean;
 };
 type Pd4WebGlobals = {
-  Pd4WebModule(options: { locateFile(path: string): string; monitorRunDependencies?(left: number): void }): Promise<{ Pd4Web: new () => Pd4Web; FS: EmscriptenFS }>;
+  Pd4WebModule(options: { locateFile(path: string): string }): Promise<{ Pd4Web: new () => Pd4Web; FS: EmscriptenFS }>;
   Pd4Web: Pd4Web | null;
   Pd4WebAudioContext?: AudioContext;
   Pd4WebAudioWorkletNode?: AudioWorkletNode;
@@ -89,9 +89,6 @@ function untar(bytes: Uint8Array, write: (path: string, data: Uint8Array) => voi
   return paths;
 }
 
-/** 엔진을 여는 중 지금 단계(디버그 표시용). 다 열리면 "열림". */
-export let engineStage = "";
-
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCategory, timeout: number): Promise<PdEngine> {
@@ -99,30 +96,21 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
     throw new Error("pd4web 엔진에는 교차 출처 격리(COOP/COEP)가 필요합니다. 페이지를 새로고침하세요.");
   }
   const g = globals();
-  engineStage = "엔진 스크립트";
-  if (!g.Pd4WebModule) await loadScript(`${baseUrl}engine/pd4web.js`);
-  engineStage = "wasm";
-  // 엔진은 시작 전에 작업자(Web Worker) 4개가 응답하기를 기다린다. 폰에서 여기서 멈춰서, 응답 수와 작업자 오류를 남긴다.
-  let left = 0, workers = 0, answered = 0;
-  const show = () => { engineStage = `wasm (남은 준비 ${left} · 작업자 응답 ${answered}/${workers})`; };
+  const engineUrl = `${baseUrl}engine/pd4web.js`;
+  if (!g.Pd4WebModule) await loadScript(engineUrl);
+  // 엔진은 시작 전에 같은 스크립트로 작업자(Web Worker) 4개를 띄우고, 넷 다 응답해야 시작한다.
+  // 폰 Firefox에서는 이 작업자 스크립트 요청이 서비스 워커(coi-serviceworker)에서 자주 실패해, 엔진이 오류 없이 멈췄다.
+  // 이미 받은 스크립트로 Blob 주소를 만들어 띄운다: 서비스 워커를 거치지 않고, 교차 출처 격리는 페이지에서 물려받는다.
+  // 엔진이 나중에 작업자를 더 띄울 수도 있어 되돌리지 않는다(엔진 스크립트 주소만 바꾼다).
+  const source = URL.createObjectURL(new Blob([await (await fetchOk(engineUrl)).text()], { type: "text/javascript" }));
+  const engineScript = new URL(engineUrl, location.href).href;
   const OriginalWorker = g.Worker;
   g.Worker = class extends OriginalWorker {
     constructor(url: string | URL, options?: WorkerOptions) {
-      super(url, options);
-      workers++; show();
-      this.addEventListener("message", () => { answered++; show(); }, { once: true });
-      this.addEventListener("error", (e) => console.error(`pd4web 작업자 오류: ${e.message || "(이유 없음)"}`));
-      this.addEventListener("messageerror", () => console.error("pd4web 작업자 messageerror(공유 메모리를 못 받음?)"));
+      super(new URL(url, location.href).href === engineScript ? source : url, options);
     }
   };
-  let module: Awaited<ReturnType<Pd4WebGlobals["Pd4WebModule"]>>;
-  try {
-    module = await g.Pd4WebModule({
-      locateFile: (path) => `${baseUrl}engine/${path}`,
-      // 엔진이 준비를 마치기 전에 기다리는 것(wasm, 작업자 4개, 데이터 파일)의 남은 개수.
-      monitorRunDependencies: (n: number) => { left = n; show(); },
-    });
-  } finally { g.Worker = OriginalWorker; }
+  const module = await g.Pd4WebModule({ locateFile: (path) => `${baseUrl}engine/${path}` });
   const pd = new module.Pd4Web();
   // pd4web의 GUI·콜백 코드는 전역 Pd4Web을 찾는다.
   g.Pd4Web = pd;
@@ -138,7 +126,6 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   g.AudioContext = class extends Original {
     constructor(options?: AudioContextOptions) { super({ ...options, latencyHint }); }
   };
-  engineStage = "오디오 워클릿";
   try { pd.init(); } finally { g.AudioContext = Original; }
 
   // 오디오 워클릿 노드는 비동기로 생긴다. pd4web가 전역에 두고 destination에 바로 연결한다.
@@ -158,7 +145,6 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
 
   // --- 패치 폴더(tar.gz 하나)를 엔진 가상 디스크(/)에 푼다 ---
   // 서버에 따라 .gz를 Content-Encoding: gzip으로 보내 브라우저가 먼저 풀어 버리기도 한다. gzip 머리(1f 8b)가 있을 때만 푼다.
-  engineStage = "패치 묶음";
   let archive = new Uint8Array(await (await fetchOk(`${baseUrl}patches.tar.gz`)).arrayBuffer());
   if (archive[0] === 0x1f && archive[1] === 0x8b) {
     archive = new Uint8Array(await new Response(new Blob([archive]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
@@ -228,7 +214,6 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
     };
   };
 
-  engineStage = "열림";
   return { context, files, start, slotsInUse: () => used.size };
 }
 
@@ -245,6 +230,6 @@ let engine: Promise<PdEngine> | undefined;
  */
 export function openEngine(baseUrl: string, options: { latencyHint?: AudioContextLatencyCategory; timeout?: number } = {}) {
   engine ??= createEngine(baseUrl, options.latencyHint ?? "interactive", options.timeout ?? 30_000);
-  engine.catch(() => { engine = undefined; engineStage += " 실패"; });
+  engine.catch(() => { engine = undefined; });
   return engine;
 }
