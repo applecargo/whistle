@@ -21,7 +21,7 @@ type Pd4Web = {
   sendMessage(name: string, selector: string, list: PdMessage): boolean;
 };
 type Pd4WebGlobals = {
-  Pd4WebModule(options: { locateFile(path: string): string }): Promise<{ Pd4Web: new () => Pd4Web; FS: EmscriptenFS }>;
+  Pd4WebModule(options: { locateFile(path: string): string; monitorRunDependencies?(left: number): void }): Promise<{ Pd4Web: new () => Pd4Web; FS: EmscriptenFS }>;
   Pd4Web: Pd4Web | null;
   Pd4WebAudioContext?: AudioContext;
   Pd4WebAudioWorkletNode?: AudioWorkletNode;
@@ -102,7 +102,11 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   engineStage = "엔진 스크립트";
   if (!g.Pd4WebModule) await loadScript(`${baseUrl}engine/pd4web.js`);
   engineStage = "wasm";
-  const module = await g.Pd4WebModule({ locateFile: (path) => `${baseUrl}engine/${path}` });
+  const module = await g.Pd4WebModule({
+    locateFile: (path) => `${baseUrl}engine/${path}`,
+    // 엔진이 준비를 마치기 전에 기다리는 것(wasm, 작업자 4개, 데이터 파일)의 남은 개수. 멈춘 곳을 보려고 단계에 적는다.
+    monitorRunDependencies: (left: number) => { engineStage = `wasm (남은 준비 ${left})`; },
+  });
   const pd = new module.Pd4Web();
   // pd4web의 GUI·콜백 코드는 전역 Pd4Web을 찾는다.
   g.Pd4Web = pd;

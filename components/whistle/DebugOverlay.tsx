@@ -15,6 +15,20 @@ const REFRESH_MS = 250;
 /** 오버레이 폭(글자 수 기준). 가장 긴 줄보다 넉넉하게 */
 const BOX_WIDTH_CH = 88;
 
+// 폰에는 콘솔이 없어서, ?debug일 때만 최근 오류를 모아 화면에 보인다.
+const recentErrors: string[] = [];
+if (typeof window !== "undefined" && new URLSearchParams(location.search).has("debug")) {
+  const keep = (text: string) => { recentErrors.push(text.replace(/\s+/g, " ").slice(0, 160)); if (recentErrors.length > 4) recentErrors.shift(); };
+  window.addEventListener("error", (e) => keep(`오류 ${e.message}`));
+  window.addEventListener("unhandledrejection", (e) => keep(`거부 ${e.reason instanceof Error ? e.reason.message : String(e.reason)}`));
+  for (const level of ["error", "warn"] as const) {
+    const original = console[level];
+    console[level] = (...args: unknown[]) => { keep(`${level} ${args.map((a) => (a instanceof Error ? a.message : String(a))).join(" ")}`); original.apply(console, args); };
+  }
+}
+/** 좁은 화면에서 잘리지 않게 긴 글을 여러 줄로 나눈다. */
+const wrap = (text: string, width = 56) => text.match(new RegExp(`.{1,${width}}`, "g")) ?? [];
+
 const f = (v: number | undefined, digits = 2) => (v === undefined || !Number.isFinite(v) ? "-" : v.toFixed(digits));
 const pad = (s: string, n: number) => (s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length));
 
@@ -122,6 +136,10 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
         : pad("", 25);
       lines.push(`${pad(voice.patch, 20)}${pad(voice.id, 16)}${pad(kind, 8)}${values}${voice.state}`);
     }
+  }
+  if (recentErrors.length) {
+    lines.push("");
+    for (const error of recentErrors) lines.push(...wrap(error));
   }
   return lines.join("\n");
 }
