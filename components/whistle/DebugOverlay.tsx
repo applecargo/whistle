@@ -180,7 +180,8 @@ export function DebugOverlay({ audio, getWorld, derivation }: Props) {
         // 폭 고정: 내용 길이(releasing 표시, 영역 수)에 따라 박스가 늘고 줄면 오른쪽 기준이라 글자 시작이 흔들린다.
         // 가장 긴 줄(슬롯 6개 모두 다른 상태 + 영역 표 한 줄)이 들어가는 폭. 화면이 좁으면 화면에 맞춘다.
         boxSizing: "border-box", width: `min(${BOX_WIDTH_CH}ch, calc(100% - 80px))`, overflow: "hidden", pointerEvents: "none",
-        font: "14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace", whiteSpace: "pre",
+        // 폰처럼 좁은 화면에서는 글자를 줄이고, 그래도 넘치는 줄은 잘리지 않게 다음 줄로 넘긴다.
+        font: "clamp(10px, 2.8vw, 14px)/1.45 ui-monospace, SFMono-Regular, Menlo, monospace", whiteSpace: "pre-wrap", overflowWrap: "anywhere",
         color: "#e8f5e9", background: "rgba(0, 0, 0, 0.62)", borderRadius: 6,
       }}
     >
