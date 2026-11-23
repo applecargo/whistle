@@ -2,7 +2,7 @@
 #X obj 68 563 dac~;
 #X obj 21 18 loadbang;
 #X msg 21 43 \; pd dsp 1;
-#X obj 47 409 environment_wind;
+#X obj 47 409 terrain_soft;
 #X connect 1 0 2 0;
 #X connect 3 0 0 0;
 #X connect 3 1 0 1;
