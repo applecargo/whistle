@@ -52,6 +52,8 @@ type Props = {
   onAudioFrame?: (frame: PlayerAudioFrame) => void;
   onControlsReset?: () => void;
   controls?: MutableRefObject<Set<string>>;
+  /** 터치 조이스틱(PlayControls). x 오른쪽 회전 +, y 앞으로 +, 각각 -1~1. 키보드가 눌려 있으면 키보드가 먼저다. */
+  stick?: MutableRefObject<{ x: number; y: number }>;
   className?: string;
   feedback?: PlacementFeedback | null;
   clock?: () => Date;
@@ -130,6 +132,7 @@ export default function Scene({
   onAudioFrame,
   onControlsReset,
   controls,
+  stick,
   className = "",
   feedback = null,
   clock = deviceTime,
@@ -314,7 +317,6 @@ export default function Scene({
     let pitch = -0.12,
       targetPitch = pitch,
       targetYaw = player.yaw,
-      stepRemaining = 0,
       eyeY = playerEyeHeight(
         floorHeight(world, world.start.x, world.start.z, structures) ?? 0,
         environmentAt(terrain.environment, world.start.x, world.start.z).water,
@@ -488,7 +490,6 @@ export default function Scene({
       controls?.current.clear();
       resetControls.current?.();
       jumpBuffer = 0;
-      stepRemaining = 0;
       velocity = 0;
       drag = false;
       pointerStart = null;
@@ -704,13 +705,13 @@ export default function Scene({
           else jumpBuffer = Math.max(0, jumpBuffer - dt);
           if (jumpBuffer > 0 && !jump && !air && groundAge <= COYOTE_SECONDS) {
             const input = Number(!!(active("forward") || active("w") || active("arrowup")))
-              - Number(!!(active("backward") || active("s") || active("arrowdown")));
-            const direction = input || (Math.abs(velocity) > .1 ? Math.sign(velocity) : Math.sign(stepRemaining));
+              - Number(!!(active("backward") || active("s") || active("arrowdown")))
+              || Math.sign(stick?.current.y ?? 0);
+            const direction = input || (Math.abs(velocity) > .1 ? Math.sign(velocity) : 0);
             jump = launchJump(lastGround, player.yaw, direction, 1.5 * profile.speed);
             glideEligible = localEffects.glide > .5;
             jumpBuffer = 0;
             groundAge = Infinity;
-            stepRemaining = 0;
           }
           if (jump) jump.elapsed += dt;
           const crouching = !!active("crouch");
@@ -730,27 +731,10 @@ export default function Scene({
             air = environmentalFlight("bounce", ground, Math.sin(player.yaw) * velocity, -Math.cos(player.yaw) * velocity, 5 + localEffects.bounce * 2);
             bounceCooldown = 1.4;
           }
-          for (const [command, turn] of [
-            ["turn-left", -Math.PI / 12],
-            ["turn-right", Math.PI / 12],
-          ] as const) {
-            if (controls?.current.delete(command)) {
-              targetYaw =
-                player.yaw +
-                THREE.MathUtils.clamp(
-                  targetYaw + turn - player.yaw,
-                  -Math.PI / 6,
-                  Math.PI / 6,
-                );
-            }
-          }
-          if (controls?.current.delete("step"))
-            stepRemaining = Math.min(stepRemaining + 0.35, 0.7);
-          if (controls?.current.delete("backstep"))
-            stepRemaining = Math.max(stepRemaining - 0.35, -0.7);
           const turn =
             Number(!!(active("right") || active("d") || active("arrowright"))) -
-            Number(!!(active("left") || active("a") || active("arrowleft")));
+            Number(!!(active("left") || active("a") || active("arrowleft")))
+            || (stick?.current.x ?? 0);
           if (turn) {
             targetYaw += turn * dt * 0.55;
           }
@@ -760,15 +744,9 @@ export default function Scene({
             active("forward") || active("w") || active("arrowup");
           const backward =
             active("backward") || active("s") || active("arrowdown");
-          let distance =
-            (Number(!!heldForward) - Number(!!backward)) * dt * 1.5;
-          if (heldForward || backward) stepRemaining = 0;
-          else if (Math.abs(stepRemaining) > 0) {
-            distance =
-              Math.sign(stepRemaining) *
-              Math.min(dt * 1.5, Math.abs(stepRemaining));
-            stepRemaining -= distance;
-          }
+          // 조이스틱은 끈 만큼(0~1) 걷는다. 끝까지 끌면 키보드와 같은 속도
+          const forwardInput = Number(!!heldForward) - Number(!!backward) || (stick?.current.y ?? 0);
+          let distance = forwardInput * dt * 1.5;
           const airInput = dt > 0 ? distance / (dt * 1.5) : 0;
           const surface =
             tileAt(worldRef.current, player.x, player.z)?.surface ?? "plain";

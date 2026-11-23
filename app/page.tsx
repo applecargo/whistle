@@ -79,7 +79,7 @@ export default function Home() {
   const simulationRef = useRef(simulation),
     player = useRef<Player>({ ...initialWorld.start, yaw: 0 }),
     controls = useRef(new Set<string>()),
-    padPressedAt = useRef(new Map<string, number>()),
+    stick = useRef({ x: 0, y: 0 }),
     file = useRef<HTMLInputElement>(null),
     toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   simulationRef.current = simulation;
@@ -312,6 +312,7 @@ export default function Home() {
             onPlayer={(p) => (player.current = p)}
             onAudioFrame={frame => audio.movement(frame, getWorld(), simulationRef.current.actors, derivation)}
             controls={controls}
+            stick={stick}
             onControlsReset={() => setMovementMode("walk")}
           />
           <button className="play-return" aria-label={t("만들기로 돌아가기")} onClick={exit}>
@@ -321,7 +322,7 @@ export default function Home() {
           <DebugOverlay audio={audio} getWorld={getWorld} derivation={derivation} />
           <PlayControls
             controls={controls}
-            padPressedAt={padPressedAt}
+            stick={stick}
             player={player}
             movementMode={movementMode}
             onMovementModeChange={setMovementMode}

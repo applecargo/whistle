@@ -1,85 +1,56 @@
 "use client";
-import type { MutableRefObject } from "react";
+import { useRef, type MutableRefObject } from "react";
 import type { Player } from "@/lib/world";
 import { useLanguage } from "./Language";
 
+/** 조이스틱 손잡이가 움직이는 반지름(px). 이만큼 끌면 최대 */
+const STICK_RADIUS = 40;
+/** 이보다 조금 끈 것(0~1)은 0으로 본다(손가락 떨림) */
+const DEAD_ZONE = 0.15;
+
 type Props = {
   controls: MutableRefObject<Set<string>>;
-  padPressedAt: MutableRefObject<Map<string, number>>;
+  stick: MutableRefObject<{ x: number; y: number }>;
   player: MutableRefObject<Player>;
   movementMode: "walk" | "crouch";
   onMovementModeChange: (mode: "walk" | "crouch") => void;
 };
 
+/** 아날로그 조이스틱: 위아래로 끈 만큼 앞뒤로 걷고, 좌우로 끈 만큼 돈다. 손을 떼면 멈춘다. */
+function Stick({ stick, label }: { stick: Props["stick"]; label: string }) {
+  const knob = useRef<HTMLSpanElement>(null);
+  const set = (x: number, y: number) => {
+    stick.current = { x, y };
+    if (knob.current) knob.current.style.transform = `translate(${x * STICK_RADIUS}px, ${-y * STICK_RADIUS}px)`;
+  };
+  const move = (e: React.PointerEvent<HTMLDivElement>) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    let x = (e.clientX - (box.left + box.width / 2)) / STICK_RADIUS;
+    let y = -(e.clientY - (box.top + box.height / 2)) / STICK_RADIUS;
+    const length = Math.hypot(x, y);
+    if (length > 1) { x /= length; y /= length; }
+    set(Math.abs(x) < DEAD_ZONE ? 0 : x, Math.abs(y) < DEAD_ZONE ? 0 : y);
+  };
+  const release = () => set(0, 0);
+  return (
+    <div className="stick" role="application" aria-label={label}
+      onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); move(e); }}
+      onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) move(e); }}
+      onPointerUp={release}
+      onPointerCancel={release}
+      onLostPointerCapture={release}>
+      <span ref={knob} className="stick-knob" aria-hidden="true" />
+    </div>
+  );
+}
+
 export function PlayControls({
-  controls, padPressedAt, player, movementMode, onMovementModeChange,
+  controls, stick, player, movementMode, onMovementModeChange,
 }: Props) {
   const { t } = useLanguage();
   return (
     <div className="touch-controls" aria-label={t("이동 터치패드")}>
-      {(
-        [
-          {
-            key: "forward",
-            command: "step",
-            className: "direction-forward",
-            label: "앞으로",
-            glyph: "⌃",
-          },
-          {
-            key: "left",
-            command: "turn-left",
-            className: "direction-left",
-            label: "왼쪽으로 회전",
-            glyph: "‹",
-          },
-          {
-            key: "backward",
-            command: "backstep",
-            className: "direction-back",
-            label: "뒤로",
-            glyph: "⌄",
-          },
-          {
-            key: "right",
-            command: "turn-right",
-            className: "direction-right",
-            label: "오른쪽으로 회전",
-            glyph: "›",
-          },
-        ] as const
-      ).map(({ key, command, className, label, glyph }) => (
-        <button
-          key={key}
-          className={className}
-          aria-label={t(label)}
-          onPointerDown={(e) => {
-            e.preventDefault();
-            e.currentTarget.setPointerCapture(e.pointerId);
-            padPressedAt.current.set(key, performance.now());
-            controls.current.add(key);
-          }}
-          onPointerUp={() => {
-            controls.current.delete(key);
-            if (
-              performance.now() - (padPressedAt.current.get(key) ?? 0) <
-              180
-            )
-              controls.current.add(command);
-            padPressedAt.current.delete(key);
-          }}
-          onPointerCancel={() => {
-            controls.current.delete(key);
-            padPressedAt.current.delete(key);
-          }}
-          onLostPointerCapture={() => controls.current.delete(key)}
-          onClick={(e) => {
-            if (e.detail === 0) controls.current.add(command);
-          }}
-        >
-          <span aria-hidden="true">{glyph}</span>
-        </button>
-      ))}
+      <Stick stick={stick} label={t("이동 조이스틱")} />
       <div className="movement-modes">
         <button aria-label={t("점프")}
           onPointerDown={(e) => {
