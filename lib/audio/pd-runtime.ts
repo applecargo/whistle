@@ -100,29 +100,32 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   }
   const g = globals();
   engineStage = "엔진 스크립트";
-  if (!g.Pd4WebModule) await loadScript(`${baseUrl}engine/pd4web.js`);
+  const engineUrl = `${baseUrl}engine/pd4web.js`;
+  if (!g.Pd4WebModule) await loadScript(engineUrl);
   engineStage = "wasm";
-  // 엔진은 시작 전에 작업자(Web Worker) 4개가 응답하기를 기다린다. 폰에서 여기서 멈춰서, 응답 수와 작업자 오류를 남긴다.
+  // 엔진은 시작 전에 같은 스크립트로 작업자(Web Worker) 4개를 띄우고, 넷 다 응답해야 시작한다.
+  // 폰 Firefox에서는 이 작업자 스크립트 요청이 서비스 워커(coi-serviceworker)에서 자주 실패해, 엔진이 오류 없이 멈췄다.
+  // 이미 받은 스크립트로 Blob 주소를 만들어 띄운다: 서비스 워커를 거치지 않고, 교차 출처 격리는 페이지에서 물려받는다.
+  // 엔진이 나중에 작업자를 더 띄울 수도 있어 되돌리지 않는다(엔진 스크립트 주소만 바꾼다).
+  const source = URL.createObjectURL(new Blob([await (await fetchOk(engineUrl)).text()], { type: "text/javascript" }));
+  const engineScript = new URL(engineUrl, location.href).href;
   let left = 0, workers = 0, answered = 0;
   const show = () => { engineStage = `wasm (남은 준비 ${left} · 작업자 응답 ${answered}/${workers})`; };
   const OriginalWorker = g.Worker;
   g.Worker = class extends OriginalWorker {
     constructor(url: string | URL, options?: WorkerOptions) {
-      super(url, options);
+      super(new URL(url, location.href).href === engineScript ? source : url, options);
       workers++; show();
       this.addEventListener("message", () => { answered++; show(); }, { once: true });
       this.addEventListener("error", (e) => console.error(`pd4web 작업자 오류: ${e.message || "(이유 없음)"}`));
       this.addEventListener("messageerror", () => console.error("pd4web 작업자 messageerror(공유 메모리를 못 받음?)"));
     }
   };
-  let module: Awaited<ReturnType<Pd4WebGlobals["Pd4WebModule"]>>;
-  try {
-    module = await g.Pd4WebModule({
-      locateFile: (path) => `${baseUrl}engine/${path}`,
-      // 엔진이 준비를 마치기 전에 기다리는 것(wasm, 작업자 4개, 데이터 파일)의 남은 개수.
-      monitorRunDependencies: (n: number) => { left = n; show(); },
-    });
-  } finally { g.Worker = OriginalWorker; }
+  const module = await g.Pd4WebModule({
+    locateFile: (path) => `${baseUrl}engine/${path}`,
+    // 엔진이 준비를 마치기 전에 기다리는 것(wasm, 작업자 4개, 데이터 파일)의 남은 개수.
+    monitorRunDependencies: (n: number) => { left = n; show(); },
+  });
   const pd = new module.Pd4Web();
   // pd4web의 GUI·콜백 코드는 전역 Pd4Web을 찾는다.
   g.Pd4Web = pd;
