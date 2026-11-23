@@ -15,6 +15,20 @@ const REFRESH_MS = 250;
 /** 오버레이 폭(글자 수 기준). 가장 긴 줄보다 넉넉하게 */
 const BOX_WIDTH_CH = 88;
 
+// 폰에는 콘솔이 없어서, ?debug일 때만 최근 오류를 모아 화면에 보인다.
+const recentErrors: string[] = [];
+if (typeof window !== "undefined" && new URLSearchParams(location.search).has("debug")) {
+  const keep = (text: string) => { recentErrors.push(text.replace(/\s+/g, " ").slice(0, 160)); if (recentErrors.length > 4) recentErrors.shift(); };
+  window.addEventListener("error", (e) => keep(`오류 ${e.message}`));
+  window.addEventListener("unhandledrejection", (e) => keep(`거부 ${e.reason instanceof Error ? e.reason.message : String(e.reason)}`));
+  for (const level of ["error", "warn"] as const) {
+    const original = console[level];
+    console[level] = (...args: unknown[]) => { keep(`${level} ${args.map((a) => (a instanceof Error ? a.message : String(a))).join(" ")}`); original.apply(console, args); };
+  }
+}
+/** 좁은 화면에서 잘리지 않게 긴 글을 여러 줄로 나눈다. */
+const wrap = (text: string, width = 56) => text.match(new RegExp(`.{1,${width}}`, "g")) ?? [];
+
 const f = (v: number | undefined, digits = 2) => (v === undefined || !Number.isFinite(v) ? "-" : v.toFixed(digits));
 const pad = (s: string, n: number) => (s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length));
 
@@ -74,7 +88,7 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
   const slots = info.interaction.length + info.voices.length;
   lines.push(c
     ? `오디오 ${c.state} · ${c.sampleRate} Hz · 지연(${c.latencyHint}) ${f(c.baseLatency * 1000, 1)}+${f((c.outputLatency ?? NaN) * 1000, 1)} ms · 비상관 ${info.diffuse ? "켬" : "끔"}`
-    : "오디오 시작 전");
+    : `오디오 시작 전${info.stage ? ` · 단계 ${info.stage}` : " · 아직 시작 안 함"} · 격리 ${crossOriginIsolated ? "됨" : "안 됨"}`);
   // 상호작용 패치는 항상 edit·player·event 세 개라 이름은 생략(줄이 길어지면 폭을 넘는다)
   lines.push(`Pd 슬롯 ${slots}개 = 상호작용 ${info.interaction.length} + 사운드스케이프 ${info.voices.length}` +
     (info.voices.length ? ` (${Object.entries(byState).map(([s, n]) => `${s} ${n}`).join(", ")})` : ""));
@@ -123,11 +137,16 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
       lines.push(`${pad(voice.patch, 20)}${pad(voice.id, 16)}${pad(kind, 8)}${values}${voice.state}`);
     }
   }
+  if (recentErrors.length) {
+    lines.push("");
+    for (const error of recentErrors) lines.push(...wrap(error));
+  }
   return lines.join("\n");
 }
 
 export function DebugOverlay({ audio, getWorld, derivation }: Props) {
-  const [visible, setVisible] = useState(false);
+  // 키보드가 없는 폰에서는 주소에 ?debug를 붙여 켠다.
+  const [visible, setVisible] = useState(() => new URLSearchParams(location.search).has("debug"));
   const [text, setText] = useState("");
   const frame = useFrameStats();
   const latest = useRef({ audio, getWorld, derivation });
@@ -161,7 +180,8 @@ export function DebugOverlay({ audio, getWorld, derivation }: Props) {
         // 폭 고정: 내용 길이(releasing 표시, 영역 수)에 따라 박스가 늘고 줄면 오른쪽 기준이라 글자 시작이 흔들린다.
         // 가장 긴 줄(슬롯 6개 모두 다른 상태 + 영역 표 한 줄)이 들어가는 폭. 화면이 좁으면 화면에 맞춘다.
         boxSizing: "border-box", width: `min(${BOX_WIDTH_CH}ch, calc(100% - 80px))`, overflow: "hidden", pointerEvents: "none",
-        font: "14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace", whiteSpace: "pre",
+        // 폰처럼 좁은 화면에서는 글자를 줄이고, 그래도 넘치는 줄은 잘리지 않게 다음 줄로 넘긴다.
+        font: "clamp(10px, 2.8vw, 14px)/1.45 ui-monospace, SFMono-Regular, Menlo, monospace", whiteSpace: "pre-wrap", overflowWrap: "anywhere",
         color: "#e8f5e9", background: "rgba(0, 0, 0, 0.62)", borderRadius: 6,
       }}
     >
