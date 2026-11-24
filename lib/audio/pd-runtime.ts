@@ -46,6 +46,8 @@ export type PatchInstance = {
   node: AudioNode;
   /** `<id>-<bus>`로 보낸다(패치는 [r $1-<bus>]) */
   send(bus: string, message: PdMessage): void;
+  /** 패치가 `[s $1-<bus>]`로 보내는 bang을 받는다(Pd → JS). destroy 때 함께 끊는다 */
+  onBang(bus: string, listener: () => void): void;
   destroy(): void;
 };
 
@@ -61,6 +63,9 @@ export type PdEngine = {
   mixdown: AudioNode;
   /** 지금 쓰는 슬롯 수 */
   slotsInUse(): number;
+  /** 엔진 가상 디스크(메모리)에 파일을 쓴다/지운다. 경로는 / 기준(예: "uploads/s1.wav"). 패치는 [soundfiler] 등으로 읽는다. */
+  writeFile(path: string, data: Uint8Array): void;
+  removeFile(path: string): void;
 };
 
 const loadScript = (url: string) => new Promise<void>((resolve, reject) => {
@@ -209,10 +214,12 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
     const id = `v${++count}`;
     const merger = context.createChannelMerger(2);
     const last = new Map<string, () => void>();
+    const listening: (() => void)[] = [];
     let closed = false;
     const destroy = () => {
       if (closed) return;
       closed = true;
+      for (const stop of listening.splice(0)) stop();
       try { message("whistle-slot", "off", [index]); } catch { /* 엔진이 이미 멈춤 */ }
       splitter.disconnect(merger);
       merger.disconnect();
@@ -238,25 +245,36 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
         const target = `${id}-${bus}`;
         last.set(key(target, values), deliver(target, values));
       },
+      onBang(bus: string, listener: () => void) {
+        // pd4web은 한 번 등록한 이름을 풀지 못한다(audio/pd-to-js.md). 이름(vK)은 다시 쓰지 않으므로 함수만 뗀다.
+        const stop = pd.onBangReceived(`${id}-${bus}`, () => { if (!closed) listener(); });
+        if (stop) listening.push(stop);
+      },
       destroy,
     };
   };
   const send = (bus: string, values: PdMessage) => { globalLast.set(key(bus, values), deliver(bus, values)); };
+  const removeFile = (path: string) => {
+    try { module.FS.unlink(`/${path}`); } catch { /* 이미 없음 */ }
+  };
+  const writeFile = (path: string, data: Uint8Array) => {
+    const dir = path.slice(0, path.lastIndexOf("/") + 1);
+    if (dir) module.FS.mkdirTree(`/${dir}`);
+    // 엔진의 FS.writeFile은 있는 파일을 비우지 않고 뒤에 이어 쓴다. 지우고 쓴다.
+    removeFile(path);
+    module.FS.writeFile(`/${path}`, data);
+  };
 
   // 개발 서버에서만: 패치 파일을 고치면(vite.config.ts가 알려 줌) 엔진 디스크의 파일을 바꾸고, 그 파일을 쓰는 것을 다시 만든다.
   // main.pd(와 그 안의 패치)가 바뀌면 main.pd를 다시 열고 떠 있는 슬롯을 모두, 영역 패치가 바뀌면 그 슬롯만. 다시 만든 뒤 마지막 값을 다시 보낸다.
   // Pd는 abstraction을 만들 때마다 파일을 새로 읽으므로, 새로 뜨는 슬롯(영역에 다시 들어갈 때)은 저절로 새 버전이다.
   import.meta.hot?.on("whistle:patch", ({ path, data }: { path: string; data?: string }) => {
     if (data === undefined) {
-      try { module.FS.unlink(`/${path}`); } catch { /* 이미 없음 */ }
+      removeFile(path);
       if (files.includes(path)) files.splice(files.indexOf(path), 1);
       return;
     }
-    const dir = path.slice(0, path.lastIndexOf("/") + 1);
-    if (dir) module.FS.mkdirTree(`/${dir}`);
-    // 엔진의 FS.writeFile은 있는 파일을 비우지 않고 뒤에 이어 쓴다. 지우고 쓴다.
-    try { module.FS.unlink(`/${path}`); } catch { /* 새 파일 */ }
-    module.FS.writeFile(`/${path}`, Uint8Array.from(atob(data), (c) => c.charCodeAt(0)));
+    writeFile(path, Uint8Array.from(atob(data), (c) => c.charCodeAt(0)));
     if (!files.includes(path)) files.push(path);
     if (!path.endsWith(".pd")) return;
     const changed = path.slice(path.lastIndexOf("/") + 1, -3);
@@ -285,7 +303,7 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
     return [...words].some((word) => word && files.includes(`${word}.pd`) && uses(word, changed, seen));
   };
 
-  return { context, files, start, send, mixdown, slotsInUse: () => used.size };
+  return { context, files, start, send, mixdown, slotsInUse: () => used.size, writeFile, removeFile };
 }
 
 /** 터치·키 처리 안에서 부른다. 엔진의 AudioContext가 막혀(suspended) 있으면 켠다. 엔진이 아직 없으면 아무것도 안 한다. */
