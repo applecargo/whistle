@@ -1,4 +1,4 @@
-import { groundTileHeight, isHole } from "./tile.ts";
+import { groundTileHeight, isGap } from "./tile.ts";
 import type { World } from "./world.ts";
 type Ground = Pick<World, "size" | "terrain">;
 export const WATER_INSET = 0.06;
@@ -13,7 +13,7 @@ export function isWaterTile(world: Ground, x: number, z: number) {
       : world.terrain?.tiles[b * world.size + a];
   const wet = (a: number, b: number) => {
     const t = tile(a, b);
-    return !!t && !isHole(t) && t.surface === "slick";
+    return !!t && !isGap(t) && t.surface === "slick";
   };
   return wet(x, z);
 }
@@ -71,7 +71,7 @@ export function carveWaterBed(
     isWaterTile(world, i % world.size, Math.floor(i / world.size))
       ? groundTileHeight(world.terrain!.tiles[i])
       : null,
-    (i) => isHole(world.terrain?.tiles[i]),
+    (i) => isGap(world.terrain?.tiles[i]),
   );
   for (const [h, weight] of weights) {
     const w = weight * waterSupport(ground, h * unit);

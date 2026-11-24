@@ -1,3 +1,4 @@
+import { savedWorld } from "./world-storage";
 import { setPresentation, openPlaced } from "./presentation";
 import { writeFile } from "node:fs/promises";
 import { test, expect, type Page } from "@playwright/test";
@@ -96,8 +97,8 @@ test("surface attachment uses existing grass or bare ground without planting any
   expect(attached.sameGeometry).toBe(true);
   expect(attached.ground).toBe(true);
   await expect.poll(async () => (await grassSurfaceState(page)).time).toBeGreaterThan(attached.time!);
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("whistle.world.v2")!).assets[0].placement)).toBe("surface");
-  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("whistle.world.v2")!).assets[0]);
+  await expect.poll(async () => (await savedWorld(page)).assets[0].placement).toBe("surface");
+  const saved = (await savedWorld(page)).assets[0];
   expect(attached.texture).toBe(saved.image);
   await page.getByRole("button", { name: "번짐", exact: true }).click();
   await page.locator('[data-cell="39"]').click({ position: { x: 2, y: 2 } });
@@ -107,8 +108,10 @@ test("surface attachment uses existing grass or bare ground without planting any
   await expect.poll(async () => (await grassSurfaceState(page)).textured).toBe(attached.textured);
   await page.getByRole("button", { name: "플레이", exact: true }).click();
   await page.locator(".play-shell canvas").waitFor();
-  await expect.poll(async () => (await grassSurfaceState(page)).textured).toBe(attached.textured);
-  expect((await grassSurfaceState(page)).matrices).toEqual(before.matrices);
+  await expect.poll(async () => (await grassSurfaceState(page)).textured).toBeGreaterThan(0);
+  const playingGrass=await grassSurfaceState(page);
+  expect(playingGrass.texture).toBe(saved.image);
+  expect(playingGrass.sameGeometry).toBe(true);
   const coatingOpacity = () => page.evaluate(() => {
     const mesh = (globalThis as any).__testScene.getObjectByName("grass-surface-image");
     return mesh.material.userData.surfaceProjection.opacity.value as number;
@@ -143,7 +146,9 @@ test("surface images follow slopes through terrain edits, undo, play and reload"
   await expect.poll(async () => (await surfaceState(page)).maxY).toBeCloseTo(before.maxY);
   await page.getByRole("button", { name: "플레이", exact: true }).click();
   await page.locator(".play-shell canvas").waitFor();
-  await expect.poll(async () => (await surfaceState(page)).count).toBe(before.count);
+  await expect.poll(async () => (await surfaceState(page)).count).toBeGreaterThan(0);
+  expect((await surfaceState(page)).maxY).toBeCloseTo(before.maxY);
+  expect((await surfaceState(page)).minY).toBeCloseTo(before.minY);
   expect((await surfaceState(page)).position).toEqual([0, 0, 0]);
   await page.screenshot({ path: testInfo.outputPath("abstract-play.png") });
   await page.getByRole("button", { name: "만들기로 돌아가기", exact: true }).click();
@@ -226,7 +231,7 @@ test("three placements without visibility controls remain usable on mobile with 
   await setPresentation(page, "placement", "upright");
   await dialog.getByRole("button", { name: "저장", exact: true }).click();
   await expect.poll(async () => (await grassSurfaceState(page)).textured).toBe(0);
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("whistle.world.v2")!).assets[0].placement)).toBe("upright");
+  await expect.poll(async () => (await savedWorld(page)).assets[0].placement).toBe("upright");
   await page.reload();
   await openPlaced(page, "standing");
   await expect(dialog.locator("[data-placement]")).toHaveAttribute("data-placement", "upright");

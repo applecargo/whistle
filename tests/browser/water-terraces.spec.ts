@@ -1,3 +1,4 @@
+import { savedWorld } from "./world-storage";
 import { test, expect } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
 
@@ -64,7 +65,7 @@ test("saved raised water on open ground does not cover the board or distant grou
   await expect(page.locator(".result-water")).toHaveCount(2);
   await expect(page.locator('[data-cell="0"] .result-water')).toHaveCount(0);
   await expect(page.locator('[data-cell="52"]')).toHaveAccessibleName(/높이 0/);
-  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("whistle.world.v2")!));
-  expect(saved.terrain.tiles[52].height).toBe(6);
-  expect(saved.terrain.tiles[0].surface).toBe("plain");
+  const saved = await savedWorld(page);
+  expect(saved.terrain!.tiles[52].height).toBe(6);
+  expect(saved.terrain!.tiles[0].surface).toBe("plain");
 });

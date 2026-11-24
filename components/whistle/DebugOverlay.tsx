@@ -69,7 +69,7 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
   const memory = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
   lines.push(`렌더  ${f(frame.fps, 0)} fps · 최장 프레임 ${f(frame.worst, 0)} ms${memory ? ` · JS 힙 ${f(memory.usedJSHeapSize / 2 ** 20, 0)} MB` : ""}`);
   const q = renderQuality();
-  lines.push(`품질 ${q.name} (배율 ${f(q.pixelRatio, 2)}/기기 ${f(window.devicePixelRatio || 1, 2)} · MSAA ${q.samples} · 부드러운 그림자 ${q.softShadows ? "켬" : "끔"})`);
+  lines.push(`품질 ${q.name} (배율 ${f(q.pixelRatio, 2)}/기기 ${f(window.devicePixelRatio || 1, 2)} · MSAA ${q.samples})`);
   lines.push(`GPU  ${gpu().slice(0, 70)}`);
 
   // 오디오

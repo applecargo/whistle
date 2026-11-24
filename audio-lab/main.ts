@@ -1,5 +1,5 @@
-import { createInteractionSession, type InteractionSession } from "../lib/audio/pd-session";
 import { openEngine } from "../lib/audio/pd-runtime";
+import { createInteractionSession, type InteractionSession } from "../lib/audio/pd-session";
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const start = element<HTMLButtonElement>("start");
@@ -12,6 +12,7 @@ const number = (id: string) => element<HTMLInputElement>(id).valueAsNumber;
 let session: InteractionSession | undefined;
 let muted = false;
 let frame = 0;
+let generation = 0;
 let disconnectMeter = () => {};
 const received: Record<string, (string | number)[]> = {};
 
@@ -55,30 +56,36 @@ function measure(current: InteractionSession) {
 }
 
 start.onclick = async () => {
+  const currentGeneration = ++generation;
   start.disabled = true;
   status.textContent = "패치 준비 중";
   try {
-    session = await createInteractionSession(await openEngine(`${import.meta.env.BASE_URL}audio/`), (bus, message) => {
+    const current = await createInteractionSession(await openEngine(`${import.meta.env.BASE_URL}audio/`), (bus, message) => {
       received[bus] = message;
       messages.textContent = JSON.stringify(received, null, 2);
     });
-    muted = false;
-    session.mute(false);
-    mute.textContent = "음소거";
+    if (generation !== currentGeneration) { await current.close(); return; }
+    session = current;
+    muted = document.hidden;
+    session.mute(muted);
+    mute.textContent = muted ? "음소거 해제" : "음소거";
     measure(session);
     enable(true);
     status.textContent = "실행 중";
   } catch (error) {
+    if (generation !== currentGeneration) return;
     status.textContent = "오디오를 시작할 수 없습니다.";
     start.disabled = false;
   }
 };
 
 stop.onclick = async () => {
+  generation++;
   enable(false);
   disconnectMeter();
-  await session?.close();
+  const current = session;
   session = undefined;
+  await current?.close();
   meter.textContent = "—";
   delete meter.dataset.levels;
   status.textContent = "종료됨";
@@ -109,6 +116,9 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 window.addEventListener("pagehide", () => {
+  generation++;
   disconnectMeter();
-  void session?.close();
+  const current = session;
+  session = undefined;
+  void current?.close();
 });

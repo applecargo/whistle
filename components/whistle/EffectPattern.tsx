@@ -7,8 +7,6 @@ function PatternMark({ kind }: { kind: string }) {
     </g>;
     case "fog": return <path d="M3 6H10M6 10H13" />;
     case "lift": return <path d="M5 12V6M11 9V3" />;
-    case "bounce": return <path d="M4 11C4 4 12 4 12 11" />;
-    case "glide": return <path d="M4 12Q10 11 12 4" />;
     case "flow": return <path d="M2 8Q5 3 8 8T14 8" />;
     case "flicker": return <path d="M8 5V11M5 8H11" />;
     default: return null;

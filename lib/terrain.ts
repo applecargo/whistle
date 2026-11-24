@@ -1,9 +1,10 @@
-import { groundTileHeight, isHole } from "./tile.ts";
+import { groundTileHeight, isGap, isHole, isVoid } from "./tile.ts";
 import type { World, Placed } from "./world.ts";
 import { carveWaterBed } from "./water.ts";
 export type Surface = "plain" | "rough" | "slick" | "soft";
-export type Tile = { height: number; surface: Surface; hole?: boolean };
+export type Tile = { height: number; surface: Surface; hole?: boolean; void?: boolean };
 export type Terrain = {
+  floating?: boolean;
   generatorVersion?: 2;
   seed: number;
   tiles: Tile[];
@@ -24,7 +25,7 @@ export const SURFACES: {
   color: string;
   speed: number;
 }[] = [
-  { id: "plain", name: "빈 타일", color: "#ffffff", speed: 1 },
+  { id: "plain", name: "바닥", color: "#ffffff", speed: 1 },
   { id: "rough", name: "거침", color: "#ffffff", speed: 0.72 },
   { id: "slick", name: "흐름", color: "#ffffff", speed: 1.2 },
   { id: "soft", name: "번짐", color: "#ffffff", speed: 0.62 },
@@ -171,7 +172,7 @@ export function deriveStructures(
     const regions = new Int32Array(world.size * world.size).fill(-1);
     for (let start = 0; start < regions.length; start++) {
       const tile = tileAt(world, start % world.size, Math.floor(start / world.size))!;
-      if (regions[start] !== -1 || isHole(tile) || tile.surface === "slick") continue;
+      if (regions[start] !== -1 || isGap(tile) || tile.surface === "slick") continue;
       regions[start] = start;
       const pending = [start];
       for (let i = 0; i < pending.length; i++) {
@@ -179,7 +180,7 @@ export function deriveStructures(
         for (const [dx, dz] of directions) {
           const next = tileAt(world, x + dx, z + dz);
           const index = (z + dz) * world.size + x + dx;
-          if (!next || isHole(next) || next.surface === "slick" ||
+          if (!next || isGap(next) || next.surface === "slick" ||
               next.height !== tile.height || regions[index] !== -1) continue;
           regions[index] = start;
           pending.push(index);
@@ -190,11 +191,11 @@ export function deriveStructures(
     for (let z = 0; z < world.size; z++)
       for (let x = 0; x < world.size; x++) {
         const tile = tileAt(world, x, z)!;
-        if (isHole(tile) || tile.surface === "slick") continue;
+        if (isGap(tile) || tile.surface === "slick") continue;
         for (const [dx, dz] of directions) {
           const next = tileAt(world, x + dx, z + dz);
           if (
-            next && !isHole(next) &&
+            next && !isGap(next) &&
             next.height >= tile.height + 2 &&
             next.surface !== "slick"
           ) {
@@ -214,7 +215,7 @@ export function deriveStructures(
     byCell = new Map(active.map((o) => [`${o.x},${o.z}`, o]));
   for (const a of active) {
     const tile = tileAt(world, a.x, a.z);
-    if (!tile || isHole(tile)) continue;
+    if (!tile || isGap(tile)) continue;
     if (patterns.bridge)
       for (const [dx, dz] of [
         [1, 0],
@@ -223,13 +224,13 @@ export function deriveStructures(
         for (let length = 2; length <= 4; length++) {
           const b = byCell.get(`${a.x + dx * length},${a.z + dz * length}`),
             end = tileAt(world, a.x + dx * length, a.z + dz * length);
-          if (!b || b.asset !== a.asset || end?.height !== tile.height || isHole(end))
+          if (!b || b.asset !== a.asset || end?.height !== tile.height || isGap(end))
             continue;
           const gaps = Array.from({ length: length - 1 }, (_, i) => ({
             x: a.x + dx * (i + 1),
             z: a.z + dz * (i + 1),
           }));
-          if (gaps.every((p) => isHole(tileAt(world, p.x, p.z))))
+          if (gaps.every((p) => isGap(tileAt(world, p.x, p.z))))
             for (const p of gaps) add("bridge", p.x, p.z, tile.height, dx, dz);
         }
     if (patterns.canopy) {
@@ -242,7 +243,7 @@ export function deriveStructures(
         corners.every(
           ([x, z]) =>
             byCell.get(`${x},${z}`)?.asset === a.asset &&
-            !!tileAt(world, x, z) && !isHole(tileAt(world, x, z)),
+            !!tileAt(world, x, z) && !isGap(tileAt(world, x, z)),
         )
       )
         add(
@@ -285,6 +286,7 @@ export function terrainSample(
       Math.max(0, Math.min(world.size - 1, fx + dx)),
       Math.max(0, Math.min(world.size - 1, fz + dz)),
     )!;
+    if (isVoid(tile)) continue;
     if (isHole(tile)) {
       const hx = Math.max(0, Math.min(world.size - 1, fx + dx));
       const hz = Math.max(0, Math.min(world.size - 1, fz + dz));
@@ -319,7 +321,7 @@ export function terrainSample(
 
 
   const outside = Math.max(0, -0.5 - x, -0.5 - z, x - (world.size - 0.5), z - (world.size - 0.5));
-  if (outside > 0) {
+  if (outside > 0 && !world.terrain?.floating) {
     const reach = 5.5 + 1.2 * Math.sin(x * .43 + z * .31);
     const fade = smooth(Math.min(1, outside / reach));
     const relief = Math.sin(x * .61 + z * .27) * Math.cos(z * .49 - x * .19) * .45 * fade * (1 - fade);
@@ -330,9 +332,21 @@ export function terrainSample(
   return {
     height: elevation,
     naturalHeight,
-    coverage: Math.max(0, Math.min(1, 1 - voidAmount)),
+    coverage: Math.max(0, Math.min(1, 1 - voidAmount, world.terrain?.floating ? floatingCoverage(world, x, z) : 1)),
     weights,
   };
+}
+
+function floatingCoverage(world: Pick<World, "size" | "terrain">, x: number, z: number) {
+  const smooth = (t: number) => t * t * (3 - 2 * t);
+  const fx = Math.floor(x), fz = Math.floor(z), tx = smooth(x - fx), tz = smooth(z - fz);
+  let support = 0;
+  for (const [dx, dz, weight] of [[0, 0, (1-tx)*(1-tz)], [1, 0, tx*(1-tz)],
+    [0, 1, (1-tx)*tz], [1, 1, tx*tz]]) {
+    const tile = tileAt(world, fx + dx, fz + dz);
+    if (tile && !isVoid(tile)) support += weight;
+  }
+  return support;
 }
 export function floorHeight(
   world: World,

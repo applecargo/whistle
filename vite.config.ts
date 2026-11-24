@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { portalRelayPlugin } from "./scripts/portals/vite";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { extname, join, normalize, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -100,9 +101,9 @@ const audioFolder = (): Plugin => ({
 
 export default defineConfig({
   base: "/whistle/",
-  server: { headers: isolation },
+  server: { headers: isolation, watch: { ignored: ["**/output/**", "**/.whistle-data/**"] } },
   preview: { headers: isolation },
-  plugins: [react(), audioFolder()],
+  plugins: [react(), audioFolder(), portalRelayPlugin()],
   resolve: { alias: { "@": fileURLToPath(new URL(".", import.meta.url)) } },
   build: {
     rolldownOptions: {

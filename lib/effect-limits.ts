@@ -1,13 +1,11 @@
 import type { EnvironmentCell } from "./environment.ts";
 
-type EffectField = "windX" | "windZ" | "dust" | "fog" | "lift" | "bounce" | "glide" | "flowX" | "flowZ" | "flicker";
+type EffectField = "windX" | "windZ" | "dust" | "fog" | "lift" | "flowX" | "flowZ" | "flicker";
 export const EFFECT_RULES = [
   { kind: "wind", label: "바람", fields: ["windX", "windZ"], threshold: .1, maxCells: 5 },
   { kind: "dust", label: "먼지", fields: ["dust"], threshold: 0, maxCells: 3 },
   { kind: "fog", label: "안개", fields: ["fog"], threshold: .05, maxCells: 4 },
   { kind: "lift", label: "부유", fields: ["lift"], threshold: .12, maxCells: 1 },
-  { kind: "bounce", label: "튕기기", fields: ["bounce"], threshold: .1, maxCells: 1 },
-  { kind: "glide", label: "활공", fields: ["glide"], threshold: .5, maxCells: 2 },
   { kind: "flow", label: "물결", fields: ["flowX", "flowZ"], threshold: .01, maxCells: 3 },
   { kind: "flicker", label: "깜박임", fields: ["flicker"], threshold: 0, maxCells: 1 },
 ] as const satisfies readonly { kind: string; label: string; fields: readonly EffectField[]; threshold: number; maxCells: number }[];

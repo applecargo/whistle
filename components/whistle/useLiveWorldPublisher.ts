@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { World } from "../../lib/world";
+import { uid, type World } from "../../lib/world";
 import { LIVE_WORLD_CHANNEL } from "../../lib/live-world";
 
 export function useLiveWorldPublisher(world: World, ready: boolean) {
@@ -10,7 +10,7 @@ export function useLiveWorldPublisher(world: World, ready: boolean) {
 
   useEffect(() => {
     if (typeof BroadcastChannel === "undefined") return;
-    source.current = crypto.randomUUID();
+    source.current = uid();
     const connection = new BroadcastChannel(LIVE_WORLD_CHANNEL);
     channel.current = connection;
     const send = (type: string) => connection.postMessage({ type, source: source.current });

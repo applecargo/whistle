@@ -1,3 +1,4 @@
+import { savedDocument } from "./world-storage";
 import { test, expect, type Page } from "@playwright/test";
 import { starterWorld, type World } from "../../lib/world";
 import { flatTerrain } from "../../lib/terrain";
@@ -16,6 +17,9 @@ async function open(page: Page, stored?: string, hash = "", key = STORAGE) {
   await expect(page.getByRole("button", { name: "파일 저장", exact: true }))
     .toHaveAttribute("aria-description", "이 브라우저에 저장됨");
   await page.evaluate(({ key, stored }) => {
+    const opened=indexedDB.open("whistle-browser-worlds",1);
+    opened.onsuccess=()=>{const db=opened.result;const tx=db.transaction("worlds","readwrite");tx.objectStore("worlds").clear();tx.oncomplete=()=>db.close();};
+    sessionStorage.clear();
     localStorage.clear();
     localStorage.setItem("whistle.language", "ko");
     if (stored !== undefined) localStorage.setItem(key, stored);
@@ -25,12 +29,12 @@ async function open(page: Page, stored?: string, hash = "", key = STORAGE) {
   await page.goto(`./${hash}`);
 }
 async function storedValue(page: Page, key = STORAGE) {
-  return page.evaluate((key) => localStorage.getItem(key), key);
+  return key===STORAGE ? JSON.stringify(await savedDocument(page))??null : page.evaluate((key) => localStorage.getItem(key), key);
 }
 async function expectPreserved(page: Page, original: string | null, key = STORAGE) {
   // Observe beyond the 350ms autosave debounce, including subsequent edits.
   await page.waitForTimeout(800);
-  expect(await storedValue(page, key)).toBe(original);
+  expect(await page.evaluate(key=>localStorage.getItem(key),key)).toBe(original);
 }
 
 test("old link data is ignored and cannot replace the saved file", async ({ page }) => {
@@ -51,7 +55,7 @@ for (const original of ["{broken-json", "", JSON.stringify({ ...savedWorld(), ve
 test("a failed legacy load preserves the old data and creates no v2 save", async ({ page }) => {
   await open(page, "{broken-legacy", "", LEGACY_STORAGE);
   await expectPreserved(page, "{broken-legacy", LEGACY_STORAGE);
-  expect(await storedValue(page)).toBeNull();
+  expect(await savedDocument(page)).toBeUndefined();
 });
 
 test("normal loading and editing still autosave", async ({ page }) => {

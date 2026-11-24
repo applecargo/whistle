@@ -1,12 +1,12 @@
 import type { World } from "./world.ts";
 import type { Environment, EnvironmentRegion } from "./environment.ts";
 import { LEVEL } from "./terrain.ts";
-import { isHole } from "./tile.ts";
+import { isHole, isVoid } from "./tile.ts";
 import { limitEffectAreas } from "./effect-limits.ts";
 
 export const tileEffectDefaults = {
-  clusterSize: 0, dust: 0, bounce: 0, flowX: 0, flowZ: 0,
-  lift: 0, liftCeiling: 0, glide: 0, flicker: 0,
+  clusterSize: 0, dust: 0, flowX: 0, flowZ: 0,
+  lift: 0, liftCeiling: 0, flicker: 0,
 };
 const directions = [[1, 0], [0, 1], [-1, 0], [0, -1]] as const;
 
@@ -19,8 +19,8 @@ export function applyTileEffects(world: World, environment: Environment) {
     return x < 0 || z < 0 || x >= size || z >= size ? -1 : z * size + x;
   };
   const adjacent = (i: number) => directions.map(([dx, dz]) => at(i, dx, dz)).filter(n => n >= 0);
-  const kind = (i: number) => i < 0 ? null : isHole(tiles[i]) ? "hole" : tiles[i].surface;
-  const solid = (i: number) => i >= 0 && kind(i) !== "hole";
+  const kind = (i: number) => i < 0 || isVoid(tiles[i]) ? null : isHole(tiles[i]) ? "hole" : tiles[i].surface;
+  const solid = (i: number) => i >= 0 && kind(i) !== null && kind(i) !== "hole";
   for (let i = 0; i < tiles.length; i++) {
     const type = kind(i);
     if (seen.has(i) || type === "plain" || type === null) continue;
@@ -40,16 +40,7 @@ export function applyTileEffects(world: World, environment: Environment) {
     if (type === "rough" && breeze > .1 && cell.moisture < .8)
       cell.dust = Math.min(.6, breeze * .6);
     if (cell.tree && breeze > .1) cell.flicker = Math.min(1, breeze);
-    if (solid(i) && tile.height >= 1 && breeze > .1) for (const [dx, dz] of directions) {
-      const behind = at(i, -dx, -dz), edge = at(i, dx, dz);
-      if (solid(behind) && tiles[behind].height === tile.height && edge >= 0 &&
-        (kind(edge) === "hole" || tiles[edge].height < tile.height)) cell.glide = 1;
-    }
-
-    if (type === "soft") {
-      const rim = adjacent(i).filter(n => solid(n) && tiles[n].height > tile.height);
-      if (rim.length >= 3) cell.bounce = Math.min(1, (Math.min(...rim.map(n => tiles[n].height)) - tile.height) * .5);
-    } else if (type === "slick") {
+    if (type === "slick") {
       for (const [dx, dz] of directions) {
         const up = at(i, -dx, -dz), down = at(i, dx, dz);
         if (kind(up) !== "slick" || kind(down) !== "slick" || tiles[up].height <= tile.height || tiles[down].height >= tile.height) continue;

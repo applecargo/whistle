@@ -20,7 +20,7 @@
 // - 바라보는 방향: yaw 0 = −Z, 이동 방향 (sin yaw, 0, −cos yaw).
 import { LEVEL, type Structure, type Tile } from "../terrain.ts";
 import type { Environment } from "../environment.ts";
-import { isHole } from "../tile.ts";
+import { isGap } from "../tile.ts";
 import type { Vec3 } from "./soundscape.ts";
 
 export const toScene = (n: number, size: number) => n * 2 - size + 1;
@@ -88,7 +88,7 @@ function classify(layer: Layer, field: SoundField): Classified | null {
     amount[i] = clamp01(value);
   };
   if (layer === "surface") {
-    for (let i = 0; i < count; i++) if (!isHole(tiles[i])) mark(i, tiles[i].surface, 1);
+    for (let i = 0; i < count; i++) if (!isGap(tiles[i])) mark(i, tiles[i].surface, 1);
     return { kinds, amount };
   }
   if (layer === "structure") {
@@ -123,7 +123,7 @@ export function terrainRegions(field: SoundField): Regions {
   const list: Region[] = [];
   const layers: LayerMap[] = [];
   const groundHeight = new Float64Array(size * size);
-  for (let i = 0; i < groundHeight.length; i++) groundHeight[i] = isHole(tiles[i]) ? 0 : tiles[i].height * LEVEL;
+  for (let i = 0; i < groundHeight.length; i++) groundHeight[i] = isGap(tiles[i]) ? 0 : tiles[i].height * LEVEL;
   for (const layer of LAYERS) {
     const classified = classify(layer, field);
     if (!classified) continue;

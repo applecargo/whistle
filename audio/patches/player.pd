@@ -1,9 +1,9 @@
 #N canvas 0 33 615 482 12;
 #X obj 100 29 s whistle-player;
 #X obj 100 60 r whistle-player;
-#X obj 100 91 t b l;
+#X obj 100 91 route position yaw stat footed;
 #X text 189 87 [x \, y \, z \, grass \, rough \, grounded \, falling \, yaw \, water];
-#X obj 79 158 unpack f f f f f f f f f;
+#X obj 79 158 unpack f f f;
 #X obj 469 148 loadbang;
 #X obj 469 178 s whistle-ready;
 #X obj 469 203 r whistle-ready;
@@ -156,7 +156,7 @@
 #X restore 119 335 pd idle;
 #X obj 160 401 outlet~;
 #X connect 1 0 2 0;
-#X connect 2 1 4 0;
+#X connect 2 0 4 0;
 #X connect 4 0 13 0;
 #X connect 5 0 6 0;
 #X connect 10 0 12 0;
