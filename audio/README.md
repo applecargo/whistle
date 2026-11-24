@@ -42,6 +42,7 @@ Pd 엔진 하나(AudioContext 하나)에서 여러 패치를 실행한다. 소�
   `engine.start(이름, { scoped })` → 슬롯 하나: host의 `[pd slotN]` 안에 `[<패치> slotN]` → `[dac~ 2N+1 2N+2]`를 만들고
   `loadbang`을 보낸다(동적으로 만든 패치에는 loadbang이 저절로 오지 않음). 엔진 출력 32채널을 슬롯별 스테레오 노드로 나눠 돌려준다.
   슬롯은 16개(Web Audio 노드 출력 최대 32채널). `destroy()`는 슬롯을 비운다(`clear`).
+  슬롯이 엔진 안에서 어떻게 만들어지고 소리가 어떻게 믹스되는지는 [`slots-and-mix.md`](slots-and-mix.md).
 - 교차 출처 격리(COOP/COEP)가 필요하다(SharedArrayBuffer). 개발·미리보기 서버는 `vite.config.ts`의 헤더로,
   GitHub Pages는 `public/coi-serviceworker.js`(pd4web에 포함된 coi-serviceworker, MIT)로 건다. 첫 방문 때 페이지가 한 번 새로고침된다.
 - Pd → JS 메시지(`[s 이름]`을 JS가 받기)는 된다. 단 출력이 연결된 슬롯이 하나라도 떠 있어야 엔진이 돈다. 아직 앱에서는 쓰지 않는다.
