@@ -19,7 +19,9 @@ type Pd4Web = {
   init(): void;
   sendList(name: string, list: PdMessage): boolean;
   sendMessage(name: string, selector: string, list: PdMessage): boolean;
-};
+} & { [kind in Receive]: (name: string, listener: (...args: any[]) => void) => (() => void) | void };
+const RECEIVES = ["onBangReceived", "onFloatReceived", "onSymbolReceived", "onListReceived", "onMessageReceived"] as const;
+type Receive = (typeof RECEIVES)[number];
 type Pd4WebGlobals = {
   Pd4WebModule(options: { locateFile(path: string): string; monitorRunDependencies?(left: number): void }): Promise<{ Pd4Web: new () => Pd4Web; FS: EmscriptenFS }>;
   Pd4Web: Pd4Web | null;
@@ -127,6 +129,7 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
     monitorRunDependencies: (n: number) => { left = n; show(); },
   });
   const pd = new module.Pd4Web();
+  shareReceivers(pd);
   // pd4web의 GUI·콜백 코드는 전역 Pd4Web을 찾는다.
   g.Pd4Web = pd;
   // pd4web는 소리 켜기 버튼 id가 없으면 콘솔 오류를 낸다. 누를 일 없는 숨은 요소를 준다(시작은 init()으로).
@@ -238,6 +241,39 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
 export function unlockAudio() {
   const context = globals().Pd4WebAudioContext;
   if (context?.state === "suspended") void context.resume().catch(() => {});
+}
+
+/**
+ * pd4web의 on…Received는 같은 이름을 두 번 등록하면 겹쳐 불렸다(audio/pd-to-js-fix.md).
+ * Pd의 [r]처럼 같은 이름을 여럿이 받게 고친다: 이름마다 pd4web에는 한 번만 등록하고, 함수는 목록으로 모두 부른다
+ * (libpd의 PdDispatcher와 같은 방식). 등록하면 그만 받기 함수를 돌려준다. 한 이름에 종류는 하나.
+ */
+function shareReceivers(pd: Pd4Web) {
+  const names = new Map<string, { kind: Receive; listeners: Set<(...args: unknown[]) => void> }>();
+  for (const kind of RECEIVES) {
+    const original = pd[kind].bind(pd);
+    pd[kind] = (name, listener) => {
+      let entry = names.get(name);
+      if (entry && entry.kind !== kind) throw new Error(`Pd 이름 "${name}"은 이미 ${entry.kind}로 받고 있습니다(한 이름에 종류는 하나).`);
+      if (!entry) {
+        const listeners = new Set<(...args: unknown[]) => void>();
+        entry = { kind, listeners };
+        names.set(name, entry);
+        const call = (...args: unknown[]) => {
+          for (const each of [...listeners]) {
+            try { each(...args); } catch (error) { console.error(`[pd4web] ${name} 받기 오류`, error); }
+          }
+        };
+        // pd4web은 콜백의 인자 개수를 검사한다(bang 1, message 3, 나머지 2).
+        original(name, kind === "onBangReceived" ? (r: string) => call(r)
+          : kind === "onMessageReceived" ? (r: string, selector: string, values: unknown[]) => call(r, selector, values)
+          : (r: string, value: unknown) => call(r, value));
+      }
+      const own = (...args: unknown[]) => listener(...args); // 같은 함수를 두 번 등록해도 따로 센다([r] 두 개처럼)
+      entry.listeners.add(own);
+      return () => { entry.listeners.delete(own); };
+    };
+  }
 }
 
 let engine: Promise<PdEngine> | undefined;
