@@ -14,17 +14,17 @@ JS는 어느 영역이 켜지고 꺼지는지 메시지로 알리고, 나온 소
 | 장면 | 영역 패치를 띄우고 지운다(동적 패칭). 상호작용 패치, 공용 효과, 패치끼리 엮기 | 시작할 때 `main.pd`를 연다 |
 | 영역 켜기/끄기 | `whistle-slot`을 받아 만들고 지운다 | 어느 영역이 가까운지 계산해 보낸다. 끌 때는 페이드 아웃이 끝난 뒤 보낸다 |
 | 영역 값 | `[r $1-whistle-region]`으로 받는다 | `amount`, `distance`를 보낸다 |
-| 출력 | 약속한 `dac~` 채널로 낸다 | 1–30은 쌍마다 공간화, 31–32는 그대로. 합쳐서 리미터 |
+| 출력 | 약속한 `dac~` 채널로 낸다 | 1–2는 그대로, 3–32는 쌍마다 공간화. 합쳐서 리미터 |
 | 영역별 볼륨·페이드·방향 | 하지 않는다 | gain, panner, dry/wet([`slots-and-mix.md`](slots-and-mix.md)) |
-| 상호작용 | `edit`·`player`·`event`를 두고 `dac~ 31 32`로 | 전역 버스로 보낸다(`whistle-player` 등). 음소거는 31–32 게인 |
+| 상호작용 | `edit`·`player`·`event`를 두고 `dac~ 1 2`로 | 전역 버스로 보낸다(`whistle-player` 등). 음소거는 1–2 게인 |
 
 ## 채널
 
 엔진 출력은 32채널(Web Audio 노드 출력의 최대)이다.
 
-- **1–30: 공간화.** 스테레오 15쌍 = 영역 15개까지 동시에. 슬롯 N(0–14)은 `dac~ 2N+1 2N+2`. JS가 쌍마다 panner를 붙인다.
-- **31–32: 믹스다운.** 공간화 없이 그대로 나간다. 상호작용 패치, 장면 전체의 리버브 같은 방향 없는 소리.
-  여러 패치가 `[dac~ 31 32]`로 보내면 Pd 안에서 더해진다.
+- **1–2: 믹스다운.** 공간화 없이 그대로 나간다. 상호작용 패치, 장면 전체의 리버브 같은 방향 없는 소리.
+  보통의 Pd처럼 `[dac~]`(= `[dac~ 1 2]`)로 보내면 된다. 여러 패치가 보내면 Pd 안에서 더해진다.
+- **3–32: 공간화.** 스테레오 15쌍 = 영역 15개까지 동시에. 슬롯 N(0–14)은 `dac~ 2N+3 2N+4`. JS가 쌍마다 panner를 붙인다.
 - 마지막에 JS가 둘을 합쳐 리미터를 건다.
 
 **스테레오로 둔 이유.** 패너(equalpower)는 스테레오 입력을 받으면 폭을 조금 살린 채 방향을 옮기지만, 옆으로 갈수록 모노처럼 접힌다
@@ -55,7 +55,7 @@ JS는 어느 영역이 켜지고 꺼지는지 메시지로 알리고, 나온 소
 
 | 버스 | 메시지 | 뜻 |
 | --- | --- | --- |
-| `whistle-slot` | `on 번호 패치 이름 L R` | 예: `on 3 environment_water v17 7 8` → `[pd slot3]` 안에 `[environment_water v17] → [dac~ 7 8]` |
+| `whistle-slot` | `on 번호 패치 이름 L R` | 예: `on 3 environment_water v17 9 10` → `[pd slot3]` 안에 `[environment_water v17] → [dac~ 9 10]` |
 | `whistle-slot` | `off 번호` | 예: `off 3` → `[pd slot3]`을 비운다 |
 | `<이름>-whistle-region` | `amount 0~1`, `distance 타일` | 영역 값(지금과 같음, [`pd-receive.md`](pd-receive.md)) |
 | `whistle-player`, `whistle-edit`, `whistle-event`, `whistle-board-height` | (지금과 같음) | 상호작용 값([`pd-receive.md`](pd-receive.md)) |
@@ -78,10 +78,10 @@ JS는 어느 영역이 켜지고 꺼지는지 메시지로 알리고, 나온 소
 
 [edit] [player] [event]
  \  \    |  |    /  /
-   [dac~ 31 32]
+   [dac~ 1 2]
 ```
 
-- `on 3 environment_water v17 7 8`이 `[route on off]`를 지나면 `3 environment_water v17 7 8`. 메시지 상자에서
+- `on 3 environment_water v17 9 10`이 `[route on off]`를 지나면 `3 environment_water v17 9 10`. 메시지 상자에서
   `$1` = 3(그릇 `pd-slot3`), `$2` = 패치, `$3` = 이름, `$4 $5` = 채널.
 - `loadbang`을 빠뜨리지 않는다(동적으로 만든 패치에는 loadbang이 저절로 오지 않는다).
 

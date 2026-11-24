@@ -5,14 +5,14 @@
 // - 패치 폴더를 푼 뒤 main.pd를 바로 연다. 장면(영역 패치를 띄우고 지우기, 상호작용 패치)은 main.pd가 관리한다.
 // - 영역 하나 = 슬롯 하나: whistle-slot으로 "on 번호 패치 이름 L R" / "off 번호"를 보낸다. main.pd가 [pd slot번호] 안에
 //   [<패치> <이름>] → [dac~ L R]를 만들고 지운다. 이름은 띄울 때마다 새것(v1, v2…), 패치의 $1이다.
-// - 출력 32채널: 1–30은 슬롯 15개의 스테레오(슬롯 N → 2N+1, 2N+2), 31–32는 믹스다운(공간화 없음).
+// - 출력 32채널: 1–2는 믹스다운(공간화 없음), 3–32는 슬롯 15개의 스테레오(슬롯 N → 2N+3, 2N+4).
 //   슬롯별 스테레오 노드와 믹스다운 노드를 돌려준다. 연결·게인·공간화는 호출하는 쪽 책임.
 
 export type PdMessage = (string | number)[];
 
-/** 동시에 띄울 수 있는 영역 수(공간화 채널 1–30) */
+/** 동시에 띄울 수 있는 영역 수(공간화 채널 3–32) */
 export const SLOTS = 15;
-/** 엔진 출력 채널 수: 슬롯 15쌍 + 믹스다운 한 쌍(31–32). Web Audio 노드 출력은 최대 32채널. */
+/** 엔진 출력 채널 수: 믹스다운 한 쌍(1–2) + 슬롯 15쌍. Web Audio 노드 출력은 최대 32채널. */
 const CHANNELS = SLOTS * 2 + 2;
 /** 장면 패치(audio/patches/main.pd) */
 export const MAIN = "main";
@@ -57,7 +57,7 @@ export type PdEngine = {
   start(name: string): Promise<PatchInstance>;
   /** 전역 버스로 보낸다(whistle-player 등. main.pd 안의 패치가 받는다) */
   send(bus: string, message: PdMessage): void;
-  /** 믹스다운(채널 31–32): main.pd가 공간화 없이 내보내는 소리 */
+  /** 믹스다운(채널 1–2): main.pd가 공간화 없이 내보내는 소리 */
   mixdown: AudioNode;
   /** 지금 쓰는 슬롯 수 */
   slotsInUse(): number;
@@ -208,8 +208,8 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
     message("pd", "open", [`${MAIN}.pd`, "."]);
   };
   const mixdown = context.createChannelMerger(2);
-  splitter.connect(mixdown, CHANNELS - 2, 0);
-  splitter.connect(mixdown, CHANNELS - 1, 1);
+  splitter.connect(mixdown, 0, 0);
+  splitter.connect(mixdown, 1, 1);
 
   // --- 슬롯 ---
   const used = new Set<number>();
@@ -235,11 +235,11 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
       used.delete(index);
       live.delete(index);
     };
-    const on = () => message("whistle-slot", "on", [index, name, id, 2 * index + 1, 2 * index + 2]);
+    const on = () => message("whistle-slot", "on", [index, name, id, 2 * index + 3, 2 * index + 4]);
     try {
       on();
-      splitter.connect(merger, 2 * index, 0);
-      splitter.connect(merger, 2 * index + 1, 1);
+      splitter.connect(merger, 2 * index + 2, 0);
+      splitter.connect(merger, 2 * index + 3, 1);
       live.set(index, { name, id, on, last });
     } catch (error) {
       destroy();

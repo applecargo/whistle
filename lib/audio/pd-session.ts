@@ -5,7 +5,7 @@
 //   position x y z · yaw a · stat crouch run grounded falling · footed grass water
 // - event.pd  : whistle-event          (시뮬레이션 규칙 이벤트음)
 // - 3D 이동음 정지: whistle-player-stop (bang). 다음 whistle-player 메시지부터 다시 소리를 내는 것은 패치가 한다.
-// 출력은 main.pd의 믹스다운(채널 31–32). 음소거는 그 게인 fade로 한다.
+// 출력은 main.pd의 믹스다운(채널 1–2). 음소거는 그 게인 fade로 한다.
 import type { PdMessage, PdEngine } from "./pd-runtime.ts";
 
 export type { PdMessage };
