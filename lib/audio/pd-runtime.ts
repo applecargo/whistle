@@ -28,7 +28,12 @@ type Pd4WebGlobals = {
   Pd4WebAudioContext?: AudioContext;
   Pd4WebAudioWorkletNode?: AudioWorkletNode;
 };
-type EmscriptenFS = { mkdirTree(path: string): void; writeFile(path: string, data: Uint8Array): void };
+type EmscriptenFS = {
+  mkdirTree(path: string): void;
+  writeFile(path: string, data: Uint8Array): void;
+  readFile(path: string, options: { encoding: "utf8" }): string;
+  unlink(path: string): void;
+};
 const globals = () => window as unknown as Pd4WebGlobals & typeof globalThis;
 
 export type StartOptions = {
@@ -177,6 +182,8 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   // --- 슬롯 ---
   const used = new Set<number>();
   const made = new Set<number>();
+  /** 떠 있는 슬롯: 패치 이름, 다시 만드는 함수, 버스마다 마지막으로 보낸 메시지(다시 만든 뒤 다시 보낸다) */
+  const live = new Map<number, { name: string; build(): void; last: Map<string, () => void> }>();
   const message = (target: string, selector: string, args: PdMessage) => {
     if (!pd.sendMessage(target, selector, args)) throw new Error(`Pd 메시지 실패: ${target} ${selector} ${args.join(" ")}`);
   };
@@ -197,21 +204,27 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
       splitter.disconnect(merger);
       merger.disconnect();
       used.delete(index);
+      live.delete(index);
     };
-    try {
-      if (!made.has(index)) {
-        message(HOST, "obj", [20, 40 + 30 * index, "pd", slot]);
-        made.add(index);
-      }
+    const build = () => {
       message(canvas, "clear", []);
       message(canvas, "obj", [20, 20, name, slot]);
       message(canvas, "obj", [20, 80, "dac~", 2 * index + 1, 2 * index + 2]);
       message(canvas, "connect", [0, 0, 1, 0]);
       message(canvas, "connect", [0, 1, 1, 1]);
-      splitter.connect(merger, 2 * index, 0);
-      splitter.connect(merger, 2 * index + 1, 1);
       // 동적으로 만든 패치에는 loadbang이 저절로 오지 않는다.
       message(canvas, "loadbang", []);
+    };
+    const last = new Map<string, () => void>();
+    try {
+      if (!made.has(index)) {
+        message(HOST, "obj", [20, 40 + 30 * index, "pd", slot]);
+        made.add(index);
+      }
+      build();
+      splitter.connect(merger, 2 * index, 0);
+      splitter.connect(merger, 2 * index + 1, 1);
+      live.set(index, { name, build, last });
     } catch (error) {
       destroy();
       throw error;
@@ -226,11 +239,48 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
         // 글자로 시작하면 Pd 메시지 상자처럼 그 글자가 선택자다(`position 0.5 0 0.5` → [route position]으로 받음).
         // 받는 객체가 없는 버스로 보내도 Pd는 조용히 버린다(pd4web도 true를 돌려준다). 비용이 작아 따로 거르지 않는다.
         const [head, ...rest] = values;
-        const ok = typeof head === "string" ? pd.sendMessage(target, head, rest) : pd.sendList(target, values);
-        if (!ok) throw new Error(`${name}: Pd 메시지 실패: ${target}`);
+        const deliver = () => typeof head === "string" ? pd.sendMessage(target, head, rest) : pd.sendList(target, values);
+        if (!deliver()) throw new Error(`${name}: Pd 메시지 실패: ${target}`);
+        last.set(typeof head === "string" ? `${target} ${head}` : target, deliver);
       },
       destroy,
     };
+  };
+
+  // 개발 서버에서만: 패치 파일을 고치면(vite.config.ts가 알려 줌) 엔진 디스크의 파일을 바꾸고, 그 파일을 쓰는 슬롯을 다시 만든다.
+  // Pd는 abstraction을 만들 때마다 파일을 새로 읽으므로, 새로 뜨는 슬롯(영역에 다시 들어갈 때)은 저절로 새 버전이다.
+  import.meta.hot?.on("whistle:patch", ({ path, data }: { path: string; data?: string }) => {
+    if (data === undefined) {
+      try { module.FS.unlink(`/${path}`); } catch { /* 이미 없음 */ }
+      if (files.includes(path)) files.splice(files.indexOf(path), 1);
+      return;
+    }
+    const dir = path.slice(0, path.lastIndexOf("/") + 1);
+    if (dir) module.FS.mkdirTree(`/${dir}`);
+    // 엔진의 FS.writeFile은 있는 파일을 비우지 않고 뒤에 이어 쓴다. 지우고 쓴다.
+    try { module.FS.unlink(`/${path}`); } catch { /* 새 파일 */ }
+    module.FS.writeFile(`/${path}`, Uint8Array.from(atob(data), (c) => c.charCodeAt(0)));
+    if (!files.includes(path)) files.push(path);
+    if (!path.endsWith(".pd")) return;
+    const changed = path.slice(path.lastIndexOf("/") + 1, -3);
+    const restarted: string[] = [];
+    for (const [index, slot] of live) {
+      if (!uses(slot.name, changed, new Set())) continue;
+      slot.build();
+      for (const resend of slot.last.values()) resend();
+      restarted.push(`slot${index} ${slot.name}`);
+    }
+    console.info(`[pd4web] 패치 갱신: ${path}${restarted.length ? ` (다시 만듦: ${restarted.join(", ")})` : ""}`);
+  });
+  /** 패치 name이 changed를 (안쪽 abstraction까지) 쓰는지. 객체 상자의 낱말 중 하나가 그 이름이면 쓴다고 본다([clone] 인자도). */
+  const uses = (name: string, changed: string, seen: Set<string>): boolean => {
+    if (name.slice(name.lastIndexOf("/") + 1) === changed) return true;
+    if (seen.has(name)) return false;
+    seen.add(name);
+    let text = "";
+    try { text = module.FS.readFile(`/${name}.pd`, { encoding: "utf8" }); } catch { return false; }
+    const words = new Set([...text.matchAll(/^#X obj \S+ \S+ ([^;]*)/gm)].flatMap((m) => m[1].split(/\s+/)));
+    return [...words].some((word) => word && files.includes(`${word}.pd`) && uses(word, changed, seen));
   };
 
   engineStage = "열림";
