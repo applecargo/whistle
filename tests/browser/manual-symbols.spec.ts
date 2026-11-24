@@ -1,3 +1,4 @@
+import { savedWorld } from "./world-storage";
 import { setPresentation, openPlaced } from "./presentation";
 import { test, expect, type Page } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
@@ -25,13 +26,12 @@ async function setup(page: Page) {
   await expect(page.locator("[data-symbol-site]")).toHaveCount(0);
   return errors;
 }
-const saved = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem("whistle.world.v2")!));
-const presentations = (page: Page) => page.evaluate(() => {
+const saved = savedWorld;
+const presentations = async(page: Page) => page.evaluate(world => {
   const scene = (globalThis as any).__testScene;
   if (!scene) return [];
-  const world = JSON.parse(localStorage.getItem("whistle.world.v2")!);
   return world.objects.map((object: any) => scene.children.find((model: any) => model.userData.placementId === object.id)?.userData.presentation);
-});
+},await savedWorld(page));
 
 test("symbols overlap without backgrounds, keep shared colors and erase independently", async ({ page }, testInfo) => {
   const errors = await setup(page);
@@ -61,7 +61,7 @@ test("symbols overlap without backgrounds, keep shared colors and erase independ
   await page.reload();
   await expect(page.locator('[data-cell="78"] [data-symbol-site]')).toHaveCount(2);
   expect(await page.locator('[data-cell="78"] .site-glyph').evaluateAll(els => els.map(el => getComputedStyle(el).color))).toEqual(colors);
-  const second = (await saved(page)).assets.find((asset: any) => asset.text === "두 번째");
+  const second = (await saved(page)).assets.find((asset: any) => asset.text === "두 번째")!;
   await page.locator(`[data-symbol-asset="${second.id}"]`).click();
   await page.locator('[data-cell="78"]').click();
   await expect(page.locator('[data-cell="78"] [data-symbol-site]')).toHaveCount(1);
@@ -74,7 +74,7 @@ test("symbols overlap without backgrounds, keep shared colors and erase independ
 test("text is created freely, placed repeatedly, erased, undone and edited without generated slots", async ({ page }, testInfo) => {
   const errors = await setup(page);
   await page.getByRole("button", { name: "텍스트 만들기", exact: true }).click();
-  await expect(page.locator(".media-tabs, .shape-options, [title], [data-display]")).toHaveCount(0);
+  await expect(page.getByRole("dialog").locator(".media-tabs, .shape-options, [title], [data-display]")).toHaveCount(0);
   await expect(page.locator("[data-placement]")).toHaveText("세우기");
   await expect(page.locator(".cycle-mark")).toHaveCount(1);
   await expect(page.locator('.asset-size-options button[aria-pressed="true"]')).toHaveCSS("text-decoration-line", "underline");
@@ -90,17 +90,17 @@ test("text is created freely, placed repeatedly, erased, undone and edited witho
   await expect.poll(async () => (await saved(page)).objects.length).toBe(4);
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
   await expect.poll(async () => (await saved(page)).objects.length).toBe(5);
-  const world = await saved(page), object = world.objects.find((o: any) => o.x === 6);
-  expect(world.assets.find((asset: any) => asset.text).display).toBeUndefined();
+  const world = await saved(page), object = world.objects.find((o: any) => o.x === 6)!;
+  expect(world.assets.find((asset: any) => asset.text)!.display).toBeUndefined();
   await openPlaced(page, object.id);
   await expect(page.getByLabel("글자 색", { exact: true })).toHaveValue("#ff36b5");
-  await page.getByRole("textbox", { name: "텍스트 입력" }).fill("이 자리만 수정");
+  await page.getByRole("textbox", { name: "텍스트 입력" }).fill("수정한 재료");
   await page.getByRole("button", { name: "저장", exact: true }).click();
-  await expect.poll(async () => (await saved(page)).objects.find((o: any) => o.id === object.id).asset).not.toBe(object.asset);
-  expect((await saved(page)).objects.filter((o: any) => o.asset === object.asset)).toHaveLength(4);
+  await expect.poll(async () => (await saved(page)).objects.find((o: any) => o.id === object.id)!.asset).toBe(object.asset);
+  expect((await saved(page)).objects.filter((o: any) => o.asset === object.asset)).toHaveLength(5);
   await page.reload();
   await openPlaced(page, object.id);
-  await expect(page.getByRole("textbox", { name: "텍스트 입력" })).toHaveValue("이 자리만 수정");
+  await expect(page.getByRole("textbox", { name: "텍스트 입력" })).toHaveValue("수정한 재료");
   await expect(page.locator("[data-placement]")).toHaveAttribute("data-placement", "floating");
   await page.getByRole("button", { name: "닫기", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("manual-symbols-desktop.png") });
@@ -124,7 +124,7 @@ test("image creation and placement work on mobile with one placement control", a
   await page.getByRole("button", { name: "저장", exact: true }).click();
   await page.locator('[data-cell="26"]').click();
   await expect.poll(async () => (await saved(page)).objects.length).toBe(1);
-  const world = await saved(page), asset = world.assets.find((a: any) => a.id === world.objects[0].asset);
+  const world = await saved(page), asset = world.assets.find((a: any) => a.id === world.objects[0].asset)!;
   expect(asset.image).toMatch(/^data:image/);
   expect(asset.text).toBeUndefined(); expect(asset.placement).toBe("surface"); expect(asset.display).toBeUndefined();
   await page.screenshot({ path: testInfo.outputPath("manual-symbols-mobile.png") });

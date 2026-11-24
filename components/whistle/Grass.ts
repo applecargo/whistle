@@ -1,3 +1,4 @@
+import { waterLevelAt } from "../../lib/water.ts";
 import { addNeutralGrain } from "./NeutralGrain.ts";
 import * as THREE from "three";
 import { GUST_GLSL } from "../../lib/environment-effects.ts";
@@ -21,6 +22,12 @@ export function grassCoverAt(
   structures: Structure[],
   environment: Environment = deriveEnvironment(world, structures),
 ) {
+  if (x < -.5 || z < -.5 || x > environment.size-.5 || z > environment.size-.5) return 0;
+  const fx = Math.floor(x), fz = Math.floor(z);
+  const tx = (x-fx)**2 * (3-2*(x-fx)), tz = (z-fz)**2 * (3-2*(z-fz));
+  const cell = (dx:number,dz:number) => environment.cells[Math.max(0,Math.min(environment.size-1,fz+dz))*environment.size+Math.max(0,Math.min(environment.size-1,fx+dx))].grass;
+  const grass = cell(0,0)*((1-tx)*(1-tz)) + cell(1,0)*(tx*(1-tz)) + cell(0,1)*((1-tx)*tz) + cell(1,1)*(tx*tz);
+  if (grass <= .035) return 0;
   const sample = terrainSample(world, x, z);
   if (
     sample.coverage < 0.6 ||
@@ -32,9 +39,9 @@ export function grassCoverAt(
     )
   )
     return 0;
-  const conditions = environmentAt(environment, x, z);
-  if (conditions.water !== null && conditions.water > sample.height) return 0;
-  const amount = Math.max(0, Math.min(1, (conditions.grass - 0.035) / 0.24));
+  const water = environment.ponds.length ? waterLevelAt(environment.size,x,z,i=>environment.cells[i].water,i=>environment.cells[i].hole,sample.naturalHeight) : null;
+  if (water !== null && water > sample.height) return 0;
+  const amount = Math.max(0, Math.min(1, (grass - 0.035) / 0.24));
   return amount * amount * (3 - 2 * amount);
 }
 
@@ -119,8 +126,10 @@ export function makeGrass(
     for (let x = -0.5 + spacing / 2; x < world.size - 0.5; x += spacing) {
       const gx = x + (random() - 0.5) * spacing * 0.65,
         gz = z + (random() - 0.5) * spacing * 0.65;
+      const chance = random(), cover = grassCoverAt(world,gx,gz,structures,environment);
+      if (!cover && chance > 0) continue;
       const growth = environmentAt(environment,gx,gz).growth;
-      if (random() > grassCoverAt(world, gx, gz, structures, environment) * (.82 + growth * .18))
+      if (chance > cover * (.82 + growth * .18))
         continue;
       const root = {
         x: toScene(gx),

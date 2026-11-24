@@ -109,6 +109,13 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   if (!globalThis.crossOriginIsolated) {
     throw new Error("pd4web 엔진에는 교차 출처 격리(COOP/COEP)가 필요합니다. 페이지를 새로고침하세요.");
   }
+  engineStage = "패치 묶음";
+  // 패치 폴더(tar.gz 하나)를 먼저 받는다. 서버에 따라 .gz를 Content-Encoding: gzip으로 보내 브라우저가 먼저 풀어 버리기도 한다.
+  // gzip 머리(1f 8b)가 있을 때만 푼다.
+  let archive = new Uint8Array(await (await fetchOk(`${baseUrl}patches.tar.gz`)).arrayBuffer());
+  if (archive[0] === 0x1f && archive[1] === 0x8b) {
+    archive = new Uint8Array(await new Response(new Blob([archive]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
+  }
   const g = globals();
   engineStage = "엔진 스크립트";
   const engineUrl = `${baseUrl}engine/pd4web.js`;
@@ -147,13 +154,7 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   toggle.hidden = true;
   document.body.append(toggle);
 
-  // --- 패치 폴더(tar.gz 하나)를 엔진 가상 디스크(/)에 푼다 ---
-  // 서버에 따라 .gz를 Content-Encoding: gzip으로 보내 브라우저가 먼저 풀어 버리기도 한다. gzip 머리(1f 8b)가 있을 때만 푼다.
-  engineStage = "패치 묶음";
-  let archive = new Uint8Array(await (await fetchOk(`${baseUrl}patches.tar.gz`)).arrayBuffer());
-  if (archive[0] === 0x1f && archive[1] === 0x8b) {
-    archive = new Uint8Array(await new Response(new Blob([archive]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
-  }
+  // --- 패치 폴더를 엔진 가상 디스크(/)에 푼다 ---
   const files = untar(archive, (path, data) => {
     const dir = path.slice(0, path.lastIndexOf("/") + 1);
     if (dir) module.FS.mkdirTree(`/${dir}`);

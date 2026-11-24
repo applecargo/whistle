@@ -5,4 +5,5 @@ dist/
 .DS_Store
 output/playwright/
 output/performance/
+.whistle-data/
 output/pd4web-engine/

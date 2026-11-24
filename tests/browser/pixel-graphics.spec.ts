@@ -73,6 +73,7 @@ test.describe("native resolution text", () => {
     world.timeOfDay="noon";
     world.assets[0].text="Whistle\n가느다란 글씨";
     world.assets[0].textColor="#d53030";
+    world.assets[0].placement="floating";
     world.objects=[{id:"native-text",asset:world.assets[0].id,x:6,z:6,rotation:0,scale:3}];
     await page.addInitScript(world=>{
       const canvas=document.createElement("canvas");canvas.width=canvas.height=32;
@@ -255,19 +256,19 @@ test("sky and distant ground keep the same horizon tone during automatic sunset"
   for (const [hour, minute] of [[17, 30], [18, 0], [18, 30], [23, 0]]) {
     await page.clock.setSystemTime(new Date(2026, 10, 19, hour, minute));
     await page.clock.runFor(2500);
-    const tones = await page.locator(".play-shell canvas").evaluate(canvas => {
+    const tones = await page.locator(".play-shell canvas").evaluate(canvas => new Promise<number[]>(resolve => requestAnimationFrame(() => {
       const source = canvas as HTMLCanvasElement;
       const copy = document.createElement("canvas");
       copy.width = source.width; copy.height = source.height;
       const context = copy.getContext("2d")!;
       context.drawImage(source, 0, 0);
-      return [.48, .52].map(y => {
+      resolve([.48, .52].map(y => {
         const pixels = context.getImageData(Math.floor(copy.width*.25), Math.floor(copy.height*y), Math.floor(copy.width*.5), 1).data;
         let sum = 0;
         for (let i = 0; i < pixels.length; i += 4) sum += pixels[i];
         return sum / (pixels.length/4);
-      });
-    });
+      }));
+    })));
     expect(tones[0], "the canvas contains a rendered frame").toBeGreaterThan(3);
     expect(Math.abs(tones[0]-tones[1]), `horizon at ${hour}:${minute}: ${tones}`).toBeLessThan(4);
     if (hour === 18 && minute === 0) await page.locator(".play-shell canvas").screenshot({ path: testInfo.outputPath("sunset-horizon.png") });

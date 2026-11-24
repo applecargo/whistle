@@ -4,11 +4,11 @@
 // - pdOutputRms(): 엔진 전체 출력(모든 슬롯)의 RMS
 import type { Page } from "@playwright/test";
 
-export type PdProbe = { modules: number; starts: string[] };
+export type PdProbe = { modules: number; starts: string[]; messages: { bus: string; value: (string | number)[] }[] };
 export const ENGINE_SCRIPT = /\/audio\/engine\/pd4web\.js(\?|$)/;
 
 export async function probePd(page: Page) {
-  await page.addInitScript(() => { (window as unknown as { pdProbe: PdProbe }).pdProbe = { modules: 0, starts: [] }; });
+  await page.addInitScript(() => { (window as unknown as { pdProbe: PdProbe }).pdProbe = { modules: 0, starts: [], messages: [] }; });
   await page.route(ENGINE_SCRIPT, async (route) => {
     const response = await route.fetch();
     await route.fulfill({ response, body: await response.text() + `
@@ -20,7 +20,13 @@ export async function probePd(page: Page) {
     const proto = module.Pd4Web.prototype, send = proto.sendMessage;
     proto.sendMessage = function (target, selector, list) {
       if (target === "whistle-slot" && selector === "on") window.pdProbe.starts.push(list[1]); // on 번호 패치 이름 L R
+      if (/^whistle-/.test(target)) window.pdProbe.messages.push({bus: target + " " + selector, value: list});
       return send.call(this, target, selector, list);
+    };
+    const sendList = proto.sendList;
+    proto.sendList = function (target, list) {
+      if (/^whistle-/.test(target)) window.pdProbe.messages.push({bus: target, value: list});
+      return sendList.call(this, target, list);
     };
     return module;
   };
@@ -33,6 +39,9 @@ export const pdProbe = (page: Page) => page.evaluate(() => {
   const p = (window as unknown as { pdProbe: PdProbe }).pdProbe;
   return { modules: p.modules, starts: [...p.starts] };
 });
+
+export const pdMessages = (page: Page, bus: string) => page.evaluate(bus =>
+  (window as unknown as { pdProbe: PdProbe }).pdProbe.messages.filter(m => m.bus === bus).map(m => m.value), bus);
 
 export const pdOutputRms = (page: Page) => page.evaluate(() => {
   const w = window as unknown as { Pd4WebAudioWorkletNode?: AudioWorkletNode; pdAnalyser?: AnalyserNode };
@@ -52,3 +61,17 @@ export const pdOutputRms = (page: Page) => page.evaluate(() => {
   w.pdAnalyser.getFloatTimeDomainData(wave);
   return Math.sqrt(wave.reduce((sum, n) => sum + n * n, 0) / wave.length);
 });
+
+export async function probeOutputGain(page: Page) {
+  await page.addInitScript(() => {
+    const connect = AudioNode.prototype.connect;
+    AudioNode.prototype.connect = function (this: AudioNode, ...args: unknown[]) {
+      if (args[0] instanceof AudioDestinationNode && this instanceof GainNode) {
+        (window as unknown as { outputProbe: GainNode }).outputProbe = this;
+      }
+      return Reflect.apply(connect, this, args);
+    } as typeof connect;
+  });
+}
+export const outputGain = (page: Page) => page.evaluate(() =>
+  (window as unknown as { outputProbe?: GainNode }).outputProbe?.gain.value);

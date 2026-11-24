@@ -1,22 +1,22 @@
-# Pd(pd4web) 오디오 연결과 테스트
+# pd4web 오디오
 
-## 역할 분리
+`audio/engine/`의 pd4web 엔진 하나에서 Pd 패치를 실행한다. 편집·플레이·배치한 녹음 소리가 AudioContext를 공유한다.
 
-게임은 상호작용과 공간 상태를 계산하고 Pd에 전달한다. Pd는 그 값으로
-합성·재생·엔벌로프·음색 변화를 처리한다. 오디오 때문에 지형을 다시 생성하거나
-플레이어 이동 계산을 변경하지 않는다.
+- 상호작용: `edit.pd`, `player.pd`, `event.pd`
+- 지형·환경: `lib/audio/terrain-sources.ts`에서 플레이어 근처 영역을 선택한다. 동시에 최대 6개 영역을 재생한다.
+- 연결: `lib/audio/pd-runtime.ts`, `lib/audio/pd-session.ts`, `components/whistle/useGameAudio.ts`
+- 편집 메시지: `whistle-edit x z overlap asset action surface`
+- 플레이 메시지: `whistle-player position x y z`, `yaw angle`, `stat crouch run grounded falling`, `footed grass water`
+- UWB 보드 높이: `whistle-board-height metres` (0–10m)
+- 규칙 이벤트: `whistle-event frequency gain pan`
 
-```text
-2D 편집 결과 ── 단발 이벤트 ─┐
-                            ├─ 오디오 어댑터 → pd4web(Pd 0.56 wasm) AudioWorklet → Pd DSP → 출력
-3D 이동 상태 ── 연속 값 ─────┘
-```
+X/Z는 세계 크기로 정규화한다. 음소거는 WebAudio 게인으로 처리하며, 게임이 숨겨지면 AudioContext를 일시정지한다. 소리는 사용자 조작 후 시작한다.
 
 Pd 엔진 하나(AudioContext 하나)에서 장면 패치 `main.pd` 하나가 전체를 관리한다. 사운드스케이프 영역 패치(`environment_grass.pd` 등)는
 JS의 켜기·끄기 메시지로 `main.pd`가 "슬롯"에 띄우고, 상호작용 패치(edit·player·event)는 `main.pd` 안에 둔다.
 하위 패치(abstraction)도 쓸 수 있다. 역할 나누기·채널·메시지 약속은 [`main-pd.md`](main-pd.md).
 
-## Pd 엔진 (pd4web)
+개발·미리보기·테스트 서버는 COOP/COEP 헤더를 제공한다. 헤더를 설정할 수 없는 정적 호스팅은 `coi-serviceworker.js`가 교차 출처 격리를 설정한다.
 
 - 엔진: [pd4web](https://github.com/charlesneimog/pd4web) 3.4.1(libpd, Pd 0.56의 vanilla 객체 전체를 C에서 wasm으로).
   빈 host 패치만 들어 있는 엔진을 한 번 빌드해 `audio/engine/`에 커밋해 둔다(pd4web.js·wasm·data, 약 2MB).

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ko">
-  <head>
+  <head><script src="/coi-serviceworker.js"></script>
     <meta charset="UTF-8" />
     <!-- pd4web 엔진(SharedArrayBuffer)에 필요한 교차 출처 격리. 헤더를 못 거는 GitHub Pages용 -->
     <script src="/coi-serviceworker.js"></script>
@@ -38,7 +38,7 @@
       <button id="player">이동 상태 보내기</button>
     </fieldset>
     <p>패치 출력 측정: <output id="meter">—</output></p>
-    <p>패치가 실제 수신한 최근 메시지:</p>
+    <p>패치에 보낸 최근 메시지:</p>
     <pre id="messages">—</pre>
     <script type="module" src="./main.ts"></script>
   </body>

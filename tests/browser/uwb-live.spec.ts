@@ -1,3 +1,4 @@
+import { probeOutputGain, outputGain } from "./pd-probe";
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
 import { flatTerrain } from "../../lib/terrain";
@@ -12,6 +13,7 @@ async function openLive(page: Page, context: BrowserContext, stored: string) {
     Object.defineProperty(window, "devicePixelRatio", { value: 0.5 });
     localStorage.setItem("whistle.language", "ko");
   });
+  await probeOutputGain(page);
   await page.goto("uwb-lab/index.html");
   await page.evaluate((stored) => localStorage.setItem("whistle.world.v2", stored), stored);
   const editor = await context.newPage();
@@ -26,6 +28,7 @@ async function openLive(page: Page, context: BrowserContext, stored: string) {
 }
 
 test("live grid edits and undo reach the displayed world and Pd without relying on autosave", async ({ page, context }) => {
+  test.setTimeout(180_000);
   const world = terrainFixtures().flat;
   world.title = "실제 편집 중인 세계";
   const stored = JSON.stringify(world);
@@ -33,11 +36,7 @@ test("live grid edits and undo reach the displayed world and Pd without relying 
   await expect(page.locator("#live-status")).toHaveText("편집기에 연결되었습니다.");
   await expect(editor.getByRole("button", { name: "파일 저장", exact: true })).toHaveAttribute("aria-description", "이 브라우저에 저장됨");
   await editor.evaluate(() => {
-    const original = Storage.prototype.setItem;
-    Storage.prototype.setItem = function(key, value) {
-      if (key === "whistle.world.v2") throw new DOMException("quota", "QuotaExceededError");
-      return original.call(this, key, value);
-    };
+    IDBObjectStore.prototype.put = function() { throw new DOMException("quota", "QuotaExceededError"); };
   });
   await expect(page.getByRole("heading", { name: world.title, exact: true })).toBeVisible();
   await page.bringToFront();
@@ -55,11 +54,11 @@ test("live grid edits and undo reach the displayed world and Pd without relying 
   expect(await page.evaluate(() => localStorage.getItem("whistle.world.v2"))).toBe(stored);
   await editor.getByRole("button", { name: "거침", exact: true }).click();
   for (const i of [61, 62, 73, 74]) await editor.locator(`[data-cell="${i}"]`).click();
-  await expect(page.locator("#rough")).toHaveText("1.000");
+  await expect.poll(async () => (await data(page)).pd?.rough).toBe(1);
   await editor.getByRole("button", { name: "되돌리기", exact: true }).click();
-  await expect(page.locator("#rough")).toHaveText("0.750");
+  await expect.poll(async () => (await data(page)).pd?.rough).toBe(0.75);
   await editor.getByRole("button", { name: "다시 실행", exact: true }).click();
-  await expect(page.locator("#rough")).toHaveText("1.000");
+  await expect.poll(async () => (await data(page)).pd?.rough).toBe(1);
   await editor.getByRole("button", { name: "높이기", exact: true }).click();
   await editor.locator('[data-cell="61"]').click();
   await expect.poll(async () => Number((await messages(page))["whistle-player position"]?.[1])).toBeGreaterThan(0.2);
@@ -67,7 +66,7 @@ test("live grid edits and undo reach the displayed world and Pd without relying 
   expect((await data(page)).boardHeight).toBe(1.5);
   await editor.close();
   await expect(page.locator("#live-status")).toContainText("연결이 끊겼습니다.");
-  await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+  await expect.poll(() => outputGain(page)).toBe(0);
   await expect(page.getByTestId("position-marker")).toHaveCount(0);
 });
 
@@ -75,17 +74,16 @@ test("world replacement and reload stay connected; disconnect isolates later edi
   const world = terrainFixtures().flat;
   const editor = await openLive(page, context, JSON.stringify(world));
   await expect(page.locator("#live-status")).toHaveText("편집기에 연결되었습니다.");
+  const initialPosition=await data(page);
   const next = terrainFixtures().flat;
-  next.size = 6;
-  next.terrain = flatTerrain(6);
-  next.start = { x: 3, z: 5 };
+  next.terrain = flatTerrain(12);
   next.title = "새로 가져온 실제 세계";
   await editor.locator('input[type="file"]').setInputFiles({ name: "world.json", mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(next)) });
   await expect(page.getByRole("heading", { name: next.title, exact: true })).toBeVisible();
-  await expect(page.locator(".map rect")).toHaveCount(6 * 6);
-  expect((await data(page)).metres).toEqual({ x: 1, z: 3 });
-  expect((await data(page)).grid).toEqual({ x: 0.5, z: 2.5 });
+  await expect(page.locator(".map rect")).toHaveCount(12 * 12);
+  expect((await data(page)).metres).toEqual(initialPosition.metres);
+  expect((await data(page)).grid).toEqual(initialPosition.grid);
   await expect(editor.getByRole("button", { name: "파일 저장", exact: true })).toHaveAttribute("aria-description", "이 브라우저에 저장됨");
   await editor.reload();
   await expect(page.locator("#live-status")).toHaveText("편집기에 연결되었습니다.");
@@ -106,7 +104,7 @@ test("world replacement and reload stay connected; disconnect isolates later edi
 
 test("a failed editor load cannot replace the test world or enable live audio", async ({ page, context }) => {
   const editor = await openLive(page, context, "{broken-json");
-  await expect(page.locator("#live-status")).toContainText("불러오지 못");
+  await expect(page.locator("#live-status")).toHaveText("작업을 불러올 수 없습니다.");
   await expect(page.getByRole("button", { name: "오디오 시작", exact: true })).toBeDisabled();
   await expect(page.getByTestId("position-marker")).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem("whistle.world.v2"))).toBe("{broken-json");

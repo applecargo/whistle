@@ -23,11 +23,6 @@ export function effectFixture(kind: EffectKind) {
       set(4, 4, "slick"); set(3, 4, "plain", 2); set(4, 3, "plain", 2); set(4, 5, "plain", 2); breakAt = [3, 4]; break;
     case "lift":
       set(4, 4, "plain", 0, true); set(4, 3, "plain", 1); set(4, 5, "plain", 1); breakAt = [4, 3]; break;
-    case "bounce":
-      set(4, 4, "soft"); set(3, 4, "plain", 1); set(5, 4, "plain", 2); set(4, 5, "plain", 1); breakAt = [3, 4]; break;
-    case "glide":
-      for (const x of [3, 4, 5]) { set(x, 4, "plain", 1); for (const z of [3, 5]) set(x, z, "plain", 2); }
-      breakAt = [4, 4]; break;
     case "flow":
       set(3, 4, "slick", 2); set(4, 4, "slick", 1); set(5, 4, "slick"); breakAt = [4, 4]; break;
 

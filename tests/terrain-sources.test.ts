@@ -67,6 +67,14 @@ test("영역: 같은 종류끼리 상하좌우로 이어진 것만 한 영역", 
   assert.equal(list[0].patch, KIND_PATCHES.rough);
 });
 
+test("multiplayer void tiles do not create terrain sound regions", () => {
+  const tiles = flatTerrain(3).tiles.map(tile => ({ ...tile, void: true }));
+  tiles[4].void = false;
+  const { list, layers } = terrainRegions({ size: 3, tiles });
+  assert.deepEqual(surfaceOnly(list).map(region => region.tiles), [[4]]);
+  assert.equal(layers[0].regionOf[0], -1);
+});
+
 test("영역: 대각선으로만 닿으면 다른 영역, 구멍은 영역을 끊고 영역에 들지 않는다", () => {
   const diagonal = terrainRegions(map(["rp", "pr"])).list;
   assert.equal(diagonal.filter((r) => r.kind === "rough").length, 2);

@@ -1,6 +1,6 @@
 import type { Asset, Placed, SymbolSiteKind, World } from "./world.ts";
 import type { Environment } from "./environment.ts";
-import { isHole } from "./tile.ts";
+import { isGap } from "./tile.ts";
 
 export type SymbolSite = { id: string; kind: SymbolSiteKind; x: number; z: number; cells: number[]; placement: "surface" | "upright" };
 export const SITE_TYPES = {
@@ -28,7 +28,7 @@ export function deriveSymbolSites(world: World, environment: Environment): Symbo
     return groups;
   };
   const candidates: { kind: SymbolSiteKind; cells: number[]; positions?: number[]; placement: SymbolSite["placement"] }[] = [];
-  const raised = tiles.flatMap((tile, i) => !isHole(tile) && tile.height > 0 ? [i] : []);
+  const raised = tiles.flatMap((tile, i) => !isGap(tile) && tile.height > 0 ? [i] : []);
   for (const cells of connected(raised)) {
     const members = new Set(cells), height = Math.max(...cells.map(i => tiles[i].height));
     const outside = cells.flatMap(adjacent).filter(i => !members.has(i));
@@ -66,7 +66,7 @@ export function deriveSymbolSites(world: World, environment: Environment): Symbo
     const cz = candidate.cells.reduce((sum, i) => sum + Math.floor(i / size), 0) / candidate.cells.length;
     if (candidate.kind === "cluster" && sites.some(site => candidate.cells.includes(site.z * size + site.x))) continue;
     const sorted = [...(candidate.positions ?? candidate.cells)].sort((a, b) => Math.hypot(a % size - cx, Math.floor(a / size) - cz) - Math.hypot(b % size - cx, Math.floor(b / size) - cz) || a - b);
-    const cell = sorted.find(i => !isHole(tiles[i]) &&
+    const cell = sorted.find(i => !isGap(tiles[i]) &&
       !(i % size === world.start.x && Math.floor(i / size) === world.start.z) &&
       !placed.some(o => Math.hypot(o.x - i % size, o.z - Math.floor(i / size)) < 3) &&
       !sites.some(s => Math.hypot(s.x - i % size, s.z - Math.floor(i / size)) < 3));

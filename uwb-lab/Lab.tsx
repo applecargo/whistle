@@ -1,9 +1,9 @@
+import { openEngine } from "../lib/audio/pd-runtime";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Scene from "../components/whistle/Scene";
 import { createSimulation } from "../lib/world";
 import { createWorldDeriver } from "../lib/world-derivation";
 import { createInteractionSession, validateBoardHeight, type InteractionSession } from "../lib/audio/pd-session";
-import { openEngine } from "../lib/audio/pd-runtime";
 import { roomPositionAt, sampleTrackedPosition, type RoomMapping } from "../lib/uwb-position";
 import { createLabWorld } from "./world";
 import { useLiveWorld } from "./useLiveWorld";

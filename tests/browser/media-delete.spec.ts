@@ -1,3 +1,4 @@
+import { savedWorld } from "./world-storage";
 import { test, expect } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
 import type { World } from "../../lib/world";
@@ -17,7 +18,7 @@ for (const [kind, label] of [["image", "이미지"], ["text", "텍스트"], ["so
       localStorage.setItem("whistle.language", "ko");
     }, world);
     await page.goto(".");
-    const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem("whistle.world.v2")!) as World);
+    const saved = () => savedWorld(page);
     await expect(page.locator("[data-symbol-site]")).toHaveCount(2);
     await page.locator('[data-cell="0"] [data-symbol-site]').click();
     const footer = page.getByRole("dialog").locator(".dialog-footer");

@@ -1,3 +1,4 @@
+import { probeOutputGain, outputGain } from "./pd-probe";
 import { test, expect, type Page } from "@playwright/test";
 import { createSocket } from "node:dgram";
 import { readFileSync } from "node:fs";
@@ -25,6 +26,7 @@ async function setup(page: Page) {
     }), bridge.udpPort, "127.0.0.1");
   }, 100);
   await page.addInitScript(() => Object.defineProperty(window, "devicePixelRatio", { value: 0.5 }));
+  await probeOutputGain(page);
   await page.goto("uwb-lab/index.html");
   await page.getByRole("radio", { name: "실제 데이터 · PC 수신기", exact: true }).check();
   await page.getByLabel("수신기 주소", { exact: true }).fill(`ws://127.0.0.1:${bridge.wsPort}`);
@@ -56,18 +58,18 @@ test("UDP ranges reach the existing scene and Pd; height, invalid frames and tim
     expect((await data(page)).pd.y).toBeCloseTo(ground, 8);
     device.move({ x: 3, z: 3, boardHeight: 2.1 });
     await expect(page.locator("#rough")).toHaveText("1.000");
-    expect((await messages(page))["whistle-player footed"]).toHaveLength(2);
+    expect((await messages(page))["whistle-player position"]).toHaveLength(3);
     device.invalid();
-    await expect(page.locator("#device-status")).toContainText("앵커가 4개 이상");
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    await expect(page.locator("#device-status")).toHaveText("위치를 계산할 수 없습니다.");
+    await expect.poll(() => outputGain(page)).toBe(0);
     await expect(page.getByTestId("position-marker")).toHaveCount(0);
     device.valid();
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+    await expect.poll(() => outputGain(page)).toBe(1);
     device.pause();
     await expect(page.locator("#device-status")).toContainText("위치를 1초 이상 수신하지 못했습니다.");
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    await expect.poll(() => outputGain(page)).toBe(0);
     device.resume();
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+    await expect.poll(() => outputGain(page)).toBe(1);
     await page.getByRole("button", { name: "오디오 종료", exact: true }).click();
     device.move({ x: 5, z: 3, boardHeight: 1 });
     await expect(page.locator("#water")).toHaveText("물속");
@@ -96,16 +98,16 @@ test("tag selection, saved Whistle world and connection loss do not use another 
     await page.getByRole("button", { name: "연결 / 다시 연결", exact: true }).click();
     await expect(page.locator("#device-status")).toContainText("태그 1 수신 중");
     await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+    await expect.poll(() => outputGain(page)).toBe(1);
     await page.getByRole("button", { name: "연결 종료", exact: true }).click();
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    await expect.poll(() => outputGain(page)).toBe(0);
     await expect(page.getByTestId("position-marker")).toHaveCount(0);
     await page.getByRole("button", { name: "연결 / 다시 연결", exact: true }).click();
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([1]);
+    await expect.poll(() => outputGain(page)).toBe(1);
     device.pause();
     await device.stopBridge();
     await expect(page.locator("#device-status")).toContainText("PC 수신기 연결이 끊겼습니다.");
-    await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+    await expect.poll(() => outputGain(page)).toBe(0);
     expect(await page.evaluate(() => localStorage.getItem("whistle.world.v2"))).toBe(stored);
   } finally { await device.close(); }
 });

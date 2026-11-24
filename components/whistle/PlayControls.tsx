@@ -1,12 +1,7 @@
 "use client";
-import { useRef, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, type MutableRefObject, type PointerEvent } from "react";
 import type { Player } from "@/lib/world";
 import { useLanguage } from "./Language";
-
-/** 조이스틱 손잡이가 움직이는 반지름(px). 이만큼 끌면 최대 */
-const STICK_RADIUS = 40;
-/** 이보다 조금 끈 것(0~1)은 0으로 본다(손가락 떨림) */
-const DEAD_ZONE = 0.15;
 
 type Props = {
   controls: MutableRefObject<Set<string>>;
@@ -16,32 +11,57 @@ type Props = {
   onMovementModeChange: (mode: "walk" | "crouch") => void;
 };
 
-/** 아날로그 조이스틱: 위아래로 끈 만큼 앞뒤로 걷고, 좌우로 끈 만큼 돈다. 손을 떼면 멈춘다. */
+const STICK_RADIUS = 40;
+const DEAD_ZONE = 0.15;
+
 function Stick({ stick, label }: { stick: Props["stick"]; label: string }) {
+  const pad = useRef<HTMLDivElement>(null);
   const knob = useRef<HTMLSpanElement>(null);
-  const set = (x: number, y: number) => {
+  const pointer = useRef<number | null>(null);
+  const set = useCallback((x: number, y: number) => {
     stick.current = { x, y };
     if (knob.current) knob.current.style.transform = `translate(${x * STICK_RADIUS}px, ${-y * STICK_RADIUS}px)`;
-  };
-  const move = (e: React.PointerEvent<HTMLDivElement>) => {
-    const box = e.currentTarget.getBoundingClientRect();
-    let x = (e.clientX - (box.left + box.width / 2)) / STICK_RADIUS;
-    let y = -(e.clientY - (box.top + box.height / 2)) / STICK_RADIUS;
+  }, [stick]);
+  const release = useCallback(() => {
+    const id = pointer.current;
+    pointer.current = null;
+    set(0, 0);
+    if (id !== null && pad.current?.hasPointerCapture(id)) pad.current.releasePointerCapture(id);
+  }, [set]);
+  useEffect(() => {
+    const hide = () => { if (document.hidden) release(); };
+    window.addEventListener("blur", release);
+    document.addEventListener("visibilitychange", hide);
+    return () => {
+      window.removeEventListener("blur", release);
+      document.removeEventListener("visibilitychange", hide);
+      release();
+    };
+  }, [release]);
+  const move = (event: PointerEvent<HTMLDivElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    let x = (event.clientX - box.left - box.width / 2) / STICK_RADIUS;
+    let y = -(event.clientY - box.top - box.height / 2) / STICK_RADIUS;
     const length = Math.hypot(x, y);
     if (length > 1) { x /= length; y /= length; }
     set(Math.abs(x) < DEAD_ZONE ? 0 : x, Math.abs(y) < DEAD_ZONE ? 0 : y);
   };
-  const release = () => set(0, 0);
-  return (
-    <div className="stick" role="application" aria-label={label}
-      onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); move(e); }}
-      onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) move(e); }}
-      onPointerUp={release}
-      onPointerCancel={release}
-      onLostPointerCapture={release}>
-      <span ref={knob} className="stick-knob" aria-hidden="true" />
-    </div>
-  );
+  return <div ref={pad} className="stick" role="group" tabIndex={0} aria-label={label}
+    aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
+    onContextMenu={event => event.preventDefault()}
+    onPointerDown={event => {
+      if (pointer.current !== null || event.button !== 0) return;
+      event.preventDefault();
+      pointer.current = event.pointerId;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      move(event);
+    }}
+    onPointerMove={event => { if (pointer.current === event.pointerId) move(event); }}
+    onPointerUp={event => { if (pointer.current === event.pointerId) release(); }}
+    onPointerCancel={event => { if (pointer.current === event.pointerId) release(); }}
+    onLostPointerCapture={event => { if (pointer.current === event.pointerId) release(); }}>
+    <span ref={knob} className="stick-knob" aria-hidden="true" />
+  </div>;
 }
 
 export function PlayControls({

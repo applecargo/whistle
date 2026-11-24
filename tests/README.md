@@ -10,8 +10,8 @@ npx playwright install chromium
 Run all tests with `npm test`. Run engine tests separately with `npm run test:unit`,
 or browser storage regression tests with `npm run test:storage`.
 Use `npm run test:browser` for all browser tests.
-Use `npm run test:audio` for the WebPd WASM patch and AudioWorklet checks.
-Audio assets are compiled automatically before browser tests and production builds.
+Use `npm run test:audio` for the pd4web WASM patch and AudioWorklet checks.
+Pd patches are bundled automatically for browser tests and production builds.
 See `audio/README.md` for the parameter contract and manual listening page.
 Game audio tests also cover real grid edits, walking across materials, jumping,
 stopping, blur/return, existing sound rules and recovery from audio load failures.
