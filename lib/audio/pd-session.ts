@@ -3,7 +3,7 @@
 // - player.pd : whistle-player, whistle-board-height (3D 이동음, UWB 보드 높이)
 //   whistle-player는 메시지 네 개로 보낸다(Pd에서 [route position yaw stat footed]):
 //   position x y z · yaw a · stat crouch run grounded falling · footed grass water
-// - event.pd  : whistle-event          (시뮬레이션 규칙 이벤트음)
+// - event.pd  : whistle-event          (게임 이벤트: fallingstar 0/1, rain 0/1. Pd에서 [route fallingstar rain])
 // - 3D 이동음 정지: whistle-player-stop (bang). 다음 whistle-player 메시지부터 다시 소리를 내는 것은 패치가 한다.
 // 출력은 main.pd의 믹스다운(채널 1–2). 음소거는 그 게인 fade로 한다.
 import type { PdMessage, PdEngine } from "./pd-runtime.ts";
@@ -38,6 +38,9 @@ const bounded = (value: number, min: number, max: number) => {
 
 type Sender = { send(bus: string, message: PdMessage): void };
 
+/** whistle-event로 보내는 이벤트 이름 */
+export type GameEvent = "fallingstar" | "rain";
+
 /** 버스별 메시지를 값 검사와 함께 해당 패치로 보낸다. */
 export function interactionMessages(patches: { edit: Sender; player: Sender; event: Sender }) {
   return {
@@ -53,9 +56,8 @@ export function interactionMessages(patches: { edit: Sender; player: Sender; eve
       send(["footed", bounded(grass, 0, 1), bounded(water, 0, 1)]);
     },
     boardHeight(height: number) { patches.player.send("whistle-board-height", [validateBoardHeight(height)]); },
-    event(frequency: number, gain: number, pan: number) {
-      patches.event.send("whistle-event", [bounded(frequency, 20, 20000), bounded(gain, 0, 0.12), bounded(pan, -1, 1)]);
-    },
+    /** 게임 이벤트 켬(1)/끔(0). fallingstar: 디버그 화면의 1 키(누를 때마다 번갈아). rain: 날씨가 비이면 1, 아니면 0. */
+    event(name: GameEvent, on: boolean) { patches.event.send("whistle-event", [name, on ? 1 : 0]); },
   };
 }
 

@@ -16,7 +16,7 @@
 | --- | --- |
 | player | `play`를 켜면 80ms마다 `whistle-player position x y z`, `yaw`, `stat`, `footed`. `stop` → `whistle-player-stop bang` |
 | edit | `send` → `whistle-edit x z overlap asset action surface` |
-| event | `send` → `whistle-event frequency gain pan` |
+| event | `send` → `whistle-event frequency gain pan` (옛 형식. 지금 게임은 `whistle-event fallingstar 1/0`, `rain 1/0`) |
 | board | 숫자를 바꾸면 `whistle-board-height` |
 | 영역 0–14 (`sim-slot~`) | 패치 이름을 적고 `on` → `whistle-slot on N 패치 vK L R`, 끄면 `off N`. `amount`·`dist` → `vK-whistle-region`(켜져 있을 때만, 켤 때 다시 보냄) |
 

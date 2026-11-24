@@ -11,7 +11,7 @@
 | `whistle-player` | `[route position yaw stat footed]` | 3D 플레이 중 약 0.08초마다(네 가지 모두) |
 | `$1-whistle-region` | `[route amount distance]` | 영역 패치만. 켜질 때와 값이 바뀔 때 |
 | `whistle-edit` | `[unpack f f f s s s]` | 편집 화면에서 칸을 바꿀 때 |
-| `whistle-event` | `[unpack f f f]` | 3D 플레이 중 규칙 이벤트가 일어날 때 |
+| `whistle-event` | `[route fallingstar rain]` | 게임 이벤트 켬 1 / 끔 0(3D 플레이 중) |
 | `whistle-board-height` | 숫자 하나 | UWB 테스트 페이지에서만 |
 | `whistle-player-stop` | bang | 3D 이동음을 끌 때(UWB 테스트 페이지 등). 다음 `whistle-player`부터 다시 소리를 내는 것은 패치가 한다 |
 | `whistle-slot` | `[route on off]` | `main.pd` 전용. 영역 켜기 `on 번호 패치 이름 L R`, 끄기 `off 번호`([`main-pd.md`](main-pd.md)) |
@@ -71,9 +71,14 @@
 
 게임은 여섯 값을 다 보낸다. 실험 페이지(`audio-lab`)는 앞의 세 값만 보낸다.
 
-## whistle-event (이벤트음)
+## whistle-event (게임 이벤트)
 
-`frequency`(20~20000 Hz), `gain`(0~0.12), `pan`(−1 왼쪽 ~ 1 오른쪽). 시뮬레이션 규칙이 소리를 낼 때 온다.
+이벤트 이름과 값이 온다. `[route fallingstar rain]`을 지나면 1(켬) 또는 0(끔).
+
+| 이벤트 | 언제 오나 |
+|---|---|
+| `fallingstar` `1`/`0` | 지금은 시험용: 3D 플레이 중 디버그 화면(백틱 키)을 켜고 1 키를 누를 때마다 1, 0, 1, … |
+| `rain` `1`/`0` | 날씨가 비(편집 화면의 날씨 버튼)이면 1, 아니면 0. 3D 플레이를 시작할 때 한 번, 그 뒤로는 바뀔 때만 |
 
 ## whistle-board-height (UWB 테스트)
 

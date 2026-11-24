@@ -162,9 +162,8 @@ export default function Home() {
     setSimulation(next);
     if (next.events.length) {
       setLog((prev) => [...next.events, ...prev].slice(0, 12));
-      next.events.filter((e) => e.action === "sound").forEach((event) => audio.event(event, player.current));
     }
-  }, [audio, getWorld]);
+  }, [getWorld]);
   useEffect(() => {
     if (!playing) return;
     const interval = setInterval(step, 700);

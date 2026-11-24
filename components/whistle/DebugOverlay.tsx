@@ -2,15 +2,18 @@
 // 3D 플레이 화면 위에 디버그 정보를 글자로 겹쳐 보인다.
 // 3D 플레이 중 ` (백틱, 숫자 1 왼쪽) 키로 켜고 끈다(기본은 꺼짐). 켜면 오른쪽 위에 보인다.
 // 키는 자판 위치(code)로 본다: 한/영 입력 상태와 상관없이 같은 키.
-// 0.25초마다 읽기만 한다(게임·오디오 상태를 바꾸지 않음).
+// 0.25초마다 읽기만 한다. 예외: 켜져 있을 때 1 키로 Pd에 whistle-event fallingstar 1/0을 번갈아 보낸다(이벤트 시험용). rain은 날씨를 따른다(useGameAudio).
 import { useEffect, useRef, useState } from "react";
 import type { GameAudioDebug } from "@/components/whistle/useGameAudio";
+import type { GameEvent } from "@/lib/audio/pd-session";
 import type { World } from "@/lib/world";
 import type { WorldDerivation } from "@/lib/world-derivation";
 import { isHole } from "@/lib/tile";
 import { renderQuality } from "@/lib/render-quality";
 
 const TOGGLE_CODE = "Backquote";
+/** 디버그가 켜져 있을 때 이벤트를 켜고 끄는 키(누를 때마다 1, 0, 1, …) */
+const EVENT_KEYS: Record<string, GameEvent> = { Digit1: "fallingstar" };
 const REFRESH_MS = 250;
 /** 오버레이 폭(글자 수 기준). 가장 긴 줄보다 넉넉하게 */
 const BOX_WIDTH_CH = 88;
@@ -33,7 +36,7 @@ const f = (v: number | undefined, digits = 2) => (v === undefined || !Number.isF
 const pad = (s: string, n: number) => (s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length));
 
 type Props = {
-  audio: { debug(): GameAudioDebug };
+  audio: { debug(): GameAudioDebug; event(name: GameEvent, on: boolean): void };
   getWorld: () => World;
   derivation: WorldDerivation;
 };
@@ -74,8 +77,9 @@ function useFrameStats() {
   return stats;
 }
 
-function describe(info: GameAudioDebug, world: World, derivation: WorldDerivation, frame: { fps: number; worst: number }) {
+function describe(info: GameAudioDebug, world: World, derivation: WorldDerivation, frame: { fps: number; worst: number }, events: Partial<Record<GameEvent, boolean>>) {
   const lines: string[] = [];
+  lines.push(`이벤트 ${Object.entries(EVENT_KEYS).map(([code, name]) => `${name} ${events[name] ? 1 : 0} (${code.slice(5)} 키)`).join(" · ")} · rain ${world.weather === "rain" ? 1 : 0} (날씨)`);
   const memory = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
   lines.push(`렌더  ${f(frame.fps, 0)} fps · 최장 프레임 ${f(frame.worst, 0)} ms${memory ? ` · JS 힙 ${f(memory.usedJSHeapSize / 2 ** 20, 0)} MB` : ""}`);
   const q = renderQuality();
@@ -148,6 +152,7 @@ export function DebugOverlay({ audio, getWorld, derivation }: Props) {
   // 키보드가 없는 폰에서는 주소에 ?debug를 붙여 켠다.
   const [visible, setVisible] = useState(() => new URLSearchParams(location.search).has("debug"));
   const [text, setText] = useState("");
+  const events = useRef<Partial<Record<GameEvent, boolean>>>({});
   const frame = useFrameStats();
   const latest = useRef({ audio, getWorld, derivation });
   latest.current = { audio, getWorld, derivation };
@@ -162,9 +167,22 @@ export function DebugOverlay({ audio, getWorld, derivation }: Props) {
 
   useEffect(() => {
     if (!visible) return;
+    const press = (event: KeyboardEvent) => {
+      const name = EVENT_KEYS[event.code];
+      if (!name || event.repeat) return;
+      const on = !events.current[name];
+      events.current[name] = on;
+      latest.current.audio.event(name, on);
+    };
+    window.addEventListener("keydown", press);
+    return () => window.removeEventListener("keydown", press);
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
     const update = () => {
       const { audio, getWorld, derivation } = latest.current;
-      setText(describe(audio.debug(), getWorld(), derivation, frame.current));
+      setText(describe(audio.debug(), getWorld(), derivation, frame.current, events.current));
     };
     update();
     const timer = setInterval(update, REFRESH_MS);
