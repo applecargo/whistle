@@ -66,8 +66,8 @@ async function createGameMix(onBlocked: () => void) {
       diffuse,
       // 거리에 따른 음량은 game-soundscape가 영역 외곽까지 거리로 정한다(패너 감쇠는 쓰지 않음).
       rolloff: 0,
-      // 같은 패치가 여러 영역에 동시에 뜨므로 영역 버스(whistle-region)는 슬롯별로 보낸다(패치는 [r $1-whistle-region]).
-      start: (_c, name) => engine.start(name, { scoped: true }),
+      // 영역 버스(whistle-region)는 영역마다 따로 간다(패치는 [r $1-whistle-region]).
+      start: (_c, name) => engine.start(name),
       onEvent: (event) => {
         if (event.type === "error") console.warn(`[Whistle:Audio] ${event.id} ${event.patch} 로드 실패`, event.error);
         else if (event.type === "active" || event.type === "released") log(`${event.id} ${event.patch} ${event.type === "active" ? "켜짐" : "꺼짐"}`);

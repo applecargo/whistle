@@ -12,8 +12,9 @@
 3D 이동 상태 ── 연속 값 ─────┘
 ```
 
-Pd 엔진 하나(AudioContext 하나)에서 여러 패치를 실행한다. 소리 하나 = 패치 하나: 상호작용 패치(edit·player·event)와
-사운드스케이프 영역 패치(`environment_grass.pd` 등)가 각각 엔진의 "슬롯" 하나를 쓴다. 하위 패치(abstraction)도 쓸 수 있다.
+Pd 엔진 하나(AudioContext 하나)에서 장면 패치 `main.pd` 하나가 전체를 관리한다. 사운드스케이프 영역 패치(`environment_grass.pd` 등)는
+JS의 켜기·끄기 메시지로 `main.pd`가 "슬롯"에 띄우고, 상호작용 패치(edit·player·event)는 `main.pd` 안에 둔다.
+하위 패치(abstraction)도 쓸 수 있다. 역할 나누기·채널·메시지 약속은 [`main-pd.md`](main-pd.md).
 
 ## Pd 엔진 (pd4web)
 
@@ -31,7 +32,7 @@ Pd 엔진 하나(AudioContext 하나)에서 여러 패치를 실행한다. 소�
   안을 보려면 `tar tzf patches.tar.gz`. gzip은 `.pd` 같은 텍스트는 크게 줄이지만 wav는 거의 줄이지 못한다(실측 약 14%). 관리할 목록은 없다. 개발 서버는 패치 폴더가 바뀌면 새로고침하지 않고 바뀐 파일만 엔진 디스크에 다시 쓴다.
   그 파일을 쓰는(안쪽 abstraction까지) 떠 있는 슬롯은 다시 만들고, 그 슬롯에 마지막으로 보낸 값을 다시 보낸다.
   새로 뜨는 슬롯은 Pd가 만들 때마다 파일을 새로 읽으므로 저절로 새 버전이다. 다시 만들 때 소리가 한 번 끊기고 패치 상태는 처음부터다.
-  앱이 여는 패치(`KIND_PATCHES`, 상호작용 패치)가 폴더에 없으면 `npm run build`도 `npm run dev`도 그 이름을 보여 주고 멈춘다.
+  앱이 여는 패치(`KIND_PATCHES`, `main`)가 폴더에 없으면 `npm run build`도 `npm run dev`도 그 이름을 보여 주고 멈춘다.
   그래서 패치를 고치면 Pd에서 저장만 하면 된다. 개발 PC에 pd4web·Emscripten이 없어도 된다.
   파일은 매번 서버에 바뀌었는지 묻고 받는다(`cache: "no-cache"`). 페이지를 열 때 폴더 전체(지금 약 0.7MB)를 받는다.
 - 엔진을 다시 빌드할 때(pd4web 버전업, 외부 객체 추가 등)만 `npm run audio:engine`.
@@ -39,10 +40,10 @@ Pd 엔진 하나(AudioContext 하나)에서 여러 패치를 실행한다. 소�
   첫 빌드는 Emscripten 등을 받아 수 분, 이후는 `output/pd4web-engine/` 캐시로 약 4~5분(CLI 빌드 + pdlua 제외 재빌드).
   pd4web 버전을 바꿔 잘라 낼 코드가 달라지면 빌드가 멈춘다(pdlua가 조용히 남지 않도록). 그때 스크립트의 `stripPdlua`를 맞춘다.
 - 런타임 `lib/audio/pd-runtime.ts`: `openEngine(baseUrl, { latencyHint })`가 페이지당 엔진 하나를 연다(AudioContext도 엔진의 것).
-  `engine.start(이름, { scoped })` → 슬롯 하나: host의 `[pd slotN]` 안에 `[<패치> slotN]` → `[dac~ 2N+1 2N+2]`를 만들고
-  `loadbang`을 보낸다(동적으로 만든 패치에는 loadbang이 저절로 오지 않음). 엔진 출력 32채널을 슬롯별 스테레오 노드로 나눠 돌려준다.
-  슬롯은 16개(Web Audio 노드 출력 최대 32채널). `destroy()`는 슬롯을 비운다(`clear`).
-  슬롯이 엔진 안에서 어떻게 만들어지고 소리가 어떻게 믹스되는지는 [`slots-and-mix.md`](slots-and-mix.md).
+  패치 폴더를 푼 뒤 `main.pd`를 바로 연다. `engine.start(이름)` → 빈 슬롯 번호와 새 이름(`v17`)으로 `whistle-slot`에
+  `on 번호 패치 이름 L R`을 보내고, 그 슬롯의 채널 쌍을 스테레오 노드로 돌려준다. `destroy()`는 `off 번호`.
+  슬롯은 15개(채널 1–30), 31–32는 믹스다운(`engine.mixdown`). `engine.send(버스, 값)`은 전역 버스로 보낸다.
+  소리가 어떻게 믹스되는지는 [`slots-and-mix.md`](slots-and-mix.md).
 - 교차 출처 격리(COOP/COEP)가 필요하다(SharedArrayBuffer). 개발·미리보기 서버는 `vite.config.ts`의 헤더로,
   GitHub Pages는 `public/coi-serviceworker.js`(pd4web에 포함된 coi-serviceworker, MIT)로 건다. 첫 방문 때 페이지가 한 번 새로고침된다.
 - Pd → JS 메시지(`[s 이름]`을 JS가 받기)는 된다. 단 출력이 연결된 슬롯이 하나라도 떠 있어야 엔진이 돈다. 아직 앱에서는 쓰지 않는다.
@@ -53,9 +54,9 @@ Pd 엔진 하나(AudioContext 하나)에서 여러 패치를 실행한다. 소�
 - **출력은 최상위 `[outlet~]` 두 개**(왼쪽 L, 오른쪽 R. 화면에서 왼쪽에 있는 것이 L). `[dac~]`를 쓰면 모든 소리가 한 채널에 섞여
   소리별 패닝을 할 수 없다. 기존 패치는 `dac~`의 L/R 입력을 그대로 두 `outlet~`로 옮겼다.
   Pd에서 단독으로 들어 보려면 그 패치를 객체로 넣고 `[dac~]`에 연결한 시험용 패치를 연다.
-- `$1`은 슬롯 이름(`slot0`…). 같은 패치가 여러 영역에 동시에 뜨므로 **영역마다 따로 받을 버스는 `[r $1-whistle-region]`**.
-  사운드스케이프는 `scoped`로 열어 `whistle-region`을 `slotN-whistle-region`으로 보낸다.
-  상호작용 패치(edit·player·event)는 하나씩만 뜨므로 `whistle-player` 같은 전역 이름 그대로.
+- 영역 패치의 `$1`은 영역 이름(`v17`…, 띄울 때마다 새것). 같은 패치가 여러 영역에 동시에 뜨므로
+  **영역마다 따로 받을 버스는 `[r $1-whistle-region]`**(JS가 `v17-whistle-region`으로 보낸다).
+  상호작용 패치(edit·player·event)는 `main.pd` 안에 하나씩 있으므로 `whistle-player` 같은 전역 이름 그대로.
 - 받는 객체가 없는 버스로 보내도 Pd가 조용히 버린다.
 - **어디에 어떤 소리(영역)가 생기는지는 [`sound-layers.md`](sound-layers.md)에 정리했다(예: 바람은 골짜기).**
 - **패치에서 받을 수 있는 값(버스·순서·범위)은 [`pd-receive.md`](pd-receive.md)에 정리했다.** 전역 이름은 어느 패치에서나 받을 수 있다(예: 영역 패치에서 `[r whistle-player]`).
@@ -98,8 +99,8 @@ edit.pd · player.pd(→ 이동음 게인) · event.pd ─┐
 
 - 상호작용 패치는 `edit`(whistle-edit), `player`(whistle-player·whistle-board-height),
   `event`(whistle-event) 세 개로 나뉜다. 받는 값은 [`pd-receive.md`](pd-receive.md).
-- 음소거(편집 화면 복귀·blur·탭 숨김)는 `whistle-gate` 대신 마스터 게인 fade, 3D 이동음 정지는
-  `whistle-player-stop` 대신 `player` 패치 뒤의 게인 fade로 한다. 두 버스는 더 이상 쓰지 않는다.
+- 음소거(편집 화면 복귀·blur·탭 숨김)는 `whistle-gate` 대신 마스터 게인 fade로 한다. 3D 이동음 정지는 `whistle-player-stop`(bang)을
+  보낸다(상호작용 패치가 믹스다운 한 쌍에 섞여 JS가 이동음만 따로 끌 수 없으므로). 다시 켜는 것은 다음 `whistle-player` 메시지로 패치가 한다.
 - 소리의 단위는 **층별 영역**이다. 입력은 `world-derivation`의 결과(지형 타일 + `environment` + `structures`)이고,
   층마다 같은 종류끼리 이어진 칸을 묶는다(위에서 내려다본 섬). 한 칸이 여러 층에 동시에 속할 수 있다
   (예: 번짐 칸 위에 풀과 안개가 있으면 surface·grass·fog 세 영역에 모두 속해 각각 소리가 난다).
@@ -148,7 +149,7 @@ edit.pd · player.pd(→ 이동음 게인) · event.pd ─┐
 - 수동 테스트: `audio-lab/index.html`
 - 다중 패치 실험: `audio-lab/soundscape.html`, 회귀 테스트 `tests/browser/soundscape-lab.spec.ts`
 
-패치가 받는 버스와 값의 순서·범위·뜻은 [`pd-receive.md`](pd-receive.md)에 정리했다(`whistle-gate`, `whistle-player-stop`, `whistle-ready`는 더 이상 쓰지 않는다).
+패치가 받는 버스와 값의 순서·범위·뜻은 [`pd-receive.md`](pd-receive.md)에 정리했다(`whistle-gate`, `whistle-ready`는 더 이상 쓰지 않는다).
 
 UWB 테스트의 보드 높이는 현실 바닥 기준 미터 값이며, 가상 지면/발 높이 `y`와 별개다.
 `InteractionSession.boardHeight()`로 별도 버스에 보내며 유한하지 않거나 0~10m 범위 밖이면 거부한다.
@@ -159,7 +160,7 @@ X/Z·겹침·풀·바위 값은 0–1로 제한한다.
 유한하지 않은 숫자는 전송하지 않는다. 테스트 음은 최종 사운드 디자인이 아니며,
 X에 따른 좌우 출력도 실제 플레이어 방향을 고려한 3D 공간음향은 아니다.
 
-오디오는 클릭으로 시작한다. 세션 `close()`는 패치(슬롯)만 내리고 엔진·AudioContext는 페이지와 함께 계속 산다(게임은 suspend).
+오디오는 클릭으로 시작한다. 세션 `close()`는 출력만 떼고 엔진·`main.pd`·AudioContext는 페이지와 함께 계속 산다(게임은 suspend).
 테스트 페이지가 숨겨지면 음소거하며 사용자가 해제한다. 마이크 입력은 사용하지 않는다.
 
 ## 실행
