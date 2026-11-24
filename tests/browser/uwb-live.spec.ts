@@ -1,3 +1,4 @@
+import { probeOutputGain, outputGain } from "./pd-probe";
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
 import { flatTerrain } from "../../lib/terrain";
@@ -12,6 +13,7 @@ async function openLive(page: Page, context: BrowserContext, stored: string) {
     Object.defineProperty(window, "devicePixelRatio", { value: 0.5 });
     localStorage.setItem("whistle.language", "ko");
   });
+  await probeOutputGain(page);
   await page.goto("uwb-lab/index.html");
   await page.evaluate((stored) => localStorage.setItem("whistle.world.v2", stored), stored);
   const editor = await context.newPage();
@@ -26,6 +28,7 @@ async function openLive(page: Page, context: BrowserContext, stored: string) {
 }
 
 test("live grid edits and undo reach the displayed world and Pd without relying on autosave", async ({ page, context }) => {
+  test.setTimeout(180_000);
   const world = terrainFixtures().flat;
   world.title = "실제 편집 중인 세계";
   const stored = JSON.stringify(world);
@@ -39,31 +42,31 @@ test("live grid edits and undo reach the displayed world and Pd without relying 
   await page.bringToFront();
   await page.getByLabel("보드 높이 (m)", { exact: true }).fill("1.5");
   await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
-  await expect.poll(async () => (await messages(page))["whistle-player"]?.[3]).toBe(0);
+  await expect.poll(async () => (await messages(page))["whistle-player footed"]?.[0]).toBe(0);
   const initialPosition = (await data(page)).grid;
   await editor.bringToFront();
   await editor.getByRole("button", { name: "번짐", exact: true }).click();
   for (const i of [61, 62, 73, 74]) await editor.locator(`[data-cell="${i}"]`).click();
-  await expect.poll(async () => (await messages(page))["whistle-player"]?.[3]).toBe(1);
+  await expect.poll(async () => (await messages(page))["whistle-player footed"]?.[0]).toBe(1);
   await expect(page.locator("#audio-status")).toHaveText("오디오 실행 중");
   await expect(page.locator(".map rect").nth(61)).toHaveAttribute("fill", "#b5cc9c");
   expect((await data(page)).grid).toEqual(initialPosition);
   expect(await page.evaluate(() => localStorage.getItem("whistle.world.v2"))).toBe(stored);
   await editor.getByRole("button", { name: "거침", exact: true }).click();
   for (const i of [61, 62, 73, 74]) await editor.locator(`[data-cell="${i}"]`).click();
-  await expect.poll(async () => (await messages(page))["whistle-player"]?.[4]).toBe(1);
+  await expect.poll(async () => (await data(page)).pd?.rough).toBe(1);
   await editor.getByRole("button", { name: "되돌리기", exact: true }).click();
-  await expect.poll(async () => (await messages(page))["whistle-player"]?.[4]).toBe(0.75);
+  await expect.poll(async () => (await data(page)).pd?.rough).toBe(0.75);
   await editor.getByRole("button", { name: "다시 실행", exact: true }).click();
-  await expect.poll(async () => (await messages(page))["whistle-player"]?.[4]).toBe(1);
+  await expect.poll(async () => (await data(page)).pd?.rough).toBe(1);
   await editor.getByRole("button", { name: "높이기", exact: true }).click();
   await editor.locator('[data-cell="61"]').click();
-  await expect.poll(async () => Number((await messages(page))["whistle-player"]?.[1])).toBeGreaterThan(0.2);
+  await expect.poll(async () => Number((await messages(page))["whistle-player position"]?.[1])).toBeGreaterThan(0.2);
   expect((await messages(page))["whistle-board-height"]).toEqual([1.5]);
   expect((await data(page)).boardHeight).toBe(1.5);
   await editor.close();
   await expect(page.locator("#live-status")).toContainText("연결이 끊겼습니다.");
-  await expect.poll(async () => (await messages(page))["whistle-gate"]).toEqual([0]);
+  await expect.poll(() => outputGain(page)).toBe(0);
   await expect(page.getByTestId("position-marker")).toHaveCount(0);
 });
 

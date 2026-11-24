@@ -745,7 +745,7 @@ test("effect regions join adjacent active cells and update when a region splits"
 test("different effects share cells while keeping a separate marker", async () => {
   const { effectRegions } = await import("../lib/effect-regions.ts");
   const env = deriveEnvironment(empty());
-  for (const i of [13, 14, 15]) { env.cells[i].dust = .4; env.cells[i].glide = 1; }
+  for (const i of [13, 14, 15]) { env.cells[i].dust = .4; env.cells[i].windX = 1; }
   const regions = effectRegions(env);
   assert.equal(regions.length, 2);
   assert.deepEqual(regions[0].cells, regions[1].cells);

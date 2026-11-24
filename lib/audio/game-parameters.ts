@@ -1,12 +1,13 @@
 import type { World } from "../world.ts";
 import type { WorldDerivation } from "../world-derivation.ts";
 import { isHole } from "../tile.ts";
-import type { EditSound, PlayerSound } from "./webpd-session.ts";
+import type { EditSound, PlayerSound } from "./pd-session.ts";
 
 export type PlayerAudioFrame = {
   x: number; y: number; z: number; size: number;
   grass: number; rough: number; water: number;
   grounded: boolean; falling: boolean; yaw: number;
+  crouch?: boolean; run?: boolean;
 };
 
 export function playerSound(frame: PlayerAudioFrame): PlayerSound {

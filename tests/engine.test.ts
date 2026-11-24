@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  roughGroundMotion,
   launchJump,
   resolveJump,
   jumpFrame,
@@ -777,20 +776,6 @@ test("standing jumps stay in place and gaps beyond jump range still cause a fall
   assert.ok(backward.vz > 0);
 });
 
-test("rough footsteps only move the camera while walking and remain gentle", () => {
-  for (let distance = 0; distance < 30; distance += .07) {
-    assert.equal(Math.abs(roughGroundMotion(distance, 1, 0, false).y), 0);
-    assert.equal(Math.abs(roughGroundMotion(distance, 1, 0, false).roll), 0);
-    const motion = roughGroundMotion(distance, 1, 2, false);
-    assert.ok(Math.abs(motion.y) <= .0491);
-    assert.ok(Math.abs(motion.roll) <= .0041);
-    const crouched = roughGroundMotion(distance, 1, 2, true);
-    assert.ok(Math.abs(crouched.y) <= Math.abs(motion.y));
-    assert.equal(Math.abs(roughGroundMotion(distance, 0, 2, false).y), 0);
-  }
-  assert.notEqual(roughGroundMotion(.2, 1, 2, false).y, roughGroundMotion(.4, 1, 2, false).y);
-});
-
 test("weather survives sharing, old worlds default to clear, and unknown weather is rejected", () => {
   for (const weather of ["clear", "cloud", "rain", "snow"] as const) {
     const world = starterWorld(); world.weather = weather;
@@ -900,7 +885,7 @@ test("high edges require the narrow ladder route, including maximum rise and des
 
 test("updrafts turn a full circle in 90 seconds and stop turning on release or landing", async () => {
   const { environmentalFlight, stepEnvironmentalFlight } = await import("../lib/environment-motion.ts");
-  const conditions = { lift: .65, liftCeiling: 2, glideHeld: false, crouching: false };
+  const conditions = { lift: .65, liftCeiling: 2, crouching: false };
   for (const fps of [30, 60, 120]) {
     let flight = environmentalFlight("float", 2), yaw = 0;
     for (let i = 0; i < fps * 90; i++) {
@@ -917,23 +902,22 @@ test("updrafts turn a full circle in 90 seconds and stop turning on release or l
   }
 });
 
-test("environment flights prioritize lift, release gliding and land without chaining states", async () => {
+test("floating holds height and releases into gravity or lands", async () => {
   const { environmentalFlight, stepEnvironmentalFlight } = await import("../lib/environment-motion.ts");
-  const normal = { lift: 0, liftCeiling: 0, glideHeld: false, crouching: false };
-  const bounce = environmentalFlight("bounce", 0);
-  let state = bounce, landed = false;
+  const lifting = { lift: .65, liftCeiling: 2, crouching: false };
+  let state = environmentalFlight("float", 1);
+  for (let i = 0; i < 300; i++) state = stepEnvironmentalFlight(state, 1 / 60, null, lifting).flight;
+  assert.ok(Math.abs(state.y - 2) < .03);
+  const released = stepEnvironmentalFlight(state, .1, null, { ...lifting, crouching: true });
+  assert.ok(released.flight.y < state.y);
+  const exited = stepEnvironmentalFlight(state, .1, null, { ...lifting, lift: 0 });
+  assert.ok(exited.flight.y < state.y);
+  let landed = false;
   for (let i = 0; i < 180; i++) {
-    const result = stepEnvironmentalFlight(state, 1 / 60, 0, normal);
+    const result = stepEnvironmentalFlight(state, 1 / 60, 0, { ...lifting, lift: 0 });
     state = result.flight;
     if (result.landed) { landed = true; break; }
   }
-  assert.equal(landed, true); assert.equal(state.y, 0);
-  const glide = environmentalFlight("glide", 3, 0, 2, -2);
-  assert.ok(stepEnvironmentalFlight(glide, .1, null, { ...normal, glideHeld: true }).flight.vy >= -.7);
-  assert.ok(stepEnvironmentalFlight(glide, .1, null, normal).flight.vy < -2);
-  state = environmentalFlight("glide", 1, 0, 0, -1);
-  for (let i = 0; i < 300; i++) state = stepEnvironmentalFlight(state, 1 / 60, null, { ...normal, lift: .65, liftCeiling: 2 }).flight;
-  assert.equal(state.mode, "float"); assert.ok(Math.abs(state.y - 2) < .03);
-  const released = stepEnvironmentalFlight(state, .1, null, { ...normal, lift: .65, liftCeiling: 2, crouching: true });
-  assert.ok(released.flight.y < state.y);
+  assert.equal(landed, true);
+  assert.equal(state.y, 0);
 });

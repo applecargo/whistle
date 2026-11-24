@@ -1,161 +1,102 @@
-import { atFixedStart } from "./fixed-start";
 import { test, expect, type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
 import { terrainFixtures } from "../terrain-fixtures";
-import type { World } from "../../lib/world";
+import { atFixedStart } from "./fixed-start";
+import { probePd, pdProbe, pdMessages } from "./pd-probe";
 
-test.setTimeout(90_000);
-type Probe = {
-  messages: { bus: string; value: (string | number)[] }[];
-  contexts: AudioContext[]; rms: number; peak: number;
-};
-async function openWorld(page: Page, world: World) {
-  world=atFixedStart(world);
-  const io = JSON.parse(readFileSync("public/audio-test/io.json", "utf8"));
-  await page.addInitScript(({ world, io }) => {
+test.setTimeout(120_000);
+test.use({ viewport: { width: 520, height: 600 }, deviceScaleFactor: 1 });
+
+async function open(page: Page) {
+  await page.addInitScript(world => {
     localStorage.setItem("whistle.world.v2", JSON.stringify(world));
     localStorage.setItem("whistle.language", "ko");
-    const state = window as typeof window & { audioProbe: Probe; audioIo: typeof io };
-    state.audioProbe = { messages: [], contexts: [], rms: 0, peak: 0 };
-    state.audioIo = io;
-    const Original = window.AudioContext;
-    window.AudioContext = class extends Original {
-      constructor(options?: AudioContextOptions) { super(options); state.audioProbe.contexts.push(this); }
-    };
-  }, { world, io });
-  await page.route("**/audio-test/webpd-runtime.js", async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({ response, body: await response.text() + `
-      const originalRun = WebPdRuntime.run;
-      WebPdRuntime.run = async (context, patch, settings) => {
-        const probe = window.audioProbe;
-        const node = await originalRun(context, patch, {
-          messageHandler(node, event) {
-            if (event.data.type === 'io:messageSender') {
-              const p = event.data.payload;
-              const bus = Object.keys(window.audioIo.outputs).find(name => window.audioIo.outputs[name].nodeId === p.nodeId);
-              probe.messages.push({bus, value: p.message});
-            }
-            settings.messageHandler(node, event);
-          }
-        });
-        const analyser = context.createAnalyser();
-        analyser.fftSize = 2048;
-        node.connect(analyser);
-        const wave = new Float32Array(2048);
-        const timer = setInterval(() => {
-          if(context.state === 'closed') { clearInterval(timer); return; }
-          analyser.getFloatTimeDomainData(wave);
-          probe.rms = Math.sqrt(wave.reduce((sum,n) => sum+n*n,0) / wave.length);
-          probe.peak = Math.max(probe.peak, probe.rms);
-        }, 20);
-        return node;
-      };
-    ` });
-  });
-  await page.goto(".");
-  await expect(page.getByRole("button", { name: "파일 저장", exact: true }))
-    .toHaveAttribute("aria-description", "이 브라우저에 저장됨");
+  }, atFixedStart(terrainFixtures().flat));
+  await probePd(page);
+  await page.goto(`?meeting=audio-${Date.now()}`);
+  await expect(page.locator("main")).toHaveAttribute("data-meeting-status", "online");
 }
-const probe = (page: Page) => page.evaluate(() => {
-  const p = (window as typeof window & { audioProbe: Probe }).audioProbe;
-  return { messages: p.messages, contexts: p.contexts.map((ctx) => ctx.state), rms: p.rms, peak: p.peak };
-});
-const messages = async (page: Page, bus: string) => (await probe(page)).messages.filter((m) => m.bus === bus).map((m) => m.value);
+const audioState = (page: Page) => page.evaluate(() =>
+  (window as unknown as { Pd4WebAudioContext?: AudioContext }).Pd4WebAudioContext?.state);
 
-test.afterEach(async ({ page }, info) => {
-  if (info.status !== info.expectedStatus) {
-    await info.attach("audio-probe", { body: JSON.stringify(await probe(page)), contentType: "application/json" });
-  }
-});
-
-test("real grid edits reach Pd once with material context; no-op and undo stay silent", async ({ page }) => {
-  const world = terrainFixtures().flat;
-  for (const i of [1, 2]) world.terrain!.tiles[i].surface = "soft";
-  world.terrain!.tiles[5].height = 6;
-  await openWorld(page, world);
-  expect((await probe(page)).contexts).toEqual([]);
-  await page.getByRole("button", { name: "높이기", exact: true }).click();
-  await page.locator('[data-cell="5"]').click({ position: { x: 2, y: 2 } });
-  expect((await probe(page)).contexts).toEqual([]);
-  await page.getByRole("button", { name: "번짐", exact: true }).click();
-  await page.locator('[data-cell="0"]').click();
-  await expect.poll(async () => (await messages(page, "whistle-edit")).length).toBe(1);
-  expect((await messages(page, "whistle-edit"))[0]).toEqual([0.5 / 12, 0.5 / 12, 1, "terrain", "paint", "soft"]);
-  await expect.poll(async () => (await probe(page)).peak).toBeGreaterThan(0.005);
-  await page.locator('[data-cell="0"]').click();
-  await expect.poll(async () => (await messages(page, "whistle-edit")).length).toBe(2);
-  expect((await messages(page, "whistle-edit"))[1][2]).toBe(0);
-  await page.getByRole("button", { name: "거침", exact: true }).click();
-  await page.locator('[data-cell="4"]').click();
-  await expect.poll(async () => (await messages(page, "whistle-edit")).length).toBe(3);
-  expect((await messages(page, "whistle-edit"))[2][5]).toBe("rough");
-  await page.getByRole("button", { name: "되돌리기", exact: true }).click();
-  await expect.poll(async () => (await probe(page)).rms).toBeLessThan(0.0001);
-  expect((await messages(page, "whistle-edit")).length).toBe(3);
-  expect((await probe(page)).contexts).toEqual(["running"]);
-});
-
-test("walking sends spatial state at fixed volume; blur and exit silence it", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  const world = terrainFixtures().flat;
-  world.start = { x: 6, z: 7 };
-  for (const z of [6, 7, 8]) world.terrain!.tiles[z * 12 + 6].surface = "soft";
-  for (let x = 0; x < 12; x++) world.terrain!.tiles[5 * 12 + x].surface = "rough";
-  await openWorld(page, world);
-  await page.getByRole("button", { name: "플레이", exact: true }).click();
-  await expect(page.locator(".play-shell canvas")).toBeVisible();
-  await expect.poll(async () => (await messages(page, "whistle-ready")).length).toBe(1);
-  await page.keyboard.down("w");
-  await expect.poll(async () => (await messages(page, "whistle-player")).some((m) => Number(m[2]) < 7.5 / 12 && Number(m[3]) > 0.1)).toBe(true);
-  await expect.poll(async () => (await messages(page, "whistle-player")).some((m) => Number(m[4]) > 0.1), { timeout: 15000 }).toBe(true);
-  await expect.poll(async () => (await probe(page)).peak).toBeGreaterThan(0.001);
-  await page.keyboard.press("Space");
-  await expect.poll(async () => (await messages(page, "whistle-player")).some((m) => m[5] === 0 && Number(m[1]) > 0.2)).toBe(true);
-  await page.keyboard.up("w");
-  await expect.poll(async () => (await messages(page, "whistle-player")).at(-1)?.[5]).toBe(1);
-  expect((await messages(page, "whistle-player")).every((m) => m.length === 9)).toBe(true);
-  await expect.poll(async () => (await probe(page)).rms).toBeGreaterThan(0.001);
-  await page.keyboard.down("w");
-  await expect.poll(async () => (await probe(page)).rms).toBeGreaterThan(0.001);
-  await page.evaluate(() => window.dispatchEvent(new Event("blur")));
-  await page.keyboard.up("w");
-  await expect.poll(async () => (await probe(page)).rms).toBeLessThan(0.0001);
-  await page.keyboard.down("w");
-  await expect.poll(async () => (await probe(page)).rms).toBeGreaterThan(0.001);
-  await page.keyboard.up("w");
-  await page.keyboard.press("Escape");
-  await expect(page.locator(".workspace")).toBeVisible();
-  await expect.poll(async () => (await probe(page)).rms).toBeLessThan(0.0001);
-  expect((await messages(page, "whistle-gate")).at(-1)).toEqual([0]);
-  expect((await probe(page)).contexts).toEqual(["running"]);
-});
-
-test("failed audio loading leaves editing usable and retries on the next edit", async ({ page }) => {
-  await page.route("**/audio-test/patch.wasm", (route) => route.fulfill({ status: 503, body: "unavailable" }));
-  await openWorld(page, terrainFixtures().flat);
+test("real edits reach the shared Pd engine; no-op and undo stay silent; failed downloads retry", async ({ page }) => {
+  await open(page);
+  expect((await pdProbe(page)).modules).toBe(0);
+  await page.route("**/audio/patches.tar.gz", route => route.fulfill({ status: 503, body: "unavailable" }));
   await page.getByRole("button", { name: "높이기", exact: true }).click();
   await page.locator('[data-cell="0"]').click();
   await expect(page.locator('[data-cell="0"]')).toHaveAccessibleName(/높이 1/);
-  await expect.poll(async () => (await probe(page)).contexts).toEqual(["closed"]);
-  await page.unroute("**/audio-test/patch.wasm");
+  await expect(page.locator(".toast")).toContainText("오디오를 시작하지 못했어요");
+  await page.unroute("**/audio/patches.tar.gz");
   await page.locator('[data-cell="1"]').click();
-  await expect.poll(async () => (await messages(page, "whistle-edit")).length).toBe(1);
-  await expect(page.locator('[data-cell="1"]')).toHaveAccessibleName(/높이 1/);
-  expect((await probe(page)).contexts).toEqual(["closed", "running"]);
+  await expect.poll(async () => (await pdMessages(page, "whistle-edit")).length).toBe(1);
+  expect((await pdMessages(page, "whistle-edit"))[0]).toEqual([1.5 / 12, 0.5 / 12, 0, "terrain", "paint", "plain"]);
+  await page.getByRole("button", { name: "되돌리기", exact: true }).click();
+  expect((await pdMessages(page, "whistle-edit")).length).toBe(1);
+  await page.getByRole("button", { name: "바닥", exact: true }).click();
+  await page.locator('[data-cell="1"]').click();
+  expect((await pdMessages(page, "whistle-edit")).length).toBe(1);
+  expect((await pdProbe(page)).modules).toBe(1);
 });
 
-test("existing approach sound rules use the same Pd session", async ({ page }) => {
-  const world = terrainFixtures().flat;
-  world.objects = [{ id: "tone", asset: "circle", x: 6, z: 9, rotation: 0, scale: 1 }];
-  world.rules = [{ id: "sound", subject: "circle", trigger: "approach", token: "", source: "*",
-    radius: 2, action: "sound", result: "", replacement: "", enabled: true }];
-  await openWorld(page, world);
-  await page.getByRole("button", { name: "플레이", exact: true }).click();
-  await expect.poll(async () => (await messages(page, "whistle-event")).length).toBe(1);
-  expect((await messages(page, "whistle-event"))[0]).toEqual([261.63, 0.12 / 1.3, 0]);
-  await expect.poll(async () => (await probe(page)).peak).toBeGreaterThan(0.005);
-  await page.keyboard.press("Escape");
-  await expect.poll(async () => (await probe(page)).rms).toBeLessThan(0.0001);
-  expect((await probe(page)).contexts).toEqual(["running"]);
-});
+for (const touch of [false, true]) {
+  test(`${touch ? "phone touch" : "PC mouse"} joystick moves, turns, stops on release and preserves keyboard controls`, async ({ browser, baseURL }, info) => {
+    const context = await browser.newContext({ baseURL, locale: "ko-KR", hasTouch: touch,
+      isMobile: touch, viewport: touch ? { width: 390, height: 844 } : { width: 720, height: 600 }, deviceScaleFactor: 2 });
+    const page = await context.newPage();
+    try {
+      const errors: string[] = [];
+      page.on("pageerror", error => errors.push(error.message));
+      page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+      await open(page);
+      await page.getByRole("button", { name: "플레이", exact: true }).click();
+      const stick = page.getByRole("group", { name: "이동 조이스틱", exact: true });
+      await expect(stick).toBeVisible();
+      expect(await page.locator(".play-shell canvas").evaluate((canvas: HTMLCanvasElement) => canvas.width / canvas.clientWidth)).toBeCloseTo(1, 2);
+      const position = async () => (await pdMessages(page, "whistle-player position")).at(-1)! as number[];
+      const yaw = async () => Number((await pdMessages(page, "whistle-player yaw")).at(-1)?.[0]);
+      await expect.poll(async () => (await position())?.length, { timeout: 30_000 }).toBe(3);
+      expect((await pdProbe(page)).starts).toEqual(expect.arrayContaining(["edit", "player", "event"]));
+      await expect.poll(async () => (await pdProbe(page)).starts.some(s => s.startsWith("terrain_"))).toBe(true);
+      const box = (await stick.boundingBox())!, x = box.x + box.width / 2, y = box.y + box.height / 2;
+      const cdp = touch ? await context.newCDPSession(page) : undefined;
+      const move = async (dx: number, dy: number, start = false) => {
+        if (cdp) await cdp.send("Input.dispatchTouchEvent", { type: start ? "touchStart" : "touchMove", touchPoints: [{ x: x + dx, y: y + dy }] });
+        else { await page.mouse.move(x + dx, y + dy); if (start) await page.mouse.down(); }
+      };
+      const release = async () => {
+        if (cdp) await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        else await page.mouse.up();
+      };
+      const before = await position();
+      await move(0, -35, true);
+      await expect.poll(async () => (await position())[2], { timeout: 15_000 }).toBeLessThan(before[2] - .005);
+      await release();
+      await expect(page.locator(".stick-knob")).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+      await page.waitForTimeout(250);
+      const stopped = await position();
+      await page.waitForTimeout(400);
+      expect((await position())[2]).toBeCloseTo(stopped[2], 4);
+      const beforeYaw = await yaw();
+      await move(35, 0, true);
+      await expect.poll(yaw, { timeout: 15_000 }).toBeGreaterThan(beforeYaw + .1);
+      if (touch) await cdp!.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+      else { await page.evaluate(() => window.dispatchEvent(new Event("blur"))); await release(); }
+      await expect(page.locator(".stick-knob")).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+      if (!touch) {
+        await expect.poll(() => audioState(page)).toBe("suspended");
+        const p = await position();
+        await page.keyboard.down("w");
+        await expect.poll(async () => Math.hypot(...(await position()).filter((_, i) => i !== 1).map((v, i) => v - p[i * 2])), { timeout: 15_000 }).toBeGreaterThan(.005);
+        await page.keyboard.up("w");
+        await page.getByRole("button", { name: "기어가기", exact: true }).click();
+        await expect.poll(async () => (await pdMessages(page, "whistle-player stat")).at(-1)?.[0]).toBe(1);
+      }
+      await page.screenshot({ path: info.outputPath(touch ? "joystick-phone.png" : "joystick-pc.png") });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect((await pdProbe(page)).modules).toBe(1);
+      expect(errors).toEqual([]);
+      await page.keyboard.press("Escape");
+      await expect(page.locator(".workspace")).toBeVisible();
+    } finally { await context.close(); }
+  });
+}

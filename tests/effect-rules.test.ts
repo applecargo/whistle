@@ -13,7 +13,7 @@ for (const rule of EFFECT_RULES) {
     const active = regions.filter(region => region.kind === rule.kind);
     assert.ok(active.length > 0, rule.kind);
     assert.ok(active.every(region => region.cells.length <= rule.maxCells));
-    assert.deepEqual([...new Set(regions.map(region => region.kind))].sort(), ["dust", "glide", "flicker"].includes(rule.kind) ? [rule.kind, "wind"].sort() : [rule.kind]);
+    assert.deepEqual([...new Set(regions.map(region => region.kind))].sort(), ["dust", "flicker"].includes(rule.kind) ? [rule.kind, "wind"].sort() : [rule.kind]);
     assert.deepEqual(deriveEnvironment(JSON.parse(JSON.stringify(world))), env);
     world.terrain!.tiles[breakIndex] = { surface: "plain", height: 0 };
     assert.equal(effectRegions(deriveEnvironment(world)).some(region => region.kind === rule.kind), false);
@@ -92,18 +92,6 @@ test("a local downhill current does not animate an entire connected pond", async
   });
   assert.ok(moving > 0 && distant > 0);
   disposeTerrain(terrain.group);
-});
-
-test("wind is playable: gusts push more in the air and crouching resists them", async () => {
-  const { environmentalDrift, environmentalFlight } = await import("../lib/environment-motion.ts");
-  const air = { windX: 1, windZ: 0, flowX: 0, flowZ: 0 };
-  const time = Math.PI / 2 / .63;
-  const standing = environmentalDrift(air, time, false, false).x;
-  assert.ok(standing > environmentalDrift(air, 0, false, false).x);
-  assert.ok(environmentalDrift(air, time, true, false).x > standing);
-  assert.equal(environmentalDrift(air, time, false, true).x, standing * .2);
-  assert.deepEqual(environmentalDrift({ windX: 0, windZ: 0, flowX: .5, flowZ: 0 }, 0, true, false), { x: 0, z: 0 });
-  assert.equal(environmentalFlight("bounce", 0, 0, 0, 7).vy, 7);
 });
 
 test("dust follows wind and sheltering the passage removes it", () => {

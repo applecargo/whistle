@@ -86,7 +86,7 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
   const simulationRef = useRef(simulation),
     player = useRef<Player>(initialPlayer),
     controls = useRef(new Set<string>()),
-    padPressedAt = useRef(new Map<string, number>()),
+    stick = useRef({ x: 0, y: 0 }),
     file = useRef<HTMLInputElement>(null),
     toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   simulationRef.current = simulation;
@@ -95,7 +95,7 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(""), 4200);
   }, []);
-  const audio = useGameAudio();
+  const audio = useGameAudio(notify);
   const whistle = useMeetingWhistle(meeting, playing, player);
   const meetingReset = useRef(meeting.view.reset.id);
   useLayoutEffect(() => {
@@ -209,8 +209,8 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
   }, [meeting.view.materials, receiveAssets, ready]);
   useEffect(() => {
     if(!ready || meeting.status!=="online" || !sharedWorld.current)return;
-    meeting.send({type:"publish",world:portalWorld(sharedWorld.current),share:true,received:[...receivedMaterials.current]});
-  },[ready,meeting.status,meeting.send]);
+    meeting.send({type:"publish",world:portalWorld({...sharedWorld.current,connectionFootings:getWorld().connectionFootings}),share:true,received:[...receivedMaterials.current]});
+  },[ready,meeting.status,meeting.send,getWorld]);
   useEffect(() => {
     if(!ready || meeting.status!=="online")return;
     const send=()=>meeting.send({type:"publish",world:portalWorld(getWorld()),received:[...receivedMaterials.current]});
@@ -333,6 +333,8 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
         playing={playing}
         saveStatus={saveStatus}
         onlineCount={meeting.status==="online" ? meeting.presence.onlineCount ?? meeting.presence.peers.filter(p=>p.online).length : null}
+        multiplayerEnabled={meeting.enabled}
+        onToggleMultiplayer={() => meeting.setMultiplayer(!meeting.enabled,getWorld())}
         connectionStatus={meeting.status}
         makeButton={makeButton}
         onEnter={enter}
@@ -350,8 +352,9 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
             derivation={activeDerivation}
             mode="play"
             onPlayer={(p) => {player.current = p;meeting.position({...p,grounded:!!p.grounded},true);}}
-            onAudioFrame={frame => audio.movement(frame, activeWorld, activeSimulation.actors, activeDerivation.environment)}
+            onAudioFrame={frame => audio.movement(frame, activeWorld, activeSimulation.actors, activeDerivation)}
             controls={controls}
+            stick={stick}
             onControlsReset={() => setMovementMode("walk")}
             initialPlayer={spawn}
             meeting={meetingVisuals(visibleMeeting)}
@@ -365,8 +368,9 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
           </button>
           <div className="crosshair" />
           <PlayControls
+            key={`controls-${playKey}`}
             controls={controls}
-            padPressedAt={padPressedAt}
+            stick={stick}
             player={player}
             movementMode={movementMode}
             onMovementModeChange={setMovementMode}

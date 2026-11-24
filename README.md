@@ -1,6 +1,6 @@
 # Whistle
 
-- 2D 격자 편집 → 3D 탐색 · WebPd 사운드
+- 2D 격자 편집 → 3D 탐색 · pd4web 사운드
 - [브라우저에서 열기](https://suspiciouscloudgames.github.io/whistle/)
 
 ## 실행
@@ -9,7 +9,7 @@
 
 ```sh
 npm ci       # 최초 설치
-npm run dev  # Pd 자동 컴파일 · 서버 시작
+npm run dev  # 개발 서버 시작
 ```
 
 - 종료: `Ctrl+C`
@@ -18,12 +18,10 @@ npm run dev  # Pd 자동 컴파일 · 서버 시작
 
 ## 사운드 수정
 
-- `audio/patches/player3.pd` 및 하위 패치: 음색·리듬·볼륨 수정
-- `audio/patches/uwb-player.pd`: 원본 패치 로드 · 앱/UWB 입력 연결. 사운드만 수정할 때 유지
-- 적용: Pd 저장 → `npm run audio:build` → 페이지 새로고침 → 오디오 시작
-- 서버 재시작 시에도 자동 컴파일
+- `audio/patches/player.pd` 및 지형·환경 패치: 음색·리듬·볼륨 수정
+- 적용: Pd 저장 → `npm run build` → 페이지 새로고침 → 오디오 시작
 - 입력 파라미터 변경 시 연결 패치·앱 코드 확인
-- `public/audio-test/`: 자동 생성 파일, 직접 수정 금지
+- `audio/engine/`: pd4web 엔진 · `audio/patches/`: Pd 패치
 - `whistle-board-height`: 보드 높이 수신만 연결, 소리 변화 없음
 
 ## UWB 테스트

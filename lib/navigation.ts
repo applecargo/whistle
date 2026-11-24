@@ -156,12 +156,3 @@ export function resolveJump(jump: { origin: number; elapsed: number }, floor: nu
 export function playerEyeHeight(feet: number, water: number | null, eyeHeight = 1.35) {
   return Math.max(feet + eyeHeight, water === null ? -Infinity : water + eyeHeight * 0.5);
 }
-
-
-export function roughGroundMotion(distance: number, roughness: number, speed: number, crouching: boolean) {
-  const strength = Math.max(0, Math.min(1, roughness)) * Math.max(0, Math.min(1, speed / 1.8)) * (crouching ? 0.55 : 1);
-  return {
-    y: (Math.sin(distance * 9) + 0.4 * Math.sin(distance * 15.7)) * 0.035 * strength,
-    roll: Math.sin(distance * 7.1) * 0.004 * strength,
-  };
-}

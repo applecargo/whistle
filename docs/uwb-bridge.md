@@ -3,7 +3,7 @@
 ```text
 USB의 AT+RANGE 또는 UDP의 거리 JSON
   → PC: 거리 검증 → 앵커 좌표로 위치 계산 → 태그별 평활화
-  → WebSocket → UWB 페이지 → 기존 지면 판정·3D 표식·WebPd
+  → WebSocket → UWB 페이지 → 기존 지면 판정·3D 표식·pd4web
 ```
 
 PC 수신기는 최대 4개 태그를 각각 계산합니다. 페이지는 선택한 태그 1명의 위치와 소리를 표시합니다.

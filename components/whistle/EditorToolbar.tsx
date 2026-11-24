@@ -6,6 +6,8 @@ type Props = {
   playing: boolean;
   saveStatus: string;
   onlineCount: number | null;
+  multiplayerEnabled: boolean;
+  onToggleMultiplayer: () => void;
   connectionStatus: "connecting" | "online" | "offline";
   makeButton: RefObject<HTMLButtonElement | null>;
   onEnter: () => void;
@@ -16,21 +18,21 @@ type Props = {
 };
 
 export function EditorToolbar({
-  playing, saveStatus, onlineCount, connectionStatus, makeButton, onEnter, onExit, onNew, onImport, onSave,
+  playing, saveStatus, onlineCount, multiplayerEnabled, onToggleMultiplayer, connectionStatus, makeButton, onEnter, onExit, onNew, onImport, onSave,
 }: Props) {
   const { language, setLanguage, t } = useLanguage();
-  const presenceLabel = onlineCount === null
+  const presenceLabel = !multiplayerEnabled ? t("혼자 플레이") : onlineCount === null
     ? t(connectionStatus === "connecting" ? "연결 중" : "연결 끊김")
     : `${t("접속 인원 (나 포함)")}: ${onlineCount}`;
   return (
     <header className="topbar" hidden={playing}>
       <div className="brand-lockup">
         <h1>Whistle</h1>
-        <span className="presence-count" role="status" title={presenceLabel}>
+        <button type="button" className="presence-count" aria-label={t("멀티플레이")}
+          aria-pressed={multiplayerEnabled} aria-description={presenceLabel} title={presenceLabel} onClick={onToggleMultiplayer}>
           <span className="presence-mark" aria-hidden="true" />
-          <span aria-hidden="true">{onlineCount ?? "—"}</span>
-          <span className="sr-only">{presenceLabel}</span>
-        </span>
+          {multiplayerEnabled && <span className="presence-number" aria-hidden="true">{onlineCount ?? "—"}</span>}
+        </button>
       </div>
       <nav className="view-tabs" aria-label={t("화면")}>
         <button

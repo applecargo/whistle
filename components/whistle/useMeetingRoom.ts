@@ -15,6 +15,7 @@ function identity(key:string, fresh=false) {
   return {id,token};
 }
 export function useMeetingRoom(key: string) {
+  const [enabled, setEnabled] = useState(true);
   const [session,setSession]=useState(()=>identity(key));
   const [documentId]=useState(()=>{
     try {
@@ -31,6 +32,7 @@ export function useMeetingRoom(key: string) {
   const resetId = useRef(0);
   const listeners = useRef(new Set<(event: MeetingWhistle) => void>());
   useEffect(() => {
+    if (!enabled) return;
     let stopped = false, delay = 1000;
     let retry: ReturnType<typeof setTimeout> | undefined, connecting: ReturnType<typeof setTimeout> | undefined;
     const {id,token}=session;
@@ -79,7 +81,7 @@ export function useMeetingRoom(key: string) {
     };
     connect();
     return () => { stopped = true; clearTimeout(retry); clearTimeout(connecting); socket.current?.close(); socket.current = null; };
-  }, [key,session]);
+  }, [key,session,enabled]);
   const send = useCallback((message: object) => {
     if (socket.current?.readyState === WebSocket.OPEN) {
       try { for (const frame of codec.current.encode(message)) socket.current.send(frame); }
@@ -92,8 +94,14 @@ export function useMeetingRoom(key: string) {
     const next=identity(key,true);
     resetId.current=0;
     setView(localMeetingView(next.id,world));
-    setPresence({peers:[],canWhistle:false});setStatus("connecting");setError("");setSession(next);
-  },[key,send]);
+    setPresence({peers:[],canWhistle:false});setStatus(enabled?"connecting":"offline");setError("");setSession(next);
+  },[key,send,enabled]);
+  const setMultiplayer = useCallback((next:boolean, world:World) => {
+    if (next === enabled) return;
+    if (!next) restart(world);
+    setEnabled(next);
+    setStatus(next ? "connecting" : "offline");
+  }, [enabled,restart]);
   const position = useCallback((player: MeetingPosition, playing: boolean) => {
     send({ type: "position", player, playing, resetId:resetId.current });
   }, [send]);
@@ -101,5 +109,5 @@ export function useMeetingRoom(key: string) {
     listeners.current.add(listener);
     return () => { listeners.current.delete(listener); };
   }, []);
-  return { key, documentId, view, presence, status, error, send, restart, position, subscribeWhistle };
+  return { key, documentId, view, presence, status, error, enabled, setMultiplayer, send, restart, position, subscribeWhistle };
 }

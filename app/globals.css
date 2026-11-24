@@ -510,8 +510,8 @@ p {
   transform: translateX(-50%);
   bottom: max(12px, env(safe-area-inset-bottom));
   display: grid;
-  grid-template-columns: 40px 40px 40px 24px 64px;
-  grid-template-rows: 40px 40px 40px;
+  grid-template-columns: 120px 24px 64px;
+  grid-template-rows: 120px;
   padding: 0;
   background: none;
   border: 0;
@@ -530,18 +530,32 @@ p {
   place-items: center;
   opacity: 1;
 }
-.touch-controls > button span {
-  font: 300 23px/1 "Helvetica Neue", "Apple SD Gothic Neo", sans-serif;
-}
 .touch-controls button:active { opacity: 1; }
 .touch-controls button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
-.direction-forward { grid-column: 2; grid-row: 1; }
-.direction-left { grid-column: 1; grid-row: 2; }
-.direction-back { grid-column: 2; grid-row: 3; }
-.direction-right { grid-column: 3; grid-row: 2; }
+.stick {
+  grid-column: 1;
+  position: relative;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.stick:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.stick-knob {
+  position: absolute;
+  left: calc(50% - 20px);
+  top: calc(50% - 20px);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: currentColor;
+  pointer-events: none;
+}
 .movement-modes {
-  grid-column: 5;
-  grid-row: 1 / 4;
+  grid-column: 3;
+  grid-row: 1;
   align-self: center;
   width: 64px;
   height: 64px;
@@ -1736,8 +1750,9 @@ p {
   align-items: center;
   gap: 20px;
 }
-.presence-count { display: inline-flex; align-items: center; gap: 6px; color: #777; font-size: 12px; font-weight: 400; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.presence-mark { width: 12px; height: 12px; border-radius: 50%; background: #111; }
+.presence-count { display: inline-flex; align-items: center; gap: 6px; min-width: 44px; min-height: 44px; padding: 8px; color: #777; font-size: 12px; font-weight: 400; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; touch-action: manipulation; }
+.presence-mark { position: relative; flex-shrink: 0; width: 12px; height: 12px; border-radius: 50%; background: #111; }
+.presence-count[aria-pressed="false"] .presence-mark::after { content: ""; position: absolute; left: 50%; top: 50%; width: 16px; height: 1.5px; border-radius: 1px; background: #111; transform: translate(-50%, -50%) rotate(-45deg); }
 .topbar .view-tabs {
   grid-column: 1;
   grid-row: 2;

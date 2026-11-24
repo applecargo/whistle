@@ -1,4 +1,5 @@
-import { createPdSession, type PdSession } from "../lib/audio/webpd-session";
+import { openEngine } from "../lib/audio/pd-runtime";
+import { createInteractionSession, type InteractionSession } from "../lib/audio/pd-session";
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const start = element<HTMLButtonElement>("start");
@@ -8,7 +9,7 @@ const status = element("status");
 const meter = element("meter");
 const messages = element("messages");
 const number = (id: string) => element<HTMLInputElement>(id).valueAsNumber;
-let session: PdSession | undefined;
+let session: InteractionSession | undefined;
 let muted = false;
 let frame = 0;
 let generation = 0;
@@ -21,7 +22,7 @@ function enable(enabled: boolean) {
   element<HTMLFieldSetElement>("player-controls").disabled = !enabled;
 }
 
-function measure(current: PdSession) {
+function measure(current: InteractionSession) {
   const splitter = current.context.createChannelSplitter(2);
   const analysers = [0, 1].map((channel) => {
     const analyser = current.context.createAnalyser();
@@ -59,7 +60,7 @@ start.onclick = async () => {
   start.disabled = true;
   status.textContent = "패치 준비 중";
   try {
-    const current = await createPdSession(`${import.meta.env.BASE_URL}audio-test/`, (bus, message) => {
+    const current = await createInteractionSession(await openEngine(`${import.meta.env.BASE_URL}audio/`), (bus, message) => {
       received[bus] = message;
       messages.textContent = JSON.stringify(received, null, 2);
     });
@@ -105,7 +106,7 @@ element("edit").onclick = () => act(() => session?.edit({
 }));
 element("player").onclick = () => act(() => session?.player({
   x: number("player-x"), y: number("player-y"), z: number("player-z"),
-  grass: number("grass"), rough: number("rough"),
+  grass: number("grass"),
 }));
 document.addEventListener("visibilitychange", () => {
   if (document.hidden && session) {

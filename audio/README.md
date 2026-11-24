@@ -1,145 +1,19 @@
-# WebPd 오디오 연결과 테스트
+# pd4web 오디오
 
-## 역할 분리
+`audio/engine/`의 pd4web 엔진 하나에서 Pd 패치를 실행한다. 편집·플레이·배치한 녹음 소리가 AudioContext를 공유한다.
 
-게임은 상호작용과 공간 상태를 계산하고 Pd에 전달한다. Pd는 그 값으로
-합성·재생·엔벌로프·음색 변화를 처리한다. 오디오 때문에 지형을 다시 생성하거나
-플레이어 이동 계산을 변경하지 않는다.
+- 상호작용: `edit.pd`, `player.pd`, `event.pd`
+- 지형·환경: `lib/audio/terrain-sources.ts`에서 플레이어 근처 영역을 선택한다. 동시에 최대 6개 영역을 재생한다.
+- 연결: `lib/audio/pd-runtime.ts`, `lib/audio/pd-session.ts`, `components/whistle/useGameAudio.ts`
+- 편집 메시지: `whistle-edit x z overlap asset action surface`
+- 플레이 메시지: `whistle-player position x y z`, `yaw angle`, `stat crouch run grounded falling`, `footed grass water`
+- UWB 보드 높이: `whistle-board-height metres` (0–10m)
+- 규칙 이벤트: `whistle-event frequency gain pan`
 
-```text
-2D 편집 결과 ── 단발 이벤트 ─┐
-                            ├─ 오디오 어댑터 → WebPd AudioWorklet → Pd DSP → 출력
-3D 이동 상태 ── 연속 값 ─────┘
-```
+X/Z는 세계 크기로 정규화한다. 음소거는 WebAudio 게인으로 처리하며, 게임이 숨겨지면 AudioContext를 일시정지한다. 소리는 사용자 조작 후 시작한다.
 
-하나의 AudioContext와 오디오 세션을 사용하고, 패치 안에서 편집용 소리와
-플레이용 소리를 나눈다. 최종 패치가 여러 파일이면 상위 패치에서 합성한다.
-현재 테스트는 단일 .pd 파일이다. 샘플 파일·외부 오브젝트·서브패치는 아직 검증하지 않았다.
+`npm run dev`에서 패치 수정이 반영되며, `npm run build`는 패치 폴더를 묶어 배포물에 포함한다. 엔진 자체를 다시 만들 때만 pd4web 환경에서 `npm run audio:engine`을 실행한다.
 
-## 게임 연결
+개발·미리보기·테스트 서버는 COOP/COEP 헤더를 제공한다. 헤더를 설정할 수 없는 정적 호스팅은 `coi-serviceworker.js`가 교차 출처 격리를 설정한다.
 
-- `useGameAudio`가 게임의 오디오 세션 하나를 관리한다. 첫 유효한 격자 편집 또는
-  플레이 버튼 클릭으로 시작한다. 초기 로드·무변경 칠하기·시작점 지정·실행 취소는 편집음을 내지 않는다.
-- `paint` 처리 전후 문서를 비교해 실제 변경된 셀만 판별한다. 드래그 콜백마다
-  마지막 변경 셀 하나를 대표해 전송한다. 누적 셀의 ID만 다시 생성된 경우에는 재생하지 않는다.
-- `WorldDerivation`의 기존 환경·구조 캐시를 재사용한다. 겹침 강도는 풀, 물,
-  안개, 그늘, 바위 지면, 생성 구조의 결과로 정한다. 물리적 오브젝트 중첩 개수와는 다르다.
-- `Scene.onAudioFrame`이 발 X/Y/Z, 풀·바위·물,
-  접지·낙하·방향을 보낸다. 80ms 간격으로 전달한다.
-- 이동·충돌·점프·카메라 계산은 유지한다. 카메라 흔들림이 아닌 발 높이를 사용하고,
-  접근성 설정의 동작 줄이기 여부와 보행음의 접지 판정을 분리한다.
-- 3D 상태를 수신하면 고정 크기의 연속 시험음을 재생한다. 제자리나 점프 중에도
-  위치·재질 상태를 전달하며, 이동 속도로 음량을 조절하지 않는다.
-- 편집 화면 복귀·문서 교체·blur·탭 숨김 시 보행 상태와 대기 입력을 비우고 음소거한다.
-  다시 키나 포인터를 조작하면 재개한다. 세션은 재사용하고 컴포넌트 해제 시 닫는다.
-- 패치 로딩 중 편집은 마지막 한 건, 이동은 최신 상태만 보존한다. 모드 전환 시
-  대기 입력을 취소한다. 로딩 실패는 편집·이동을 막지 않으며 다음 클릭에서 재시도한다.
-- 기존 시뮬레이션의 `sound` 이벤트도 `whistle-event`로 전송한다. 기존 주파수 선택,
-  거리 감쇠·방향 계산은 유지하며 소리 합성은 Pd에서 처리한다.
-
-좌표는 어댑터에서 `(gridCoordinate + 0.5) / world.size`로 정규화한다.
-높이는 장면의 발 높이다. 3D 오디오는 연속 시험음으로 연결했으며,
-최종 발걸음 샘플·착지 소리·개별 바위 오브젝트 접촉음은 아직 구현하지 않았다.
-현재 아이콘 ID, 추가/삭제, 지면 종류는 패치로 전달되지만 개별 아이콘 음색은 아직 지정하지 않았다.
-
-## 최소 테스트 구현
-
-- 원본: `audio/patches/interaction-test.pd`
-- WebPd: `1.0.0-alpha.14` 고정, 개발 의존성. `.pd`를 WASM으로 사전 컴파일한다.
-- 브리지: `lib/audio/webpd-session.ts`
-- 게임 연결: `components/whistle/useGameAudio.ts`, `lib/audio/game-audio.ts`, `lib/audio/game-parameters.ts`
-- 수동 테스트: `audio-lab/index.html`
-- 브라우저 회귀 테스트: `tests/browser/audio.spec.ts`
-
-| Pd 버스 | 입력 | 테스트 패치의 반응 |
-| --- | --- | --- |
-| `whistle-edit` | `[x, z, overlap]` | `440 + 220 × overlap` Hz, 짧은 엔벌로프. X/Z는 수신 확인용 |
-| `whistle-player` | `[x, y, z, grass, rough]` | `220 + 220z + 220grass + 440rough` Hz, 고정 진폭 0.02, X에 따른 좌우 출력. Y는 수신 확인용 |
-| `whistle-board-height` | `[heightMetres]` | UWB 테스트 전용. 0~10m, 위 플레이 시험음에 `110 × heightMetres` Hz 추가. 초기값 0 |
-| `whistle-player-stop` | `bang` | 3D 음만 정지. 편집 화면 복귀·일시정지에서 사용 |
-| `whistle-event` | `[frequency, gain, pan]` | 기존 규칙 이벤트용 사인파, 25ms 어택·1100ms 감쇠 |
-| `whistle-gate` | `[0 또는 1]` | 전체 음소거/해제, 20ms 변화 |
-| `whistle-ready` | 패치 → 브라우저 `bang` | DSP 초기화 확인 |
-
-게임에서 보내는 메시지는 기본 값 뒤에 문맥을 덧붙인다.
-
-- `whistle-edit`: `[x, z, overlap, assetId, action, surface]`
-- `whistle-player`: `[x, y, z, grass, rough, grounded, falling, yaw, water]`
-
-접지·낙하·물은 0/1이고 yaw는 라디안이다. 기존 실험 페이지는 앞의 기본 값만 전송한다.
-현재 패치는 뒤의 문맥 값을 수신·반환하며 음색 합성에는 기본 값만 사용한다.
-
-UWB 테스트의 보드 높이는 현실 바닥 기준 미터 값이며, 가상 지면/발 높이 `y`와 별개다.
-`PdSession.boardHeight()`로 별도 버스에 보내며 유한하지 않거나 0~10m 범위 밖이면 거부한다.
-UWB 페이지에서 숫자 또는 JSON의 `boardHeight`로 시험한다. 높이만 바뀌어도 시험음에 반영된다.
-일반 게임은 이 버스를 보내지 않으므로 기존 시험음과 동작을 유지한다.
-
-X/Z·겹침·풀·바위 값은 0–1로 제한한다.
-유한하지 않은 숫자는 전송하지 않는다. 테스트 음은 최종 사운드 디자인이 아니며,
-X에 따른 좌우 출력도 실제 플레이어 방향을 고려한 3D 공간음향은 아니다.
-
-WebPd alpha.14의 기본 외부 입력은 최상위 `[send]` 객체의 inlet으로 전달된다.
-패치에 같은 이름의 `[s whistle-player]`와 `[r whistle-player]`를 두었고,
-JS는 컴파일 결과 메타데이터에서 해당 노드 ID를 찾아 사용한다.
-`n_0_*` 같은 컴파일러 생성 ID를 앱에 고정하지 않는다.
-각 `[r]`의 메시지가 브라우저로 돌아오는 것을 확인하며, 별도로 PCM 출력도 측정한다.
-
-`run()` 반환만으로 DSP가 준비됐다고 가정하지 않는다. `[loadbang]`에서 오는
-`whistle-ready`를 받은 후에만 입력을 허용한다. 오디오는 클릭으로 시작하고,
-시작 실패·종료 시 AudioContext와 노드를 정리한다. 재시작도 가능하다.
-테스트 페이지가 숨겨지면 음소거하며 사용자가 해제한다. 마이크 입력은 사용하지 않는다.
-
-## 실행
-
-```sh
-npm ci
-npm run dev:audio
-```
-
-Vite에 표시된 주소 뒤에 `audio-lab/index.html`을 붙여 연다.
-기본 주소는 `http://127.0.0.1:5173/whistle/audio-lab/index.html`이다.
-`오디오 시작`을 클릭하고 두 입력 그룹을 조작한다. `오디오 종료`로 정지한다.
-
-```sh
-npm run test:audio
-npm test
-npm run build
-```
-
-오디오 테스트와 전체 브라우저 테스트, 빌드는 패치를 먼저 컴파일한다.
-일반 `npm run dev`도 패치를 자동 컴파일한다.
-패치를 수정한 뒤에도 다시 컴파일하고 페이지를 새로고침한다.
-빌드 결과에도 `/whistle/audio-lab/index.html` 테스트 페이지가 포함된다.
-생성 파일 `public/audio-test/`는 Git에서 제외하며 빌드로 재생성한다.
-
-게임 화면(`/whistle/`)에서는 격자를 편집하거나 플레이를 시작하면 연결된다.
-실험 페이지에서는 같은 패치에 직접 입력한 파라미터를 보내 비교할 수 있다.
-비주얼과 플레이어 이동 로직은 유지했다. 기존 이벤트음은 Pd 합성으로 교체되어 감쇠 특성이 다를 수 있다.
-
-## 검증 범위
-
-`tests/game-audio.test.ts`는 문맥 매핑·무변경 드래그·좌표 변환·비동기 초기화·
-전환 중 취소·실패 재시도를 확인한다. `tests/browser/game-audio.spec.ts`는 실제 게임에서
-격자 편집, 풀/바위 구간 보행, 점프, 정지, blur, 화면 복귀와 기존 규칙 이벤트를 검사한다.
-브라우저 검사는 테스트에서만 WebPd 런타임을 계측해 실제 Pd 수신값과 출력 파형을 읽는다.
-앱에는 측정용 전역 변수를 추가하지 않는다.
-
-Chromium에서 실제 WASM AudioWorklet 출력에 AnalyserNode를 연결해 확인한다.
-
-- 편집: 겹침 0/1 메시지 수신, 약 440/660Hz 출력, 엔벌로프 종료 후 무음.
-- 플레이: X/Y/Z·재질값 수신, 약 220/770Hz 출력, 좌우 분리, 고정 크기 출력. 다른 값을 고정하고 Y만 바꾸면 주파수를 유지한다.
-- UWB 보드 높이: 별도 버스 수신, 높이 1m당 110Hz 증가, 지형 높이와 독립성, 잘못된 입력의 음소거와 재시작.
-- 생명주기: 클릭 전 AudioContext 없음, 마이크 요청 없음, 음소거/해제, 화면 복귀·탭 이탈 시 무음,
-  로드 실패 후 컨텍스트 정리·재시도, 종료 후 재시작.
-
-자동 측정은 음원 생성과 전달 경로를 검증한다. 실제 스피커의 청감, 모바일 Safari,
-실기기의 CPU·지연, 최종 샘플/외부 오브젝트 호환성은 별도 검증 대상이다.
-
-## 참고
-
-- [WebPd 공식 저장소](https://github.com/sebpiq/WebPd): 컴파일 방식, 지원 오브젝트, 메시지 순서 지침.
-- [WebPd 런타임](https://github.com/sebpiq/WebPd_runtime): AudioWorklet 실행 계층.
-
-알파 버전이므로 컴파일러 내부 메타데이터 읽기는 빌드 스크립트에만 모았다.
-업그레이드 시 이 스크립트와 오디오 테스트를 함께 확인한다.
-WebPd 런타임의 LGPL 라이선스 파일도 생성 디렉터리와 배포물에 복사한다.
+`npm run test:audio`로 실제 브라우저의 엔진 재사용, 메시지 전달, 출력 파형, 공간 음향과 게임 연결을 확인한다. 수동 테스트는 `audio-lab/index.html`, `audio-lab/soundscape.html`에서 할 수 있다. 실물 휴대폰의 성능과 스피커 청감은 별도 확인이 필요하다.

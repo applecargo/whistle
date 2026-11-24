@@ -302,7 +302,7 @@ export function environmentAt(
       "windX",
       "windZ",
       "fog",
-      "dust", "bounce", "flowX", "flowZ", "lift", "liftCeiling", "glide", "flicker",
+      "dust", "flowX", "flowZ", "lift", "liftCeiling", "flicker",
     ] as const)
       out[key] += c[key] * w;
   }

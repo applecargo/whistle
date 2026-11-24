@@ -17,6 +17,85 @@ async function newPlayer(browser:Browser,baseURL?:string) {
 }
 test.afterEach(async()=>{await Promise.all(players.splice(0).map(context=>context.close()));});
 
+test("multiplayer is the default and toggles participation without losing the world",async({browser,baseURL},info)=>{
+  const a=await newPlayer(browser,baseURL),b=await newPlayer(browser,baseURL),state=observe(a);
+  let sockets=0;a.on("websocket",socket=>{if(socket.url().includes("/whistle/meeting?"))sockets++;});
+  const url=`?meeting=toggle-${Date.now()}`;
+  await a.goto(url);
+  const toggle=a.getByRole("button",{name:"멀티플레이",exact:true});
+  await expect(toggle).toHaveAttribute("aria-pressed","true");
+  await ready(a);
+  await expect(a.locator(".presence-number")).toHaveText("1");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed","false");
+  await expect(toggle).toHaveAttribute("title","혼자 플레이");
+  await expect(a.locator(".presence-number")).toHaveCount(0);
+  await expect(a.locator(".presence-mark")).toHaveCSS("background-color","rgb(243, 239, 145)");
+  expect(await a.locator(".presence-mark").evaluate(mark=>getComputedStyle(mark,"::after").content)).toBe('""');
+  await makeText(a,"혼자 만든 재료");await publishMaterials(a);
+  const original=await savedWorld(a);
+  await a.screenshot({path:info.outputPath("solo-desktop.png")});
+  await a.setViewportSize({width:390,height:844});
+  await a.screenshot({path:info.outputPath("solo-mobile.png"),fullPage:true});
+  expect(await a.evaluate(()=>document.documentElement.scrollWidth>innerWidth)).toBe(false);
+  await a.setViewportSize({width:1280,height:720});
+  await b.goto(url);await ready(b);await makeText(b,"이웃의 재료");await publishMaterials(b);
+  await expect(b.locator(".presence-number")).toHaveText("1");
+  await expect(b.locator(".received-material")).toHaveCount(0);
+  await expect(a.locator(".received-material")).toHaveCount(0);
+  expect(sockets).toBe(1);
+
+  await a.bringToFront();await toggle.focus();await a.keyboard.press("Enter");await ready(a);
+  await expect(toggle).toHaveAttribute("aria-pressed","true");
+  await expect(a.locator(".presence-number")).toHaveText("2");
+  await expect(b.locator(".presence-number")).toHaveText("2");
+  await expect(a.getByRole("button",{name:"배치: 이웃의 재료",exact:true})).toBeVisible();
+  await expect(b.getByRole("button",{name:"배치: 혼자 만든 재료",exact:true})).toBeVisible();
+  await useText(a,"이웃의 재료");
+  await expect(a.locator('[data-connection-online="true"]')).toHaveCount(1);
+  await expect.poll(async()=>(await savedWorld(a)).connectionFootings?.some(p=>p.built)).toBe(true);
+  await a.screenshot({path:info.outputPath("multiplayer-desktop.png")});
+  const before=await savedWorld(a);
+  expect(before.assets.find(asset=>asset.text==="혼자 만든 재료")).toEqual(original.assets.find(asset=>asset.text==="혼자 만든 재료"));
+  await toggle.focus();await a.keyboard.press("Space");
+  await expect(toggle).toHaveAttribute("aria-pressed","false");
+  await expect(a.locator(".presence-number")).toHaveCount(0);
+  await expect(a.locator('[data-connection-online="true"], [data-approach-online="true"]')).toHaveCount(0);
+  await expect(b.locator(".presence-number")).toHaveText("1");
+  expect(await savedWorld(a)).toEqual(before);
+  await makeText(b,"혼자 모드에서는 받지 않음");await publishMaterials(b);
+  await expect(a.getByRole("button",{name:"배치: 혼자 모드에서는 받지 않음",exact:true})).toHaveCount(0);
+  expect(sockets).toBe(2);
+  await makeText(a,"혼자 추가한 재료");
+  await toggle.click();await ready(a);
+  await expect(a.locator(".presence-number")).toHaveText("2");
+  await expect.poll(()=>state.view().ownWorld.assets.some(asset=>asset.text==="혼자 추가한 재료")).toBe(true);
+  expect((await savedWorld(a)).connectionFootings).toEqual(expect.arrayContaining(before.connectionFootings!));
+  await expect(a.getByRole("button",{name:"배치: 혼자 모드에서는 받지 않음",exact:true})).toBeVisible();
+  await a.reload();
+  await expect(toggle).toHaveAttribute("aria-pressed","true");
+  await ready(a);
+  await expect(a.getByRole("button",{name:"배치: 혼자 추가한 재료",exact:true})).toBeVisible();
+  expect(sockets).toBe(4);
+  expect(state.errors).toEqual([]);
+});
+
+test("switching to solo cancels pending connection retries",async({page})=>{
+  let attempts=0;
+  await page.routeWebSocket(/\/whistle\/meeting\?/,socket=>{attempts++;socket.close();});
+  await page.goto(`?meeting=cancel-${Date.now()}`);
+  const toggle=page.getByRole("button",{name:"멀티플레이",exact:true});
+  await expect.poll(()=>attempts).toBe(1);
+  await expect(page.locator("main")).toHaveAttribute("data-meeting-status","offline");
+  await toggle.click();
+  await page.waitForTimeout(1500);
+  expect(attempts).toBe(1);
+  await expect(toggle).toHaveAttribute("title","혼자 플레이");
+  await expect(page.locator(".presence-mark")).toHaveCSS("background-color","rgb(243, 239, 145)");
+  await toggle.click();
+  await expect.poll(()=>attempts).toBe(2);
+});
+
 test("an unavailable relay keeps the editor usable and recovers when the server returns", async ({ page }) => {
   await page.addInitScript(()=>Object.defineProperty(crypto,"randomUUID",{value:undefined}));
   let attempts=0;
@@ -105,6 +184,9 @@ test("browser storage restores my world and edited gifts after both the browser 
 });
 async function ready(page: Page) {
   await page.bringToFront();
+  const toggle=page.getByRole("button",{name:"멀티플레이",exact:true});
+  await expect(toggle).toBeVisible();
+  if(await toggle.getAttribute("aria-pressed")==="false")await toggle.click();
   await expect(page.locator("[data-meeting-status]")).toHaveAttribute("data-meeting-status", "online", { timeout: 30_000 });
   await expect(page.locator(".live-preview canvas")).toHaveAttribute("data-ready", "true", { timeout: 30_000 });
 }

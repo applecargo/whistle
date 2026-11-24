@@ -58,8 +58,8 @@ export function EditorBoard({
       Math.hypot(c.windX, c.windZ) > 0.1 ? t("바람") : "",
       c.light < 0.7 ? t("그늘") : "",
       c.dust ? t("먼지") : "",
-      c.bounce ? t("튕기기") : "", c.flicker ? t("깜박임") : "",
-      c.lift ? t("부유") : "", c.glide ? t("활공") : "",
+      c.flicker ? t("깜박임") : "",
+      c.lift ? t("부유") : "",
     ]
       .filter(Boolean)
       .join(" · ");

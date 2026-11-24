@@ -49,7 +49,7 @@ export function EditorPalette({ weather, timeOfDay, surface, terrainTool, placin
       <div className="height-choices" aria-label={t("바닥 높이")}>
         {(["raise", "lower"] as const).map(tool => <button key={tool} aria-label={t(tool === "raise" ? "높이기" : "낮추기")}
           aria-pressed={terrainTool === tool && !placingStart && !selectedSymbol}
-          className={terrainTool === tool && !placingStart && !selectedSymbol ? "active" : ""} onClick={() => onSelectTerrainTool(tool)}>{tool === "raise" ? "＋" : "−"}</button>)}
+          className={terrainTool === tool && !placingStart && !selectedSymbol ? "active" : ""} onClick={() => onSelectTerrainTool(tool)}>{tool === "raise" ? "↑" : "↓"}</button>)}
       </div>
       {!startLocked && <button className={`site-start ${placingStart ? "active" : ""}`} aria-label={t("시작점")}
         aria-pressed={placingStart} onClick={onToggleStart}>◎</button>}

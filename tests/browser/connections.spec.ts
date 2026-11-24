@@ -5,7 +5,7 @@ import { savedWorld } from "./world-storage";
 async function ready(page:Page) {
   await page.bringToFront();
   await expect(page.getByRole("button",{name:"파일 저장",exact:true})).toHaveAttribute("aria-description","이 브라우저에 저장됨");
-  await expect(page.locator(".live-preview canvas")).toHaveAttribute("data-ready","true");
+  await expect(page.locator(".live-preview canvas")).toHaveAttribute("data-ready","true",{timeout:30_000});
 }
 
 test("the normal page opens, edits, saves and plays without a multiplayer server",async({page})=>{

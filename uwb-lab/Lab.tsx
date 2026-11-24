@@ -1,8 +1,9 @@
+import { openEngine } from "../lib/audio/pd-runtime";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Scene from "../components/whistle/Scene";
 import { createSimulation } from "../lib/world";
 import { createWorldDeriver } from "../lib/world-derivation";
-import { createPdSession, validateBoardHeight, type PdSession } from "../lib/audio/webpd-session";
+import { createInteractionSession, validateBoardHeight, type InteractionSession } from "../lib/audio/pd-session";
 import { roomPositionAt, sampleTrackedPosition, type RoomMapping } from "../lib/uwb-position";
 import { createLabWorld } from "./world";
 import { useLiveWorld } from "./useLiveWorld";
@@ -30,7 +31,7 @@ export default function Lab() {
   const [audioState, setAudioState] = useState<"off" | "loading" | "on">("off");
   const [audioError, setAudioError] = useState("");
   const [received, setReceived] = useState<Record<string, (string | number)[]>>({});
-  const session = useRef<PdSession | null>(null);
+  const session = useRef<InteractionSession | null>(null);
   const generation = useRef(0);
   const live = useLiveWorld(setWorld);
   const liveActive = useRef(live.active);
@@ -99,7 +100,7 @@ export default function Lab() {
     setAudioError("");
     setReceived({});
     try {
-      const created = await createPdSession(`${import.meta.env.BASE_URL}audio-test/`, (bus, message) => {
+      const created = await createInteractionSession(await openEngine(`${import.meta.env.BASE_URL}audio/`), (bus, message) => {
         if (request === generation.current) setReceived((previous) => ({ ...previous, [bus]: message }));
       });
       if (request !== generation.current) { await created.close(); return; }
