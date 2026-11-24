@@ -5,7 +5,7 @@ Pd 패치는 소리만 만든다. 그 소리가 어디서 얼마나 크게 들�
 
 ## 1. 슬롯
 
-엔진 출력은 32채널이다. 1–30은 슬롯 15개의 스테레오(슬롯 N → 2N+1, 2N+2), 31–32는 믹스다운(공간화 없음).
+엔진 출력은 32채널이다. 1–2는 믹스다운(공간화 없음), 3–32는 슬롯 15개의 스테레오(슬롯 N → 2N+3, 2N+4).
 영역 패치를 슬롯에 띄우고 지우는 것은 장면 패치 `main.pd`가 한다(약속은 [`main-pd.md`](main-pd.md)). JS는 아래만 한다.
 
 ### 엔진을 열고 `main.pd`를 연다
@@ -21,8 +21,8 @@ pd.openPatch("main.pd", { channelCountOut: CHANNELS, renderGui: false, ... });  
 worklet.disconnect();                                      // pd4web이 스피커에 바로 꽂아 둔 것을 뺀다
 const splitter = context.createChannelSplitter(CHANNELS);  // 32채널을 낱개로
 const mixdown = context.createChannelMerger(2);
-splitter.connect(mixdown, CHANNELS - 2, 0);                // 31 → 왼쪽
-splitter.connect(mixdown, CHANNELS - 1, 1);                // 32 → 오른쪽
+splitter.connect(mixdown, 0, 0);                           // 1 → 왼쪽
+splitter.connect(mixdown, 1, 1);                           // 2 → 오른쪽
 ```
 
 ### 영역 하나 띄우기 = 슬롯 하나 쓰기 (`start`)
@@ -31,10 +31,10 @@ splitter.connect(mixdown, CHANNELS - 1, 1);                // 32 → 오른쪽
 let index = 0;
 while (used.has(index)) index++;   // 비어 있는 가장 작은 번호
 const id = `v${++count}`;          // 새 이름: 패치의 $1
-message("whistle-slot", "on", [index, name, id, 2 * index + 1, 2 * index + 2]);  // on 3 environment_water v17 7 8
+message("whistle-slot", "on", [index, name, id, 2 * index + 3, 2 * index + 4]);  // on 3 environment_water v17 9 10
 const merger = context.createChannelMerger(2);
-splitter.connect(merger, 2 * index, 0);       // 7번 채널(0부터 세면 6) → 왼쪽
-splitter.connect(merger, 2 * index + 1, 1);   // 8번 채널 → 오른쪽
+splitter.connect(merger, 2 * index + 2, 0);   // 9번 채널(0부터 세면 8) → 왼쪽
+splitter.connect(merger, 2 * index + 3, 1);   // 10번 채널 → 오른쪽
 return { name, id, node: merger, send, destroy };
 ```
 
@@ -65,7 +65,7 @@ used.delete(index);                        // 다음 start가 이 번호를 쓴�
                                            soundscape master ─→ 앱 master ─→ limiter ─→ 스피커
 ```
 
-믹스다운(채널 31–32: `main.pd` 안의 상호작용 패치 등)은 이 줄기 없이 앱 master로 바로 간다(공간화 없음).
+믹스다운(채널 1–2: `main.pd` 안의 상호작용 패치 등)은 이 줄기 없이 앱 master로 바로 간다(공간화 없음).
 
 ### 노드를 만들고 잇는다 (`soundscape.ts`의 `load`)
 
@@ -119,7 +119,7 @@ const width = voice.source.width ?? 0;   // 0 = 한 점에서, 1 = 사방에서
 master = context.createGain();
 const limiter = context.createDynamicsCompressor();   // -3dB, 비율 20: 사실상 리미터
 master.connect(limiter).connect(context.destination);
-createInteractionSession(engine, undefined, master);   // 믹스다운(31–32) → master로 바로
+createInteractionSession(engine, undefined, master);   // 믹스다운(1–2) → master로 바로
 createSoundscape({ destination: master, rolloff: 0, ..., start: (_c, name) => engine.start(name) });
 ```
 

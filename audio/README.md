@@ -42,7 +42,7 @@ JS의 켜기·끄기 메시지로 `main.pd`가 "슬롯"에 띄우고, 상호작�
 - 런타임 `lib/audio/pd-runtime.ts`: `openEngine(baseUrl, { latencyHint })`가 페이지당 엔진 하나를 연다(AudioContext도 엔진의 것).
   패치 폴더를 푼 뒤 `main.pd`를 바로 연다. `engine.start(이름)` → 빈 슬롯 번호와 새 이름(`v17`)으로 `whistle-slot`에
   `on 번호 패치 이름 L R`을 보내고, 그 슬롯의 채널 쌍을 스테레오 노드로 돌려준다. `destroy()`는 `off 번호`.
-  슬롯은 15개(채널 1–30), 31–32는 믹스다운(`engine.mixdown`). `engine.send(버스, 값)`은 전역 버스로 보낸다.
+  1–2는 믹스다운(`engine.mixdown`), 슬롯은 15개(채널 3–32). `engine.send(버스, 값)`은 전역 버스로 보낸다.
   소리가 어떻게 믹스되는지는 [`slots-and-mix.md`](slots-and-mix.md).
 - 교차 출처 격리(COOP/COEP)가 필요하다(SharedArrayBuffer). 개발·미리보기 서버는 `vite.config.ts`의 헤더로,
   GitHub Pages는 `public/coi-serviceworker.js`(pd4web에 포함된 coi-serviceworker, MIT)로 건다. 첫 방문 때 페이지가 한 번 새로고침된다.
