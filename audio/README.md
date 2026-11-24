@@ -43,7 +43,7 @@ Pd 엔진 하나(AudioContext 하나)에서 여러 패치를 실행한다. 소�
 - 교차 출처 격리(COOP/COEP)가 필요하다(SharedArrayBuffer). 개발·미리보기 서버는 `vite.config.ts`의 헤더로,
   GitHub Pages는 `public/coi-serviceworker.js`(pd4web에 포함된 coi-serviceworker, MIT)로 건다. 첫 방문 때 페이지가 한 번 새로고침된다.
 - Pd → JS 메시지(`[s 이름]`을 JS가 받기)는 된다. 단 출력이 연결된 슬롯이 하나라도 떠 있어야 엔진이 돈다. 아직 앱에서는 쓰지 않는다.
-  콜백 쓰는 법·주의점·범용 통로 제안은 [`pd-to-js.md`](pd-to-js.md). 실험 페이지의 "Pd가 수신한 값"은 JS가 Pd에 보낸 값을 보여 준다.
+  쓰는 법과 주의점은 [`pd-to-js.md`](pd-to-js.md). 실험 페이지의 "Pd가 수신한 값"은 JS가 Pd에 보낸 값을 보여 준다.
 
 ### 패치 규칙 (pd4web 전환 때 바뀜)
 
