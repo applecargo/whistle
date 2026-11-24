@@ -13,6 +13,8 @@
 | `whistle-edit` | `[unpack f f f s s s]` | 편집 화면에서 칸을 바꿀 때 |
 | `whistle-event` | `[unpack f f f]` | 3D 플레이 중 규칙 이벤트가 일어날 때 |
 | `whistle-board-height` | 숫자 하나 | UWB 테스트 페이지에서만 |
+| `whistle-player-stop` | bang | 3D 이동음을 끌 때(UWB 테스트 페이지 등). 다음 `whistle-player`부터 다시 소리를 내는 것은 패치가 한다 |
+| `whistle-slot` | `[route on off]` | `main.pd` 전용. 영역 켜기 `on 번호 패치 이름 L R`, 끄기 `off 번호`([`main-pd.md`](main-pd.md)) |
 
 ## whistle-player (플레이어 상태)
 
@@ -41,7 +43,7 @@
 ## $1-whistle-region (영역 패치 전용)
 
 사운드스케이프 영역 패치(`terrain_*`, `environment_*`, `structure_*`)는 같은 패치가 여러 영역에 동시에 뜬다.
-그래서 영역마다 따로 오는 값은 `$1`을 붙여 받는다. `$1`은 슬롯 이름(`slot0`…)이다.
+그래서 영역마다 따로 오는 값은 `$1`을 붙여 받는다. `$1`은 영역 이름(`v17`…, 띄울 때마다 새것)이다.
 
 ```
 [r $1-whistle-region]

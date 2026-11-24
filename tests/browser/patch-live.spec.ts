@@ -48,7 +48,7 @@ test("패치를 고치면 떠 있는 슬롯을 다시 만들고(안쪽 abstracti
   await page.evaluate(async () => {
     const { openEngine } = await import(/* @vite-ignore */ `${location.origin}/whistle/lib/audio/pd-runtime.ts`);
     const engine = await openEngine("/whistle/audio/");
-    const patch = await engine.start("zz-live", { scoped: true });
+    const patch = await engine.start("zz-live");
     const analyser = new AnalyserNode(engine.context, { fftSize: 2048 });
     patch.node.connect(analyser);
     patch.node.connect(engine.context.destination); // 출력이 이어져야 엔진이 돈다
@@ -59,7 +59,7 @@ test("패치를 고치면 떠 있는 슬롯을 다시 만들고(안쪽 abstracti
   expect(await rms()).toBeLessThan(0.001); // 안쪽이 무음
 
   writeFileSync(inner, INNER("osc~ 440"));
-  await expect.poll(() => logs.some((l) => /패치 갱신: zz-live-inner\.pd \(다시 만듦: slot\d+ zz-live/.test(l)), { timeout: 10_000 }).toBe(true);
+  await expect.poll(() => logs.some((l) => /패치 갱신: zz-live-inner\.pd \(다시 만듦: v\d+ zz-live/.test(l)), { timeout: 10_000 }).toBe(true);
   // 다시 만든 뒤 amp 0.5를 다시 보냈으면 0.5 × 사인(RMS 0.707) ≈ 0.35
   await expect.poll(rms, { timeout: 5_000 }).toBeGreaterThan(0.3);
 });

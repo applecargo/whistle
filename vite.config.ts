@@ -5,7 +5,7 @@ import { extname, join, normalize, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { KIND_PATCHES } from "./lib/audio/terrain-sources.ts";
-import { INTERACTION_PATCHES } from "./lib/audio/pd-session.ts";
+import { MAIN } from "./lib/audio/pd-runtime.ts";
 // pd4web 엔진은 SharedArrayBuffer(스레드)를 쓰므로 교차 출처 격리가 필요하다.
 // 개발·미리보기 서버는 헤더로, 정적 호스팅은 public/coi-serviceworker.js로 건다.
 const isolation = { "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp" };
@@ -52,8 +52,8 @@ function tar(dir: string) {
   return gzipSync(Buffer.concat(blocks));
 }
 
-/** 앱이 여는 패치(KIND_PATCHES, 상호작용 패치) 중 audio/patches/에 없는 것. 빌드도 개발 서버도 시작하지 않는다. */
-const missingPatches = () => [...new Set([...Object.values(KIND_PATCHES), ...Object.values(INTERACTION_PATCHES)])]
+/** 앱이 여는 패치(KIND_PATCHES, 장면 패치 main) 중 audio/patches/에 없는 것. 빌드도 개발 서버도 시작하지 않는다. */
+const missingPatches = () => [...new Set([...Object.values(KIND_PATCHES), MAIN])]
   .filter((name) => !existsSync(join(patchDir, `${name}.pd`)));
 const missingMessage = (names: string[]) => `patches missing from audio/patches/: ${names.map((n) => `${n}.pd`).join(", ")}`;
 

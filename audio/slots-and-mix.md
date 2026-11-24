@@ -5,115 +5,53 @@ Pd 패치는 소리만 만든다. 그 소리가 어디서 얼마나 크게 들�
 
 ## 1. 슬롯
 
-브라우저에는 Pd 엔진이 하나뿐이고 그 안에서 여러 패치가 같이 돈다. 엔진 출력은 32채널 하나뿐이라
-패치마다 두 채널씩 나눠 준다. 그 한 칸이 **슬롯**이다(16개, `SLOTS`). `[s]`/`[r]` 같은 메시지 통로가 아니다.
+엔진 출력은 32채널이다. 1–30은 슬롯 15개의 스테레오(슬롯 N → 2N+1, 2N+2), 31–32는 믹스다운(공간화 없음).
+영역 패치를 슬롯에 띄우고 지우는 것은 장면 패치 `main.pd`가 한다(약속은 [`main-pd.md`](main-pd.md)). JS는 아래만 한다.
 
-엔진 안의 모습(Pd 데스크톱에는 없고, 브라우저 엔진에서 JS가 만든다):
-
-```
-index.pd (host)
- ├ [pd slot0] 안: [environment_water slot0] → [dac~ 1 2]
- ├ [pd slot1] 안: [terrain_rough slot1]     → [dac~ 3 4]
- └ ...
-```
-
-- **Pd 쪽 슬롯**: `index.pd` 안의 `[pd slotN]` 서브패치 하나. 그 안에 `[패치 slotN] → [dac~ 2N+1 2N+2]`.
-- **브라우저 쪽 슬롯**: 엔진 출력 32채널 중 두 채널을 꺼낸 스테레오 노드 하나.
-- 패치 작성자에게 보이는 것은 `$1`(= `slotN`)뿐이다. `[r $1-whistle-region]`은 실제로 `[r slot3-whistle-region]`.
-  `whistle-player` 같은 전역 이름은 슬롯과 상관없이 그대로다.
-
-### 빈 host 패치를 연다
-
-엔진에 들어 있는 패치는 이것뿐이다(`output/pd4web-engine/src/index.pd`).
-
-```
-#N canvas 0 50 450 300 12;
-#X text 20 20 whistle host: slots are created by JS;
-```
+### 엔진을 열고 `main.pd`를 연다
 
 ```ts
-pd.openPatch("index.pd", { channelCountOut: SLOTS * 2, renderGui: false, ... });
+const files = untar(archive, ...);   // 패치 폴더를 엔진 디스크(/)에 먼저 푼다
+pd.openPatch("main.pd", { channelCountOut: CHANNELS, renderGui: false, ... });  // 32채널. loadbang도 온다
 ```
 
-엔진 출력을 32채널로 연다. 열린 패치의 캔버스는 `pd-index.pd`라는 이름으로 메시지를 받는다(`HOST`).
-
-### 엔진 출력 32채널을 나눌 준비 (Web Audio)
+### 32채널을 나눈다 (Web Audio)
 
 ```ts
 worklet.disconnect();                                      // pd4web이 스피커에 바로 꽂아 둔 것을 뺀다
-const splitter = context.createChannelSplitter(SLOTS * 2); // 32채널을 낱개로 나누는 노드
+const splitter = context.createChannelSplitter(CHANNELS);  // 32채널을 낱개로
+const mixdown = context.createChannelMerger(2);
+splitter.connect(mixdown, CHANNELS - 2, 0);                // 31 → 왼쪽
+splitter.connect(mixdown, CHANNELS - 1, 1);                // 32 → 오른쪽
 ```
 
-### 패치 하나 띄우기 = 슬롯 하나 쓰기 (`start`)
-
-JS가 하는 일은 Pd의 동적 패칭과 같다. 캔버스에 `obj`, `connect` 메시지를 보내 상자를 만들고 잇는다.
+### 영역 하나 띄우기 = 슬롯 하나 쓰기 (`start`)
 
 ```ts
 let index = 0;
 while (used.has(index)) index++;   // 비어 있는 가장 작은 번호
-const slot = `slot${index}`;       // "slot3"
-const canvas = `pd-${slot}`;       // "pd-slot3": [pd slot3] 서브패치의 캔버스 이름
-```
-
-(1) host에 서브패치 상자를 만든다(슬롯마다 처음 한 번).
-
-```ts
-message(HOST, "obj", [20, 40 + 30 * index, "pd", slot]);
-```
-
-Pd로 쓰면 `[; pd-index.pd obj 20 130 pd slot3(`.
-
-(2) 그 서브패치 안을 채운다(`build`).
-
-```ts
-message(canvas, "clear", []);
-message(canvas, "obj", [20, 20, name, slot]);                           // 0번 상자: [environment_water slot3]
-message(canvas, "obj", [20, 80, "dac~", 2 * index + 1, 2 * index + 2]); // 1번 상자: [dac~ 7 8]
-message(canvas, "connect", [0, 0, 1, 0]);                               // 왼쪽 outlet~ → dac~ 왼쪽
-message(canvas, "connect", [0, 1, 1, 1]);                               // 오른쪽 outlet~ → dac~ 오른쪽
-message(canvas, "loadbang", []);                                        // 동적으로 만든 패치에는 loadbang이 저절로 오지 않는다
-```
-
-Pd로 쓰면:
-
-```
-[; pd-slot3 clear;
-   pd-slot3 obj 20 20 environment_water slot3;
-   pd-slot3 obj 20 80 dac~ 7 8;
-   pd-slot3 connect 0 0 1 0;
-   pd-slot3 connect 0 1 1 1;
-   pd-slot3 loadbang(
-```
-
-(3) 브라우저 쪽에서 그 두 채널을 꺼낸다.
-
-```ts
+const id = `v${++count}`;          // 새 이름: 패치의 $1
+message("whistle-slot", "on", [index, name, id, 2 * index + 1, 2 * index + 2]);  // on 3 environment_water v17 7 8
 const merger = context.createChannelMerger(2);
 splitter.connect(merger, 2 * index, 0);       // 7번 채널(0부터 세면 6) → 왼쪽
 splitter.connect(merger, 2 * index + 1, 1);   // 8번 채널 → 오른쪽
-return { name, slot, node: merger, send, destroy };
+return { name, id, node: merger, send, destroy };
 ```
 
-`merger`가 이 패치만의 스테레오 소리다. 사운드스케이프가 이것을 받아 믹스한다(아래 2).
+`merger`가 이 영역만의 스테레오 소리다. 사운드스케이프가 이것을 받아 믹스한다(아래 2).
 
-### 메시지 보내기 (`send`)
+### 보내기
 
-```ts
-const target = options.scoped ? `${slot}-${bus}` : bus;
-```
-
-- 사운드스케이프 패치는 `scoped`로 연다: `send("whistle-region", …)` → `slot3-whistle-region` → 패치의 `[r $1-whistle-region]`.
-- 상호작용 패치(edit·player·event)는 `scoped` 없이: `whistle-player` 그대로.
+- 영역: `instance.send("whistle-region", …)` → `v17-whistle-region` → 패치의 `[r $1-whistle-region]`.
+- 전역: `engine.send("whistle-player", …)` → `main.pd` 안의 `[r whistle-player]`.
 
 ### 닫기 (`destroy`)
 
 ```ts
-message(canvas, "clear", []);   // [pd slot3] 안을 비운다(상자 [pd slot3]는 남겨 다시 쓴다)
-splitter.disconnect(merger);    // 브라우저 쪽 통로를 뗀다
-used.delete(index);             // 번호를 비운다 → 다음 start가 이 번호를 쓴다
+message("whistle-slot", "off", [index]);   // main.pd가 [pd slot3]을 비운다
+splitter.disconnect(merger);
+used.delete(index);                        // 다음 start가 이 번호를 쓴다(이름은 새것)
 ```
-
-개발 서버에서 패치를 고쳐 다시 만들 때는 `build()`만 다시 부른다. `[pd slotN]` 안만 비웠다가 다시 채우고, 브라우저 쪽 통로는 그대로다.
 
 ## 2. 믹스
 
@@ -127,7 +65,7 @@ used.delete(index);             // 번호를 비운다 → 다음 start가 이 �
                                            soundscape master ─→ 앱 master ─→ limiter ─→ 스피커
 ```
 
-상호작용 패치(edit·player·event)는 이 줄기 없이 앱 master로 바로 간다(공간화 없음).
+믹스다운(채널 31–32: `main.pd` 안의 상호작용 패치 등)은 이 줄기 없이 앱 master로 바로 간다(공간화 없음).
 
 ### 노드를 만들고 잇는다 (`soundscape.ts`의 `load`)
 
@@ -181,8 +119,8 @@ const width = voice.source.width ?? 0;   // 0 = 한 점에서, 1 = 사방에서
 master = context.createGain();
 const limiter = context.createDynamicsCompressor();   // -3dB, 비율 20: 사실상 리미터
 master.connect(limiter).connect(context.destination);
-createInteractionSession(engine, undefined, master);   // edit·player·event → master로 바로
-createSoundscape({ destination: master, rolloff: 0, ..., start: (_c, name) => engine.start(name, { scoped: true }) });
+createInteractionSession(engine, undefined, master);   // 믹스다운(31–32) → master로 바로
+createSoundscape({ destination: master, rolloff: 0, ..., start: (_c, name) => engine.start(name) });
 ```
 
 사운드스케이프에도 자기 master가 하나 있고(`soundscape.ts`), 그것이 앱 master로 간다. 앱 master는 리미터를 거쳐 스피커로.
