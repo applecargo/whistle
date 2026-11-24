@@ -44,6 +44,7 @@ JS의 켜기·끄기 메시지로 `main.pd`가 "슬롯"에 띄우고, 상호작�
   `on 번호 패치 이름 L R`을 보내고, 그 슬롯의 채널 쌍을 스테레오 노드로 돌려준다. `destroy()`는 `off 번호`.
   1–2는 믹스다운(`engine.mixdown`), 슬롯은 15개(채널 3–32). `engine.send(버스, 값)`은 전역 버스로 보낸다.
   소리가 어떻게 믹스되는지는 [`slots-and-mix.md`](slots-and-mix.md).
+- 서버 없이 Pd에서 main.pd를 들어 보려면 `audio/simulator/simulator.pd`([`simulator/README.md`](simulator/README.md)).
 - 교차 출처 격리(COOP/COEP)가 필요하다(SharedArrayBuffer). 개발·미리보기 서버는 `vite.config.ts`의 헤더로,
   GitHub Pages는 `public/coi-serviceworker.js`(pd4web에 포함된 coi-serviceworker, MIT)로 건다. 첫 방문 때 페이지가 한 번 새로고침된다.
 - Pd → JS 메시지(`[s 이름]`을 JS가 받기)는 된다. 단 출력이 연결된 슬롯이 하나라도 떠 있어야 엔진이 돈다. 아직 앱에서는 쓰지 않는다.
