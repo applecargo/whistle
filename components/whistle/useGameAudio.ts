@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef } from "react";
-import { createInteractionSession, type EditSound } from "@/lib/audio/pd-session";
+import { createInteractionSession, type EditSound, type GameEvent } from "@/lib/audio/pd-session";
 import { createGameAudio } from "@/lib/audio/game-audio";
 import { playerSound, type PlayerAudioFrame } from "@/lib/audio/game-parameters";
 import { createPlacedSounds } from "@/lib/audio/placed-sounds";
@@ -8,7 +8,7 @@ import { openEngine, unlockAudio } from "@/lib/audio/pd-runtime";
 import { createSoundscape } from "@/lib/audio/soundscape";
 import { createGameSoundscape, type GameSoundscape } from "@/lib/audio/game-soundscape";
 import { flatTerrain } from "@/lib/terrain";
-import type { Actor, World, Event, Player } from "@/lib/world";
+import type { Actor, World } from "@/lib/world";
 import type { WorldDerivation } from "@/lib/world-derivation";
 
 const BASE = `${import.meta.env.BASE_URL}audio/`;
@@ -125,6 +125,8 @@ export function useGameAudio(notify: (message: string) => void) {
   const lastFrame = useRef<PlayerAudioFrame | null>(null);
   const enabled = useRef(false);
   const paused = useRef(false);
+  /** 이번 플레이에서 Pd에 보낸 rain 값(날씨가 비인지). 바뀔 때만 보낸다. */
+  const rain = useRef<boolean | undefined>(undefined);
   const api = useMemo(() => {
     const failed = () => report.current("오디오를 시작하지 못했어요. 다음 클릭에서 다시 시도합니다.");
     const get = () => controller.current ??= createGameAudio(
@@ -140,13 +142,16 @@ export function useGameAudio(notify: (message: string) => void) {
     const quiet = () => soundscape.current?.stop();
     return {
       edit: (sound: EditSound) => { enabled.current = false; quiet(); recordings.current?.stop(); get().edit(sound); },
-      play: () => { enabled.current = true; paused.current = false; recordings.current?.stop(); get().play(); },
+      play: () => { enabled.current = true; paused.current = false; rain.current = undefined; recordings.current?.stop(); get().play(); },
       stop: () => { enabled.current = false; quiet(); recordings.current?.stop(); controller.current?.stop(); },
       reset: () => { quiet(); recordings.current?.stop(); controller.current?.reset(); },
       movement: (frame: PlayerAudioFrame, world?: World, actors?: Actor[], derivation?: WorldDerivation) => {
         lastFrame.current = frame;
         controller.current?.movement(playerSound(frame));
         if (!enabled.current || paused.current || !world) return;
+        // 날씨가 비면 rain 1, 아니면 rain 0(플레이 시작 때 한 번, 그 뒤로는 바뀔 때만).
+        const raining = world.weather === "rain";
+        if (raining !== rain.current) { rain.current = raining; controller.current?.event("rain", raining); }
         soundscape.current?.frame(frame, {
           size: world.size,
           tiles: tilesOf(world),
@@ -170,14 +175,8 @@ export function useGameAudio(notify: (message: string) => void) {
           frame: lastFrame.current,
         };
       },
-      event: (event: Event, player: Player) => {
-        const distance = Math.hypot(event.x - player.x, event.z - player.z);
-        const angle = Math.atan2(event.x - player.x, -(event.z - player.z)) - player.yaw;
-        controller.current?.event(
-          [261.63, 329.63, 392, 523.25, 659.25][Math.abs(Math.round(event.x + event.z)) % 5],
-          0.12 / (1 + distance * 0.3), Math.sin(angle),
-        );
-      },
+      /** whistle-event <이름> 1/0 (fallingstar: 디버그 화면의 1 키. rain은 위 movement가 날씨로 보낸다) */
+      event: (name: GameEvent, on: boolean) => controller.current?.event(name, on),
     };
   }, []);
   useEffect(() => {

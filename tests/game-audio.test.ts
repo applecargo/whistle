@@ -27,7 +27,7 @@ function session() {
       edit: (value: unknown) => edits.push(value),
       player: (value: PlayerSound) => moves.push(value),
       stopPlayer: () => { stops++; },
-      event: (...values: number[]) => events.push(values),
+      event: (name: string, on: boolean) => events.push([name, on]),
       mute: (value: boolean) => gates.push(value),
       close: async () => { closed++; },
     } as Pick<InteractionSession, "context" | "edit" | "player" | "stopPlayer" | "event" | "mute" | "close">,
@@ -80,7 +80,7 @@ test("one session keeps only the latest edit during startup and cancels it on pl
   const moveCount = stub.moves.length;
   audio.pause();
   audio.movement(moving);
-  audio.event(440, 0.1, 0);
+  audio.event("fallingstar", true);
   assert.equal(stub.moves.length, moveCount);
   assert.equal(stub.stops, 2);
   assert.equal(stub.gates.at(-1), true);
@@ -159,4 +159,36 @@ test("player state goes to Pd as four route-able messages", () => {
     "whistle-player stat 1 0 1 0",
     "whistle-player footed 0.4 1",
   ]);
+});
+
+test("events set while loading or paused reach Pd once the session runs; play/stop forget them", async () => {
+  const stub = session();
+  let finish!: (value: typeof stub.value) => void;
+  const audio = createGameAudio(() => new Promise((resolve) => { finish = resolve; }), (error) => assert.fail(String(error)));
+  audio.play();
+  audio.event("rain", true);
+  finish(stub.value);
+  await tick();
+  assert.deepEqual(stub.events, [["rain", true]], "엔진이 열리면 보낸다");
+  audio.pause();
+  audio.event("rain", false);
+  assert.equal(stub.events.length, 1, "멈춘 동안은 보내지 않는다");
+  audio.resume();
+  await tick();
+  assert.deepEqual(stub.events.at(-1), ["rain", false], "다시 켜면 마지막 값을 보낸다");
+  audio.stop();
+  audio.play();
+  await tick();
+  assert.equal(stub.events.length, 2, "새 플레이는 지난 값을 다시 보내지 않는다");
+  audio.dispose();
+});
+
+test("game events go to Pd as whistle-event <name> 1/0", () => {
+  const sent: string[] = [];
+  const to = { send: (bus: string, message: (string | number)[]) => { sent.push(`${bus} ${message.join(" ")}`); } };
+  const messages = interactionMessages({ edit: to, player: to, event: to });
+  messages.event("fallingstar", true);
+  messages.event("fallingstar", false);
+  messages.event("rain", true);
+  assert.deepEqual(sent, ["whistle-event fallingstar 1", "whistle-event fallingstar 0", "whistle-event rain 1"]);
 });
