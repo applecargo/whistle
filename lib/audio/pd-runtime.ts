@@ -140,8 +140,7 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   const splitter = context.createChannelSplitter(SLOTS * 2);
   worklet.connect(splitter);
 
-  // Pd → JS 메시지(onBangReceived 등)는 쓰지 않는다: 이 구성(pd4web 3.4.1, GUI 없음)에서는 콜백이 오지 않았다
-  // (JS가 보낸 bang·list를 같은 이름으로 받아도 오지 않음, print만 옴). 시작 확인은 동기 생성으로 충분하다.
+  // Pd → JS 메시지(onBangReceived 등)는 아직 쓰지 않는다(audio/pd-to-js.md). 시작 확인은 동기 생성으로 충분하다.
 
   // --- 패치 폴더(tar.gz 하나)를 엔진 가상 디스크(/)에 푼다 ---
   // 서버에 따라 .gz를 Content-Encoding: gzip으로 보내 브라우저가 먼저 풀어 버리기도 한다. gzip 머리(1f 8b)가 있을 때만 푼다.
