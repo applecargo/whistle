@@ -3,13 +3,13 @@ import Scene from "../components/whistle/Scene";
 import { createSimulation } from "../lib/world";
 import { createWorldDeriver } from "../lib/world-derivation";
 import { createPdSession, validateBoardHeight, type PdSession } from "../lib/audio/webpd-session";
-import { roomPositionAt, sampleTrackedPosition, type RoomMapping } from "../lib/uwb-position";
+import { defaultRoom, roomPositionAt, sampleTrackedPosition, type RoomMapping } from "../lib/uwb-position";
 import { createLabWorld } from "./world";
 import { useLiveWorld } from "./useLiveWorld";
 import { useDevicePosition } from "./useDevicePosition";
+import { useVisitorPublisher } from "./useVisitorPublisher";
 import DeviceControls from "./DeviceControls";
 
-const initialMapping: RoomMapping = { originX: 0, originZ: 0, width: 6, depth: 6, rotation: 0 };
 const labels: Record<keyof RoomMapping, string> = {
   originX: "원점 X (m)", originZ: "원점 Z (m)", width: "가로 (m)", depth: "세로 (m)", rotation: "회전 (°)",
 };
@@ -17,7 +17,7 @@ const statusLabels = { tracking: "위치 연결됨", outside: "공간 범위를 
 
 export default function Lab() {
   const [world, setWorld] = useState(createLabWorld);
-  const [mapping, setMapping] = useState(initialMapping);
+  const [mapping, setMapping] = useState(defaultRoom);
   const [manualPosition, setPosition] = useState({ x: 1, z: 3 });
   const [manualHeight, setBoardHeight] = useState(0);
   const [inputMode, setInputMode] = useState<"manual" | "device">("manual");
@@ -48,6 +48,8 @@ export default function Lab() {
       return { value: null, error: error instanceof Error ? error.message : "좌표가 올바르지 않습니다." };
     }
   }, [world, derivation, position, mapping, inputError, live.active, live.status, deviceMode, device.position]);
+  useVisitorPublisher(live.sourceId, sample.value ? position : null, sample.value?.frame ?? null,
+    deviceMode ? device.position?.tagId ?? "device" : "manual", deviceMode ? device.position?.receivedAt : undefined, mapping);
   let heightError = "";
   try { validateBoardHeight(boardHeight); }
   catch (error) { heightError = (error as Error).message; }

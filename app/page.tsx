@@ -140,7 +140,7 @@ export default function Home() {
   const { ready, saveStatus, resumeAutosave, importFile: loadFile } = useWorldPersistence({
     world, onLoad: handleLoad, onImport: handleImport, notify,
   });
-  useLiveWorldPublisher(world, ready);
+  const recordTrail = useLiveWorldPublisher(world, ready, simulation.actors, playKey);
   const reset = useCallback((w: World = getWorld()) => {
     resetSimulation(w);
   }, [getWorld, resetSimulation]);
@@ -309,7 +309,10 @@ export default function Home() {
             derivation={derivation}
             mode="play"
             onPlayer={(p) => (player.current = p)}
-            onAudioFrame={frame => audio.movement(frame, getWorld(), simulationRef.current.actors, derivation.environment)}
+            onAudioFrame={frame => {
+              recordTrail(frame.x, frame.z, frame.grounded);
+              audio.movement(frame, getWorld(), simulationRef.current.actors, derivation.environment);
+            }}
             controls={controls}
             onControlsReset={() => setMovementMode("walk")}
           />

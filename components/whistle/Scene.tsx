@@ -41,12 +41,24 @@ import {
   feedbackRegions,
   type PlacementFeedback,
 } from "@/lib/placement-feedback";
+import { createObservationCamera } from "./ObservationCamera";
+import type { RoomMapping } from "@/lib/uwb-position";
+import { defaultRoom } from "@/lib/uwb-position";
+import { cameraOffset, type DisplayMount, type VisitorPose } from "@/lib/display-proximity";
+import { createSectorSurface } from "./SectorSurface";
+import type { Sector, TrailSegment } from "@/lib/exhibition";
+
 const EYE_HEIGHT = 1.35;
 type Props = {
   world: World;
-  simulation: Simulation;
+  simulation: Pick<Simulation, "actors">;
   derivation: WorldDerivation;
-  mode: "overview" | "play";
+  mode: "overview" | "play" | "sector" | "observation";
+  mapping?: RoomMapping;
+  sector?: Sector;
+  visitor?: MutableRefObject<VisitorPose | null>;
+  mount?: DisplayMount;
+  trail?: MutableRefObject<TrailSegment[]>;
   onPlayer?: (p: Player) => void;
   onAudioFrame?: (frame: PlayerAudioFrame) => void;
   onControlsReset?: () => void;
@@ -124,7 +136,7 @@ export default function Scene({
   world,
   simulation,
   derivation,
-  mode,
+  mode, sector, trail, mount, visitor, mapping = defaultRoom,
   onPlayer,
   onAudioFrame,
   onControlsReset,
@@ -135,6 +147,8 @@ export default function Scene({
   trackedPosition = null,
 }: Props) {
   const { t } = useLanguage();
+  const mappingRef = useRef(mapping);
+  mappingRef.current = mapping;
   const trackedRef = useRef(trackedPosition);
   trackedRef.current = trackedPosition;
   const audioCallback = useRef(onAudioFrame);
@@ -187,12 +201,13 @@ export default function Scene({
     const baseFog = mode === "play" ? 0.055 : 0.018;
     const atmosphere = new THREE.FogExp2(sky, baseFog * currentDay.fog);
     scene.fog = atmosphere;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1,2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, mode === "observation" ? 1 : 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.setClearColor("#000000");
-    const pixelRenderer = makePixelRenderer(renderer,graphicsDaylight);
+    const fragment = sector ? createSectorSurface(world.size, sector) : null;
+    const pixelRenderer = fragment ? null : makePixelRenderer(renderer, graphicsDaylight);
     el.appendChild(renderer.domElement);
     const ambient = new THREE.HemisphereLight(
       "#ffffff",
@@ -230,15 +245,26 @@ export default function Scene({
     let terrain = makeTerrain(world, structures, derivationRef.current.environment);
     applyPixelMaterials(terrain.group, graphicsDaylight);
     softenEdges(terrain.group, world.size);
+    fragment?.apply(terrain.group);
     scene.add(terrain.group);
     let terrainSignature = derivationRef.current.key;
+    const observation = mode === "observation" ? createObservationCamera() : null;
     const camera =
-      mode === "play"
-        ? new THREE.PerspectiveCamera(66, 1, 0.08, 300)
+      mode === "play" || observation
+        ? new THREE.PerspectiveCamera(observation ? 40 : 66, 1, 0.08, 300)
         : new THREE.OrthographicCamera(-15, 15, 15, -15, 0.1, 400);
     if (mode === "overview") {
       camera.position.set(20, 24, 25);
       camera.lookAt(0, 0, 0);
+    }
+    const restOrbit = new THREE.Spherical().setFromVector3(new THREE.Vector3(20, 24, 25));
+    const currentOrbit = restOrbit.clone();
+    let sectorYaw = 0, sectorTilt = 0;
+    if (fragment) {
+      camera.position.copy(fragment.center).add(new THREE.Vector3(20, 24, 25));
+      camera.lookAt(fragment.center);
+      horizon.visible = false;
+      weatherScene.group.visible = false;
     }
     const toScene = (n: number) => n * 2 - world.size + 1;
     let trackingMarker: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial> | undefined;
@@ -358,6 +384,7 @@ export default function Scene({
         terrain = makeTerrain(worldRef.current, structures, nextDerivation.environment);
         applyPixelMaterials(terrain.group, graphicsDaylight);
         softenEdges(terrain.group, world.size);
+        fragment?.apply(terrain.group);
         scene.add(terrain.group);
       }
       const treeImages = terrain.setSurfaceImages(actors.current, worldRef.current.assets);
@@ -384,6 +411,7 @@ export default function Scene({
             ? makeSurfaceImage(asset, a, worldRef.current, terrain.group, treeImages.has(a.id))
             : makeObject(asset);
           softenEdges(model, world.size);
+          fragment?.apply(model);
           model.userData.asset = a.asset;
           model.userData.placementId = a.id;
           model.userData.environmentPresentation = true;
@@ -424,10 +452,11 @@ export default function Scene({
       const w = el.clientWidth,
         h = el.clientHeight;
       if (!w || !h) return;
-      pixelRenderer.resize(w, h);
+      if (pixelRenderer) pixelRenderer.resize(w, h);
+      else renderer.setSize(w, h, false);
       if (camera instanceof THREE.PerspectiveCamera) camera.aspect = w / h;
       else {
-        const size = world.size * 1.22;
+        const size = fragment ? Math.max(fragment.span * .65625, fragment.span * .78 * h / w) : world.size * 1.22;
         camera.left = (-size * w) / h;
         camera.right = (size * w) / h;
         camera.top = size;
@@ -544,7 +573,28 @@ export default function Scene({
       renderer.domElement.addEventListener("pointercancel", up);
     }
     const render = (time: number) => {
-      const dt = Math.min((time - last) / 1000, 0.05);
+      const elapsed = Math.max(0, (time - last) / 1000);
+      if (observation && elapsed < 1 / 30 - .001) {
+        frame = requestAnimationFrame(render);
+        return;
+      }
+      if ((fragment || observation) && mount && visitor) {
+        const target = cameraOffset(mount, visitor.current, Date.now());
+        const blend = 1 - Math.exp(-Math.min(elapsed, .2) / (target.tilt === 0 ? 1.2 : .45));
+        sectorYaw += (target.yaw - sectorYaw) * blend;
+        sectorTilt += (target.tilt - sectorTilt) * blend;
+        if (fragment) {
+          currentOrbit.theta = restOrbit.theta + sectorYaw;
+          currentOrbit.phi = restOrbit.phi - sectorTilt;
+          camera.position.setFromSpherical(currentOrbit).add(fragment.center);
+          camera.lookAt(fragment.center);
+        } else if (observation && camera instanceof THREE.PerspectiveCamera) {
+          renderer.domElement.dataset.subject = observation.update(camera, worldRef.current, derivationRef.current,
+            actors.current, mount, mappingRef.current, sectorYaw, sectorTilt, elapsed);
+        }
+        renderer.domElement.dataset.sectorYaw = (sectorYaw * 180 / Math.PI).toFixed(2);
+      }
+      const dt = Math.min(elapsed, 0.05);
       last = time;
 
       const timeOfDay = worldRef.current.timeOfDay ?? "auto";
@@ -647,7 +697,7 @@ export default function Scene({
             : 0);
         model.rotation.z = 0;
         model.rotation.x = 0;
-        if (mode === "overview") {
+        if (mode !== "play") {
           const picture = model.getObjectByName("symbol-content") as THREE.Mesh<THREE.PlaneGeometry,THREE.MeshBasicMaterial> | undefined;
           if (picture) picture.material.opacity = 1;
         }
@@ -885,7 +935,7 @@ export default function Scene({
         grounded: !falling && !jump && !air && respawnFade === 0,
         dt: document.hidden ? 0 : dt, time, reducedMotion, daylight: currentDay.daylight,
       });
-      contentPresentation.update(camera, worldRef.current.size, time, mode === "overview", reducedMotion);
+      contentPresentation.update(camera, worldRef.current.size, time, mode !== "play", reducedMotion);
       weatherScene.update(time, worldRef.current.weather ?? "clear", camera, currentDay.daylight, mode === "overview");
       for(let i=fadingMist.length-1;i>=0;i--) {
         const fog=fadingMist[i],fade=Math.min(1,(time-fog.started)/650);
@@ -895,7 +945,11 @@ export default function Scene({
         if(fade>=1) {scene.remove(fog.mesh);disposeGroup(fog.mesh);fadingMist.splice(i,1);}
       }
       waterReflection.update(renderer, scene, camera, terrain.group, time);
-      pixelRenderer.render(scene, camera);
+      if (pixelRenderer) pixelRenderer.render(scene, camera);
+      else {
+        if (trail) fragment?.paint(trail.current, Date.now());
+        renderer.render(scene, camera);
+      }
       frame = requestAnimationFrame(render);
     };
     frame = requestAnimationFrame(render);
@@ -917,20 +971,21 @@ export default function Scene({
       previewOrbit?.dispose();
       renderer.domElement.removeEventListener("keydown", rotatePreview);
       waterReflection.dispose();
-      pixelRenderer.dispose();
+      pixelRenderer?.dispose();
+      fragment?.dispose();
       disposeGroup(scene);
       renderer.dispose();
       renderer.domElement.remove();
       models.current.clear();
     };
-  }, [world.size, world.sky, world.start.x, world.start.z, mode]);
+  }, [world.size, world.sky, world.start.x, world.start.z, mode, sector, trail, mount, visitor]);
   return (
     <div
       className={`scene ${className}`}
       ref={host}
       role="img"
-      aria-label={t(
-        mode === "play" ? "플레이 화면" : "3D 미리보기",
+      aria-label={sector ?? t(
+        mode === "play" ? "플레이 화면" : mode === "observation" ? "오브제 관찰 화면" : "3D 미리보기",
       )}
     >
       <div ref={fallVeil} className="fall-veil" aria-hidden="true" />

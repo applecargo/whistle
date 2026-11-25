@@ -6,7 +6,8 @@ import { LIVE_WORLD_CHANNEL } from "../lib/live-world";
 type Status = "off" | "saved" | "waiting" | "connected" | "disconnected" | "unavailable";
 
 export function useLiveWorld(receive: (world: World) => void) {
-  const [active, setActive] = useState(false);
+  const [active, setActive] = useState(() => new URLSearchParams(location.search).has("exhibition"));
+  const [sourceId, setSourceId] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>("off");
   const [error, setError] = useState("");
   const receiveRef = useRef(receive);
@@ -47,6 +48,7 @@ export function useLiveWorld(receive: (world: World) => void) {
           const world = validateWorld(data.world);
           receiveRef.current(world);
           source = data.source;
+          setSourceId(source);
           lastSeen = performance.now();
           setStatus("connected");
           setError("");
@@ -92,5 +94,5 @@ export function useLiveWorld(receive: (world: World) => void) {
     };
   }, [active]);
 
-  return { active, status, error, connect, disconnect };
+  return { active, status, error, connect, disconnect, sourceId: active && status === "connected" ? sourceId : null };
 }

@@ -36,7 +36,7 @@ export function useDevicePosition(enabled: boolean) {
         if (message.tagId !== request.tagId || message.seq <= lastSequence) return;
         lastSequence = message.seq;
         lastReceived = performance.now();
-        if (message.type === "invalid") { clear("위치를 계산할 수 없습니다."); return; }
+        if (message.type === "invalid") { clear(`위치를 계산할 수 없습니다. ${message.error}`); return; }
         setPosition(message);
         setStatus(`태그 ${message.tagId} 수신 중 · ${message.heightSource === "fixed" ? "높이 고정" : "높이 UWB 계산"}`);
       } catch { clear("수신 데이터가 올바르지 않습니다."); }

@@ -10,7 +10,9 @@ export type RoomMapping = {
   width: number; depth: number; rotation: number;
 };
 
-export function mapRoomPosition(position: Position2D, mapping: RoomMapping, size: number) {
+export const defaultRoom: RoomMapping = { originX: 0, originZ: 0, width: 6, depth: 6, rotation: 0 };
+
+export function mapRoomPosition(position: Position2D, mapping: RoomMapping, size: number, clampToEdge = false) {
   if (![position.x, position.z, mapping.originX, mapping.originZ,
     mapping.width, mapping.depth, mapping.rotation, size].every(Number.isFinite)
     || mapping.width <= 0 || mapping.depth <= 0 || !Number.isInteger(size) || size < 1) {
@@ -21,7 +23,7 @@ export function mapRoomPosition(position: Position2D, mapping: RoomMapping, size
   const u = (dx * Math.cos(angle) + dz * Math.sin(angle)) / mapping.width;
   const v = (-dx * Math.sin(angle) + dz * Math.cos(angle)) / mapping.depth;
   if (![u, v].every(Number.isFinite)) throw new Error("좌표 변환 범위를 초과했습니다.");
-  if (u < -1e-9 || v < -1e-9 || u > 1 + 1e-9 || v > 1 + 1e-9) return null;
+  if (!clampToEdge && (u < -1e-9 || v < -1e-9 || u > 1 + 1e-9 || v > 1 + 1e-9)) return null;
   return { x: Math.max(0, Math.min(1, u)) * size - 0.5,
     z: Math.max(0, Math.min(1, v)) * size - 0.5 };
 }

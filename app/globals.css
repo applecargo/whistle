@@ -2229,3 +2229,17 @@ p {
 @media (max-width: 370px) {
   .maker-dialog .dialog-inner { padding: 16px; }
 }
+
+.exhibition-link { color: inherit; align-self: center; padding: .4em; text-underline-offset: .2em; }
+.sector-screen { position: fixed; inset: 0; display: grid; place-items: center; background: #111; color: #eee; }
+.sector-screen .scene { position: absolute; inset: 0; width: 100%; height: 100%; }
+.sector-picker { max-width: 32rem; margin: 12vh auto; padding: 1.5rem; }
+.sector-picker p { line-height: 1.6; }
+.sector-picker nav { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: currentColor; border: 1px solid; }
+.sector-picker nav a { display: grid; place-items: center; aspect-ratio: 1.5; background: white; color: #151515; text-decoration: none; }
+.sector-picker nav a:is(:hover, :focus-visible) { background: #ecece9; }
+.sector-picker details { margin-top: 1.5rem; }
+.sector-picker summary { cursor: pointer; }
+.sector-picker form { display: grid; gap: .75rem; margin: 1rem 0; }
+.sector-picker fieldset { display: grid; gap: .5rem; }
+.sector-picker input { width: 6em; }

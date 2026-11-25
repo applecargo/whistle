@@ -16,6 +16,10 @@ npm run dev  # Pd 자동 컴파일 · 서버 시작
 - 접속: [게임](http://127.0.0.1:5173/whistle/) · [오디오 테스트](http://127.0.0.1:5173/whistle/audio-lab/index.html) · [UWB 테스트](http://127.0.0.1:5173/whistle/uwb-lab/index.html)
 - 포트 변경 시 터미널 주소 확인
 
+## 전시 화면
+
+메인 편집기의 **전시 화면**에서 M1–M5 중 미니디스플레이에 표시할 오브제 관찰 화면을 연다. UWB 테스트에는 모니터별 실제 위치와 정면 방향을 지정할 수 있다. [설치 배치와 접근 반응](docs/exhibition-displays.md)
+
 ## 사운드 수정
 
 - `audio/patches/player3.pd` 및 하위 패치: 음색·리듬·볼륨 수정
