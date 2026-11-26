@@ -239,7 +239,12 @@ void setup() {
   }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.setHostname(hostname.c_str());
   WiFi.mode(WIFI_STA); WiFi.setSleep(false); WiFi.setAutoReconnect(true);
-  WiFi.begin(WHISTLE_WIFI_SSID, WHISTLE_WIFI_PASSWORD);
+  if (WHISTLE_WIFI_PASSWORD[0] == '\0') {
+    WiFi.setMinSecurity(WIFI_AUTH_OPEN);
+    WiFi.begin(WHISTLE_WIFI_SSID);
+  } else {
+    WiFi.begin(WHISTLE_WIFI_SSID, WHISTLE_WIFI_PASSWORD);
+  }
   const char *headers[] = {"X-Whistle-Key"}; server.collectHeaders(headers, 1);
   server.on("/status", HTTP_GET, sendStatus);
   server.on("/measure", HTTP_POST, []() {

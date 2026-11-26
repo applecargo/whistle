@@ -38,7 +38,12 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.setSleep(false);
-  WiFi.begin(WHISTLE_WIFI_SSID, WHISTLE_WIFI_PASSWORD);
+  if (WHISTLE_WIFI_PASSWORD[0] == '\0') {
+    WiFi.setMinSecurity(WIFI_AUTH_OPEN);
+    WiFi.begin(WHISTLE_WIFI_SSID);
+  } else {
+    WiFi.begin(WHISTLE_WIFI_SSID, WHISTLE_WIFI_PASSWORD);
+  }
 }
 
 void loop() {

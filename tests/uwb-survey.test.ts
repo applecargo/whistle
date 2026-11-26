@@ -23,8 +23,15 @@ test("router settings preserve the control key and assign four independent mDNS 
   assert.ok(result.header.includes('#define WHISTLE_NETWORK_ROUTER 1'));
   assert.ok(result.header.includes(JSON.stringify('Studio "WiFi"')));
   assert.ok(result.header.includes(JSON.stringify('secret\\123')));
-  for (const input of [null, {}, { ssid: "x".repeat(33), password: "12345678" }, { ssid: "room", password: "short" }])
+  for (const input of [null, {}, { ssid: "room" }, { ssid: "x".repeat(33), password: "12345678" }, { ssid: "room", password: "short" }])
     assert.throws(() => routerNetworkConfig(input));
+});
+
+test("an explicit empty password configures open Wi-Fi and preserves the anchor control key", () => {
+  const key = "b".repeat(48);
+  const result = routerNetworkConfig({ ssid: "room", password: "" }, key);
+  assert.equal(result.config.key, key);
+  assert.match(result.header, /^#define WHISTLE_WIFI_PASSWORD ""$/m);
 });
 
 test("network checks query all four anchors without changing their roles", async () => {
