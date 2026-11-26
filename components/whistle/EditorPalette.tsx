@@ -54,7 +54,7 @@ export function EditorPalette({ weather, timeOfDay, surface, terrainTool, placin
       {!startLocked && <button className={`site-start ${placingStart ? "active" : ""}`} aria-label={t("시작점")}
         aria-pressed={placingStart} onClick={onToggleStart}>◎</button>}
     </div>
-    <div className="generated-symbols" aria-label={t("만든 기호")}>
+    <div className="generated-symbols" aria-label={t("만든 기호")} hidden>
       {materialLimit !== undefined && <span className="meeting-material-count" aria-label={`내 기호 ${materialCount} / ${materialLimit}`}>{materialCount} / {materialLimit}</span>}
       <div className="symbol-create">
         <button onClick={() => onCreateSymbol("image")} aria-label={t("이미지 만들기")}>{t("이미지")} <span aria-hidden="true">＋</span></button>
