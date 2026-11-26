@@ -9,6 +9,7 @@ import { MAX_LIBRARY_SIZE } from "../lib/content-limits";
 type Status = "off" | "saved" | "waiting" | "connected" | "disconnected" | "unavailable";
 
 export function useLiveWorld(receive: (world: World) => void, initiallyActive = false) {
+  const [sourceId, setSourceId] = useState<string | null>(null);
   const [active, setActive] = useState(initiallyActive);
   const [status, setStatus] = useState<Status>("off");
   const [error, setError] = useState("");
@@ -55,6 +56,7 @@ export function useLiveWorld(receive: (world: World) => void, initiallyActive = 
           const world = validateWorld(data.world, MAX_LIBRARY_SIZE);
           receiveRef.current(world);
           source = data.source;
+          setSourceId(source);
           lastSeen = performance.now();
           setStatus("connected");
           setError("");
@@ -101,5 +103,5 @@ export function useLiveWorld(receive: (world: World) => void, initiallyActive = 
     };
   }, [active]);
 
-  return { active, status, error, connect, disconnect };
+  return { active, status, error, connect, disconnect, sourceId: active && status === "connected" ? sourceId : null };
 }

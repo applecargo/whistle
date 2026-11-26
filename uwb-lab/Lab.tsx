@@ -6,16 +6,16 @@ import { unlockAudio } from "../lib/audio/pd-runtime";
 import { validateBoardHeight } from "../lib/audio/pd-session";
 import { createGameMix } from "../lib/audio/game-mix";
 import type { PlayerAudioFrame } from "../lib/audio/game-parameters";
-import { roomPositionAt, sampleTrackedPosition, type RoomMapping } from "../lib/uwb-position";
+import { defaultRoom, roomPositionAt, sampleTrackedPosition, type RoomMapping } from "../lib/uwb-position";
 import { createLabWorld } from "./world";
 import { useLiveWorld } from "./useLiveWorld";
 import { useWorldLink } from "./useWorldLink";
 import { useDevicePosition } from "./useDevicePosition";
+import { useVisitorPublisher } from "./useVisitorPublisher";
 import DeviceControls from "./DeviceControls";
 import AnchorControls from "./AnchorControls";
 import { rectangleConfig, type RectangleSetup } from "../lib/uwb/rectangle";
 
-const initialMapping: RoomMapping = { originX: 0, originZ: 0, width: 6, depth: 6, rotation: 0 };
 const labels: Record<keyof RoomMapping, string> = {
   originX: "원점 X (m)", originZ: "원점 Z (m)", width: "가로 (m)", depth: "세로 (m)", rotation: "회전 (°)",
 };
@@ -29,8 +29,8 @@ const statusLabels = { tracking: "위치 연결됨", outside: "공간 범위를 
 export default function Lab({ exhibitionTag, player }: { exhibitionTag?: string; player?: { tag: string; bridge: string } }) {
   const [world, setWorld] = useState(createLabWorld);
   const link = useWorldLink(player?.bridge, setWorld);
-  const [ownMapping, setMapping] = useState(initialMapping);
-  const mapping = player ? link.mapping ?? initialMapping : ownMapping;
+  const [ownMapping, setMapping] = useState(defaultRoom);
+  const mapping = player ? link.mapping ?? defaultRoom : ownMapping;
   const [manualPosition, setPosition] = useState({ x: 1, z: 3 });
   const [manualHeight, setBoardHeight] = useState(0);
   const [inputMode, setInputMode] = useState<"manual" | "device">(exhibitionTag || player ? "device" : "manual");
@@ -55,7 +55,7 @@ export default function Lab({ exhibitionTag, player }: { exhibitionTag?: string;
   const listener = useRef<PlayerAudioFrame | null>(null);
   const rain = useRef<boolean | undefined>(undefined);
   const generation = useRef(0);
-  const live = useLiveWorld(setWorld, !!exhibitionTag);
+  const live = useLiveWorld(setWorld, !!exhibitionTag || (!player && new URLSearchParams(location.search).has("exhibition")));
   const liveActive = useRef(live.active);
   liveActive.current = live.active;
   const derive = useMemo(createWorldDeriver, []);
@@ -74,6 +74,8 @@ export default function Lab({ exhibitionTag, player }: { exhibitionTag?: string;
       return { value: null, error: error instanceof Error ? error.message : "좌표가 올바르지 않습니다." };
     }
   }, [world, derivation, position, mapping, inputError, live.active, live.status, deviceMode, device.position, player, link.received, link.error]);
+  useVisitorPublisher(live.sourceId, sample.value ? position : null, sample.value?.frame ?? null,
+    deviceMode ? device.position?.tagId ?? "device" : "manual", deviceMode ? device.position?.receivedAt : undefined, mapping);
   let heightError = "";
   try { validateBoardHeight(boardHeight); }
   catch (error) { heightError = (error as Error).message; }

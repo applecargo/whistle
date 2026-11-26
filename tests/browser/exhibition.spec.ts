@@ -1,0 +1,181 @@
+import { test, expect } from "@playwright/test";
+import { data, setup } from "./uwb-device-fixture";
+import { outputGain, probeOutputGain } from "./pd-probe";
+import { LIVE_WORLD_CHANNEL } from "../../lib/live-world";
+import { createLabWorld } from "../../uwb-lab/world";
+
+test.use({
+  viewport: { width: 480, height: 300 },
+  launchOptions: { args: [
+    ...(process.platform === "darwin" ? ["--use-angle=metal"] : []),
+    "--enable-unsafe-swiftshader", "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows",
+  ] },
+});
+
+test("the exhibition picker offers three views and matching UWB placements", async ({ page }) => {
+  await page.goto("./?display=monitors");
+  const views = ["M1", "M2", "M3"];
+  await expect(page.getByRole("navigation").getByRole("link")).toHaveText(views);
+  await page.locator("details summary").click();
+  await expect(page.getByRole("combobox").locator("option")).toHaveText(views);
+});
+
+test("an object monitor follows its visitor while sound samples the virtual B2 ground", async ({ page, context }) => {
+  test.setTimeout(120_000);
+  await context.addInitScript(world => {
+    localStorage.setItem("whistle.world.v2", JSON.stringify(world));
+  }, createLabWorld());
+  await page.goto("./");
+  const screen = await context.newPage();
+  await screen.goto("./?display=M3&mx=2&mz=2&face=0");
+  const canvas = screen.locator("canvas");
+  await expect(canvas).toBeAttached({ timeout: 30000 });
+  const lab = await context.newPage();
+  await probeOutputGain(lab);
+  const device = await setup(lab, { exhibition: true });
+  try {
+    await expect(lab.locator("#live-status")).toContainText("연결되었습니다");
+    await lab.getByRole("button", { name: "연결 / 다시 연결", exact: true }).press("Enter");
+    const initialSubject = await canvas.getAttribute("data-subject");
+    expect(initialSubject).toBeTruthy();
+    const yaw = () => canvas.getAttribute("data-sector-yaw").then(Number);
+    device.move({ x: 2.5, z: 2.45, boardHeight: 1.2 });
+    await expect.poll(yaw, { timeout: 20000 }).toBeGreaterThan(2);
+    await expect.poll(async () => (await data(lab)).grid?.x).toBeCloseTo(4.5, 2);
+    await expect.poll(async () => (await data(lab)).grid?.z).toBeCloseTo(4.4, 2);
+    await lab.getByRole("button", { name: "오디오 시작", exact: true }).click();
+    await expect.poll(() => outputGain(lab)).toBe(1);
+    device.move({ x: 1.5, z: 2.45, boardHeight: 1.2 });
+    await expect.poll(yaw, { timeout: 20000 }).toBeLessThan(-2);
+    expect(await canvas.getAttribute("data-subject")).toBe(initialSubject);
+    device.pause();
+    await expect(lab.locator("#device-status")).toContainText("1초 이상");
+    await expect.poll(async () => Math.abs(await yaw()), { timeout: 15000 }).toBeLessThan(.45);
+    await expect.poll(() => outputGain(lab)).toBe(0);
+  } finally { await device.close(); }
+});
+
+test("painting a nearby pond in the main editor reframes an open observation window", async ({ page, context }) => {
+  const world = createLabWorld();
+  for (const tile of world.terrain!.tiles) tile.surface = "plain";
+  world.terrain!.tiles[0].surface = "rough";
+  await page.addInitScript(world => localStorage.setItem("whistle.world.v2", JSON.stringify(world)), world);
+  await page.goto("./");
+  const screen = await context.newPage();
+  await screen.goto("./?display=M3");
+  const canvas = screen.locator("canvas");
+  await expect(canvas).toHaveAttribute("data-subject", "stone-0", { timeout: 20000 });
+  await page.getByRole("button", { name: "흐름", exact: true }).click();
+  await page.locator('[data-cell="65"]').click();
+  await expect(canvas).toHaveAttribute("data-subject", "water-65");
+  await page.locator('[data-cell="65"]').click();
+  await expect(canvas).toHaveAttribute("data-subject", "stone-0");
+});
+
+test("room calibration reaches existing and newly opened observation windows", async ({ page, context }) => {
+  await page.addInitScript(world => localStorage.setItem("whistle.world.v2", JSON.stringify(world)), createLabWorld());
+  await page.goto("./");
+  const screen = await context.newPage();
+  await screen.goto("./?display=M3");
+  const canvas = screen.locator("canvas");
+  await expect(canvas).toHaveAttribute("data-subject", /^stone-/);
+  const lab = await context.newPage();
+  await lab.goto("./uwb-lab/index.html?exhibition=1");
+  await expect(lab.locator("#live-status")).toContainText("연결되었습니다");
+  await lab.getByLabel("원점 X (m)").fill("2");
+  await expect(canvas).toHaveAttribute("data-subject", /^grass-/);
+  const subject = await canvas.getAttribute("data-subject");
+  const late = await context.newPage();
+  await late.goto("./?display=M3");
+  await expect(late.locator("canvas")).toHaveAttribute("data-subject", subject!);
+});
+
+test("all nine fragments render and both sides of a crossed boundary show the visitor trail", async ({ page, context }) => {
+  test.setTimeout(120_000);
+  const world = createLabWorld();
+  world.timeOfDay = "noon";
+  await page.addInitScript(world => localStorage.setItem("whistle.world.v2", JSON.stringify(world)), world);
+  await page.goto("./kiosk/");
+  const picker = page.getByRole("link", { name: "전시 화면" });
+  await expect(picker).toHaveAttribute("href", /\/whistle\/\?display=monitors$/);
+
+  const screen = await context.newPage();
+  const errors: string[] = [];
+  screen.on("pageerror", error => errors.push(error.message));
+  screen.on("console", message => {
+    if (/shader error|VALIDATE_STATUS.*false|context lost/i.test(message.text())) errors.push(message.text());
+  });
+  const canvas = screen.locator("canvas");
+  const open = async (display: string) => {
+    await screen.goto(`./?display=${display}`);
+    await expect(canvas).toHaveAttribute("data-ready", "true");
+  };
+  const colors = async () => {
+    const png = await canvas.screenshot();
+    return screen.evaluate(async encoded => {
+      const bytes = Uint8Array.from(atob(encoded), char => char.charCodeAt(0));
+      const image = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+      const ctx = new OffscreenCanvas(image.width, image.height).getContext("2d")!;
+      ctx.drawImage(image, 0, 0);
+      const { data } = ctx.getImageData(0, 0, image.width, image.height);
+      let trail = 0, landscape = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] > 130 && data[i] > data[i + 1] * 1.8 && data[i] > data[i + 2] * 2) trail++;
+        if (Math.abs(data[i] - data[0]) > 12) landscape++;
+      }
+      image.close();
+      return { trail, landscape };
+    }, png.toString("base64"));
+  };
+
+  for (const id of ["A1", "B1", "C1", "A2", "B2", "C2", "A3", "B3", "C3"]) {
+    await open(id);
+    await expect(screen.getByRole("img", { name: id, exact: true })).toBeVisible();
+    const pixels = await colors();
+    expect(pixels.landscape, id).toBeGreaterThan(100);
+    expect(pixels.trail, id).toBe(0);
+  }
+  for (const id of ["M1", "M2", "M3"]) {
+    await open(id);
+    await expect(canvas).toHaveAttribute("data-subject", /.+/);
+  }
+
+  const lab = await context.newPage();
+  await lab.goto("./uwb-lab/index.html?exhibition=1");
+  await expect(lab.locator("#live-status")).toContainText("연결되었습니다");
+  await lab.getByLabel("관객 X (m)").fill("3");
+  const z = lab.getByLabel("관객 Z (m)");
+  await z.fill("4.2");
+  await z.fill("3.8");
+  for (const id of ["B3", "B2"]) {
+    await open(id);
+    await expect.poll(async () => (await colors()).trail, { message: id }).toBeGreaterThan(5);
+  }
+  expect(errors).toEqual([]);
+});
+
+test("a walk in the main game reaches the matching tile in a late fragment window", async ({ page, context }) => {
+  await page.addInitScript(world => localStorage.setItem("whistle.world.v2", JSON.stringify(world)), createLabWorld());
+  await page.goto("./");
+  await page.getByRole("button", { name: "플레이", exact: true }).click();
+  const player = page.locator(".play-shell canvas");
+  await expect(player).toHaveAttribute("data-ready", "true");
+  await page.keyboard.down("KeyW");
+  try {
+    await expect.poll(async () => Number(await player.getAttribute("data-player-z"))).toBeLessThan(9);
+  } finally { await page.keyboard.up("KeyW"); }
+  const screen = await context.newPage();
+  await screen.goto("./?display=B3");
+  await expect(screen.getByRole("img", { name: "B3" }).locator("canvas")).toHaveAttribute("data-ready", "true");
+  const segments = await screen.evaluate(channelName => new Promise<{ x: number; z: number; endZ: number }[]>(resolve => {
+    const channel = new BroadcastChannel(channelName);
+    channel.onmessage = ({ data }) => {
+      if (data.type !== "world") return;
+      channel.close();
+      resolve(data.trail);
+    };
+    channel.postMessage({ type: "request" });
+  }), LIVE_WORLD_CHANNEL);
+  expect(segments.some(s => Math.abs(s.x - 6) < .1 && s.z <= 10 && s.endZ < s.z && s.endZ > 7.5)).toBe(true);
+});

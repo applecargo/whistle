@@ -194,7 +194,7 @@ export default function Home({meeting,kiosk=false}:{meeting:MeetingSession;kiosk
     world, onLoad: handleLoad, onImport: handleImport, notify, libraryLimit: MAX_LIBRARY_SIZE,
     storage:browserStorage,fallbackWorld:initialWorld,
   });
-  useLiveWorldPublisher(world,ready);
+  const recordTrail = useLiveWorldPublisher(world, ready, simulation.actors, playKey);
   const link = useKioskLink(kiosk, world, ready);
   useEffect(()=>{
     if(ready&&meeting.status==="online"&&meeting.view.documentReady)
@@ -352,7 +352,12 @@ export default function Home({meeting,kiosk=false}:{meeting:MeetingSession;kiosk
             derivation={activeDerivation}
             mode="play"
             onPlayer={(p) => {player.current = p;meeting.position({...p,grounded:!!p.grounded},true);}}
-            onAudioFrame={frame => audio.movement(frame, activeWorld, activeSimulation.actors, activeDerivation)}
+            onAudioFrame={frame => {
+              const local = meetingLocal(0, frame);
+              const inOwnWorld = meetingOwner(Math.round(frame.x), Math.round(frame.z)) === 0;
+              recordTrail(local.x, local.z, inOwnWorld && frame.grounded);
+              audio.movement(frame, activeWorld, activeSimulation.actors, activeDerivation);
+            }}
             controls={controls}
             stick={stick}
             onControlsReset={() => setMovementMode("walk")}

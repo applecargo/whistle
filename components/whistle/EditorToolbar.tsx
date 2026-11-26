@@ -77,6 +77,7 @@ export function EditorToolbar({
           </button>
         </div>
         <div className="file-actions">
+          <a className="exhibition-link" href={`${import.meta.env.BASE_URL}?display=monitors`} target="_blank" rel="noopener">{language === "ko" ? "전시 화면" : "Exhibition"}</a>
           <button onClick={onNew}>{t("다시 시작")}</button>
           <button onClick={onImport}>
             {t("불러오기")}

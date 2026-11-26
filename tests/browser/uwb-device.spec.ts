@@ -1,44 +1,15 @@
 import { probePd, pdProbe, probeOutputGain, outputGain } from "./pd-probe";
 import { test, expect, type Page } from "@playwright/test";
 import { createSocket } from "node:dgram";
-import { readFileSync } from "node:fs";
+import { config, data, messages, setup } from "./uwb-device-fixture";
 import { startBridge } from "../../scripts/uwb/bridge";
-import { parseConfig, distanceTo } from "../../lib/uwb/solver";
+import { distanceTo } from "../../lib/uwb/solver";
 import { createLabWorld } from "../../uwb-lab/world";
 import { rectangleConfig } from "../../lib/uwb/rectangle";
 
+test.use({ launchOptions: { args: process.platform === "darwin" ? ["--use-angle=metal"] : [] } });
 test.beforeEach(async ({ page }) => { await probeOutputGain(page); });
 test.setTimeout(60_000);
-const config = parseConfig({ ...JSON.parse(readFileSync("config/uwb.example.json", "utf8")), mode: "3d", smoothingMs: 0 });
-const data = async (page: Page) => JSON.parse((await page.locator("#position-data").textContent())!);
-const messages = async (page: Page) => JSON.parse((await page.locator("#pd-messages").textContent())!);
-
-async function setup(page: Page, sourceConfig = config, rangesOnly = false, biases: number[] = []) {
-  const bridge = await startBridge(sourceConfig, { wsPort: 0, udpPort: 0, rangesOnly, log: () => {} });
-  const udp = createSocket("udp4");
-  let seq = 0;
-  let active = true;
-  let tagId = "0";
-  let valid = true;
-  let point = { x: 1, z: 3, boardHeight: 1.2 };
-  const timer = setInterval(() => {
-    if (!active) return;
-    udp.send(JSON.stringify({ type: "ranges", tagId, seq: ++seq,
-      ranges: valid ? sourceConfig.anchors.map((a, i) => ({ anchorId: a.id, distance: distanceTo(point, a) + (biases[i] ?? 0) })) : [],
-    }), bridge.udpPort, "127.0.0.1");
-  }, 100);
-  await page.addInitScript(() => Object.defineProperty(window, "devicePixelRatio", { value: 0.5 }));
-  await page.goto("uwb-lab/index.html");
-  await page.getByRole("radio", { name: "실제 데이터 · PC 수신기", exact: true }).check();
-  await page.getByLabel("수신기 주소", { exact: true }).fill(`ws://127.0.0.1:${bridge.wsPort}`);
-  return {
-    move: (p: typeof point) => { point = p; }, pause: () => { active = false; }, resume: () => { active = true; },
-    invalid: () => { valid = false; }, valid: () => { valid = true; }, tag: (id: string) => { tagId = id; },
-    stopBridge: bridge.close,
-    close: async () => { clearInterval(timer); udp.close(); await bridge.close(); },
-  };
-}
-
 test("UDP ranges reach the existing scene and Pd; height, invalid frames and timeouts stay separate", async ({ page }) => {
   await probePd(page);
   const device = await setup(page);
@@ -87,7 +58,7 @@ test("UDP ranges reach the existing scene and Pd; height, invalid frames and tim
 
 test("page rectangle settings turn raw ranges into terrain audio and clear stale positions on recalibration", async ({ page }) => {
   const rectangle = rectangleConfig({ width: 6, depth: 4, anchorHeight: 1.5, tagHeight: 1.2 });
-  const device = await setup(page, rectangle, true);
+  const device = await setup(page, { sourceConfig: rectangle, rangesOnly: true });
   try {
     device.move({ x: 1, z: 2, boardHeight: 1.2 });
     await page.getByRole("button", { name: "연결 / 다시 연결", exact: true }).click();
@@ -177,7 +148,7 @@ test("tag selection, saved Whistle world and connection loss do not use another 
 
 test("centre calibration corrects biased distances, follows movement and resets with geometry", async ({ page }) => {
   const source = rectangleConfig({ width: 1, depth: .37, anchorHeight: .66, tagHeight: .66 });
-  const device = await setup(page, source, true, [.45, .55, .8, .5]);
+  const device = await setup(page, { sourceConfig: source, rangesOnly: true, biases: [.45, .55, .8, .5] });
   try {
     device.move({ x: .5, z: .185, boardHeight: .66 });
     await page.getByRole("button", { name: "연결 / 다시 연결", exact: true }).click();
@@ -235,6 +206,7 @@ test("four exhibition tabs follow their own tag and mute independently", async (
       await tab.getByLabel("수신기 주소").fill(`ws://127.0.0.1:${bridge.wsPort}`);
       await tab.getByRole("button", { name: "연결 / 다시 연결" }).click();
       await tab.getByRole("button", { name: "오디오 시작" }).click();
+      await expect(tab.locator("#audio-status")).toHaveText("오디오 실행 중", { timeout: 30_000 });
       await expect.poll(async () => (await messages(tab))["whistle-player position"]?.[0]).toBeCloseTo(x / 6, 4);
     }
     const levels = () => Promise.all(tabs.map(outputGain));
