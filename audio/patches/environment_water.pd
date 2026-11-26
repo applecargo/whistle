@@ -37,6 +37,11 @@
 #X obj 156 48 loadbang;
 #X obj 56 548 outlet~;
 #X obj 146 548 outlet~;
+#X obj 330 20 loadbang;
+#X msg 330 45 curve exp;
+#X obj 330 70 list prepend \$1;
+#X obj 330 95 s whistle-source;
+#X text 330 120 spatial rule for this patch: volume rises slowly \, then fast near the water. (range / width can be added the same way);
 #X connect 0 0 2 0;
 #X connect 1 0 0 0;
 #X connect 1 0 10 0;
@@ -80,3 +85,6 @@
 #X connect 33 2 30 0;
 #X connect 34 0 31 0;
 #X connect 35 0 32 0;
+#X connect 38 0 39 0;
+#X connect 39 0 40 0;
+#X connect 40 0 41 0;
