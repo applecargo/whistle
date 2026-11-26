@@ -380,7 +380,7 @@ export function createSoundscape(options: SoundscapeOptions) {
     snapshot() {
       return {
         sources: sources.size,
-        voices: [...voices].map(([id, v]) => ({ id, patch: v.source.patch, state: v.state, instance: v.patch?.id })),
+        voices: [...voices].map(([id, v]) => ({ id, patch: v.source.patch, state: v.state, ...(v.patch?.id ? { instance: v.patch.id } : {}) })),
       };
     },
     dispose() {
