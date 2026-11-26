@@ -9,6 +9,7 @@ import type { PlayerAudioFrame } from "../lib/audio/game-parameters";
 import { roomPositionAt, sampleTrackedPosition, type RoomMapping } from "../lib/uwb-position";
 import { createLabWorld } from "./world";
 import { useLiveWorld } from "./useLiveWorld";
+import { useWorldLink } from "./useWorldLink";
 import { useDevicePosition } from "./useDevicePosition";
 import DeviceControls from "./DeviceControls";
 import AnchorControls from "./AnchorControls";
@@ -20,16 +21,28 @@ const labels: Record<keyof RoomMapping, string> = {
 };
 const statusLabels = { tracking: "위치 연결됨", outside: "공간 범위를 벗어났습니다.", "no-ground": "바닥이 없습니다." };
 
-export default function Lab({ exhibitionTag }: { exhibitionTag?: string }) {
+/**
+ * exhibitionTag: 한 PC에서 태그마다 탭 하나(같은 브라우저의 편집기 맵).
+ * player: UWB 다중 플레이어 전시의 플레이어 PC(player/index.html). 맵과 매핑은 키오스크가 수신기로 보낸 것을 받고,
+ *   수신기의 태그 위치에 바로 연결해 위치가 잡히면 오디오를 스스로 켠다(Chrome 자동 재생 허용으로 띄운다).
+ */
+export default function Lab({ exhibitionTag, player }: { exhibitionTag?: string; player?: { tag: string; bridge: string } }) {
   const [world, setWorld] = useState(createLabWorld);
-  const [mapping, setMapping] = useState(initialMapping);
+  const link = useWorldLink(player?.bridge, setWorld);
+  const [ownMapping, setMapping] = useState(initialMapping);
+  const mapping = player ? link.mapping ?? initialMapping : ownMapping;
   const [manualPosition, setPosition] = useState({ x: 1, z: 3 });
   const [manualHeight, setBoardHeight] = useState(0);
-  const [inputMode, setInputMode] = useState<"manual" | "device">(exhibitionTag ? "device" : "manual");
+  const [inputMode, setInputMode] = useState<"manual" | "device">(exhibitionTag || player ? "device" : "manual");
   const deviceMode = inputMode === "device";
   const [anchorSetup, setAnchorSetup] = useState<RectangleSetup | null>(null);
   const calibration = useMemo(() => anchorSetup ? rectangleConfig(anchorSetup) : null, [anchorSetup]);
   const device = useDevicePosition(deviceMode, calibration);
+  const connectDevice = device.connect;
+  useEffect(() => {
+    if (!player) return;
+    try { connectDevice(new URL("/", player.bridge).href, player.tag); } catch { connectDevice(player.bridge, player.tag); }
+  }, [player?.bridge, player?.tag, connectDevice]);
   const position = deviceMode ? device.position ?? manualPosition : manualPosition;
   const boardHeight = deviceMode ? device.position?.boardHeight ?? 0 : manualHeight;
   const [packet, setPacket] = useState('{"x":1,"z":3,"boardHeight":0}');
@@ -52,6 +65,7 @@ export default function Lab({ exhibitionTag }: { exhibitionTag?: string }) {
   const derivation = useMemo(() => derive(world, simulation.actors), [derive, world, simulation.actors]);
   const sample = useMemo(() => {
     try {
+      if (player && !link.received) throw new Error(link.error || "키오스크 맵을 받지 못했습니다.");
       if (live.active && live.status !== "connected" && live.status !== "saved") throw new Error("편집기에 연결되지 않았습니다.");
       if (deviceMode && !device.position) throw new Error("장비 위치를 수신하지 못했습니다.");
       if (!deviceMode && inputError) throw new Error(inputError);
@@ -59,7 +73,7 @@ export default function Lab({ exhibitionTag }: { exhibitionTag?: string }) {
     } catch (error) {
       return { value: null, error: error instanceof Error ? error.message : "좌표가 올바르지 않습니다." };
     }
-  }, [world, derivation, position, mapping, inputError, live.active, live.status, deviceMode, device.position]);
+  }, [world, derivation, position, mapping, inputError, live.active, live.status, deviceMode, device.position, player, link.received, link.error]);
   let heightError = "";
   try { validateBoardHeight(boardHeight); }
   catch (error) { heightError = (error as Error).message; }
@@ -109,7 +123,7 @@ export default function Lab({ exhibitionTag }: { exhibitionTag?: string }) {
   }, [world, initialSimulation, audioState]);
 
   useEffect(() => {
-    const blur = () => { if (!liveActive.current && !exhibitionTag) stopAudio(); };
+    const blur = () => { if (!liveActive.current && !exhibitionTag && !player) stopAudio(); };
     const hidden = () => { if (document.hidden) blur(); };
     window.addEventListener("blur", blur);
     window.addEventListener("pagehide", stopAudio);
@@ -126,7 +140,7 @@ export default function Lab({ exhibitionTag }: { exhibitionTag?: string }) {
       if (mix.current) lifecycle.current = mix.current.session.close().catch(() => {});
       mix.current = null;
     };
-  }, [stopAudio, exhibitionTag]);
+  }, [stopAudio, exhibitionTag, player]);
 
   function startAudio() {
     const request = ++generation.current;
@@ -166,6 +180,13 @@ export default function Lab({ exhibitionTag }: { exhibitionTag?: string }) {
   }
   const frame = sample.value?.frame;
   const grid = sample.value?.grid;
+  // 플레이어 PC: 처음 위치가 잡히면 오디오를 켠다(한 번만. 실패하면 버튼으로)
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!player || autoStarted.current || audioState !== "off" || !frame || heightError) return;
+    autoStarted.current = true;
+    startAudio();
+  });
   const audioBlockReason = heightError || (!frame
     ? (deviceMode && !device.position ? device.status : sample.error || (sample.value && statusLabels[sample.value.status]))
     : "");
@@ -176,8 +197,11 @@ export default function Lab({ exhibitionTag }: { exhibitionTag?: string }) {
     grid: sample.value.grid, pd: sample.value.sound } : { error: sample.error };
 
   return <main>
-    <header><h1>{exhibitionTag ? `T${exhibitionTag} · 전시장 출력` : "UWB 위치 테스트"}</h1></header>
-    <section className="world-controls" aria-label="공간 선택">
+    <header><h1>{player ? `플레이어 T${player.tag}` : exhibitionTag ? `T${exhibitionTag} · 전시장 출력` : "UWB 위치 테스트"}</h1></header>
+    {player ? <section className="world-controls" aria-label="연결">
+      <p id="player-world" role="status" data-world-link={link.state}>키오스크 맵: {link.error || (link.received ? "받음" : "기다리는 중")} · {player.bridge}</p>
+      <p id="player-device" role="status">태그: {device.status}</p>
+    </section> : <section className="world-controls" aria-label="공간 선택">
       <nav className="world-menu" aria-label="테스트 공간">
         <button aria-pressed={!live.active} onClick={selectSample}>샘플</button>
         <button aria-pressed={live.active} onClick={() => {
@@ -185,7 +209,7 @@ export default function Lab({ exhibitionTag }: { exhibitionTag?: string }) {
           live.connect();
         }}>Whistle 3D</button>
       </nav>
-    </section>
+    </section>}
     <div className="layout">
       <section className="views" aria-label="가상공간">
         {live.active ? <p id="live-status" role="status">{live.error || ({ off: "", saved: "Whistle 3D", waiting: "편집기에 연결되지 않았습니다.",
@@ -225,19 +249,19 @@ export default function Lab({ exhibitionTag }: { exhibitionTag?: string }) {
             태그가 전시장 매핑 영역 안에 있는지, 앵커 배치·높이가 실측값과 맞는지 확인하세요.</> : null}
         </p> : null}
         </section>
-        <fieldset><legend>전시장 매핑</legend>
+        <fieldset disabled={!!player}><legend>전시장 매핑{player ? " (키오스크)" : ""}</legend>
           {(Object.keys(labels) as (keyof RoomMapping)[]).map((key) => <label key={key}>{labels[key]}
             <input type="number" step="any" value={Number.isFinite(mapping[key]) ? mapping[key] : ""}
               onChange={(event) => setMapping({ ...mapping, [key]: event.target.valueAsNumber })} /></label>)}
         </fieldset>
-        {!exhibitionTag && <fieldset><legend>위치 입력 방식</legend>
+        {!exhibitionTag && !player && <fieldset><legend>위치 입력 방식</legend>
           <label><input type="radio" name="input-mode" checked={!deviceMode} onChange={() => {
             device.disconnect(); setInputMode("manual");
           }} />가상 좌표 직접 입력</label>
           <label><input type="radio" name="input-mode" checked={deviceMode} onChange={() => setInputMode("device")} />실제 데이터 · PC 수신기</label>
         </fieldset>}
-        {deviceMode ? <DeviceControls device={device} exhibitionTag={exhibitionTag} /> : null}
-        {deviceMode ? <AnchorControls applied={anchorSetup} onApply={(setup) => {
+        {deviceMode && !player ? <DeviceControls device={device} exhibitionTag={exhibitionTag} /> : null}
+        {deviceMode && !player ? <AnchorControls applied={anchorSetup} onApply={(setup) => {
           setAnchorSetup(setup);
           setMapping({ originX: 0, originZ: 0, width: setup.width, depth: setup.depth, rotation: 0 });
         }} onClear={() => setAnchorSetup(null)} /> : null}

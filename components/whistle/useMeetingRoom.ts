@@ -14,8 +14,8 @@ function identity(key:string, fresh=false) {
   } catch {}
   return {id,token};
 }
-export function useMeetingRoom(key: string) {
-  const [enabled, setEnabled] = useState(true);
+export function useMeetingRoom(key: string, initiallyEnabled = true) {
+  const [enabled, setEnabled] = useState(initiallyEnabled);
   const [session,setSession]=useState(()=>identity(key));
   const [documentId]=useState(()=>{
     try {

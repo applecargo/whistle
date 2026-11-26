@@ -23,6 +23,7 @@ import { editSound } from "@/lib/audio/game-parameters";
 import { useWorldPersistence } from "@/components/whistle/useWorldPersistence";
 import { browserWorldStore } from "@/lib/browser-world";
 import { useLiveWorldPublisher } from "@/components/whistle/useLiveWorldPublisher";
+import { KioskPanel, KioskPlayers, useKioskLink } from "@/components/whistle/Kiosk";
 import { EditorToolbar } from "@/components/whistle/EditorToolbar";
 import { EditorPalette } from "@/components/whistle/EditorPalette";
 import { EditorBoard } from "@/components/whistle/EditorBoard";
@@ -45,7 +46,7 @@ const LazyScene = lazy(() => import("@/components/whistle/Scene"));
 function Scene(props: ComponentProps<typeof LazyScene>) {
   return <Suspense fallback={<SceneLoading />}><LazyScene {...props} /></Suspense>;
 }
-export default function Home({meeting}:{meeting:MeetingSession}) {
+export default function Home({meeting,kiosk=false}:{meeting:MeetingSession;kiosk?:boolean}) {
   const { t } = useLanguage();
   const initialWorld = useMemo(() => meeting.view.ownWorld, []);
   const initialPlayer = useMemo(() => ({...meetingGlobal(0,initialWorld.start),yaw:0}), []);
@@ -194,6 +195,7 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
     storage:browserStorage,fallbackWorld:initialWorld,
   });
   useLiveWorldPublisher(world,ready);
+  const link = useKioskLink(kiosk, world, ready);
   useEffect(()=>{
     if(ready&&meeting.status==="online"&&meeting.view.documentReady)
       syncConnectionFootings(meeting.view.ownWorld.connectionFootings);
@@ -261,7 +263,7 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
     const after = getWorld();
     if (before !== after) {
       const sound = editSound(before, after, cells, deriveWorld(after));
-      if (sound) audio.edit(sound);
+      if (sound && !kiosk) audio.edit(sound);
     }
   };
   const saveAsset = (asset: Asset) => {
@@ -334,6 +336,7 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
         onToggleMultiplayer={() => meeting.setMultiplayer(!meeting.enabled,getWorld())}
         connectionStatus={meeting.status}
         makeButton={makeButton}
+        editOnly={kiosk}
         onEnter={enter}
         onExit={exit}
         onNew={() => setNewDialog(true)}
@@ -411,7 +414,7 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
             onEnd={endStroke}
             onUndo={undo}
             onRedo={redo}
-            overlay={<MeetingOverlay meeting={visibleMeeting} />}
+            overlay={<><MeetingOverlay meeting={visibleMeeting} />{kiosk && <KioskPlayers players={link.players} size={world.size} />}</>}
           />
           <aside className="preview-panel" aria-label={t("배치 결과")}>
             <div className="live-preview">
@@ -423,10 +426,11 @@ export default function Home({meeting}:{meeting:MeetingSession}) {
                 feedback={feedback}
                     meeting={meetingVisuals(visibleMeeting,true)}
               />}
-              <button onClick={enter} aria-label={t("들어가기")}>
+              {!kiosk && <button onClick={enter} aria-label={t("들어가기")}>
                 <span aria-hidden="true">↗</span>
-              </button>
+              </button>}
             </div>
+            {kiosk && <KioskPanel link={link} />}
           </aside>
         </div>
       <input

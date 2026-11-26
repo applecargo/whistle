@@ -113,6 +113,8 @@ export default defineConfig({
         audioLab: fileURLToPath(new URL("./audio-lab/index.html", import.meta.url)),
         soundscapeLab: fileURLToPath(new URL("./audio-lab/soundscape.html", import.meta.url)),
         uwbLab: fileURLToPath(new URL("./uwb-lab/index.html", import.meta.url)),
+        kiosk: fileURLToPath(new URL("./kiosk/index.html", import.meta.url)),
+        player: fileURLToPath(new URL("./player/index.html", import.meta.url)),
       },
     },
   },
