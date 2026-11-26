@@ -3,7 +3,7 @@ import { createLabWorld } from "../uwb-lab/world.ts";
 import { deriveEnvironment } from "../lib/environment.ts";
 import { mapRoomPosition, defaultRoom } from "../lib/uwb-position.ts";
 import test from "node:test";
-import { cameraOffset, readMount } from "../lib/display-proximity.ts";
+import { cameraOffset, readMount, selectMonitorTag } from "../lib/display-proximity.ts";
 import assert from "node:assert/strict";
 import { createTrailRecorder, sectorBounds, sectors, trailLifetime } from "../lib/exhibition.ts";
 
@@ -72,4 +72,16 @@ test("an installation beside the mapped room can observe its edge without moving
   const edge = mapRoomPosition({ x: 4, z: 10 }, setup, 12, true)!;
   assert.equal(edge.x, 11.5);
   assert.ok(Math.abs(edge.z + .5) < 1e-8);
+});
+
+test("each monitor keeps a nearby front-facing tag until it expires or another is clearly closer", () => {
+  const mount = { x: 0, z: 0, facing: 0 };
+  const pose = (x: number, z: number, at = 1000) => ({ room: { x, z }, at });
+  const poses = new Map([["0", pose(.5, .5)], ["1", pose(.4, .5)], ["2", pose(0, -.1)]]);
+  assert.equal(selectMonitorTag(mount, poses, undefined, 1000), "1");
+  assert.equal(selectMonitorTag(mount, poses, "0", 1000), "0");
+  poses.set("1", pose(.1, .1, 1900));
+  assert.equal(selectMonitorTag(mount, poses, "0", 1950), "1");
+  poses.set("1", pose(0, 2, 2100));
+  assert.equal(selectMonitorTag(mount, poses, "0", 2100), undefined);
 });

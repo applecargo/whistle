@@ -1,5 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { data, setup } from "./uwb-device-fixture";
+import { createSocket } from "node:dgram";
+import { startBridge } from "../../scripts/uwb/bridge";
+import { distanceTo } from "../../lib/uwb/solver";
+import { config, data, setup } from "./uwb-device-fixture";
 import { outputGain, probeOutputGain } from "./pd-probe";
 import { LIVE_WORLD_CHANNEL } from "../../lib/live-world";
 import { createLabWorld } from "../../uwb-lab/world";
@@ -98,7 +101,7 @@ test("all nine fragments render and both sides of a crossed boundary show the vi
   await page.addInitScript(world => localStorage.setItem("whistle.world.v2", JSON.stringify(world)), world);
   await page.goto("./kiosk/");
   const picker = page.getByRole("link", { name: "전시 화면" });
-  await expect(picker).toHaveAttribute("href", /\/whistle\/\?display=monitors$/);
+  await expect(picker).toHaveAttribute("href", /\/whistle\/\?display=monitors&bridge=/);
 
   const screen = await context.newPage();
   const errors: string[] = [];
@@ -178,4 +181,58 @@ test("a walk in the main game reaches the matching tile in a late fragment windo
     channel.postMessage({ type: "request" });
   }), LIVE_WORLD_CHANNEL);
   expect(segments.some(s => Math.abs(s.x - 6) < .1 && s.z <= 10 && s.endZ < s.z && s.endZ > 7.5)).toBe(true);
+});
+
+test("a separate M1 profile follows kiosk edits and UDP positions and restores the latest map on restart", async ({ page, browser, baseURL }) => {
+  test.setTimeout(60_000);
+  const bridge = await startBridge(config, { wsPort: 0, udpPort: 0, log: () => {} });
+  const address = `ws://127.0.0.1:${bridge.wsPort}`;
+  const udp = createSocket("udp4");
+  const display = await browser.newContext({ baseURL, locale: "ko-KR", viewport: { width: 480, height: 300 } });
+  const world = createLabWorld();
+  for (const tile of world.terrain!.tiles) tile.surface = "plain";
+  world.terrain!.tiles[0].surface = "rough";
+  let seq = 0, x = 1.6;
+  const timer = setInterval(() => {
+    const point = { x, z: 1.3, boardHeight: 1.2 };
+    udp.send(JSON.stringify({ type: "ranges", tagId: "0", seq: ++seq,
+      ranges: config.anchors.map(a => ({ anchorId: a.id, distance: distanceTo(point, a) })) }), bridge.udpPort, "127.0.0.1");
+  }, 100);
+  try {
+    await page.addInitScript(({ world, address }) => {
+      localStorage.setItem("whistle.world.v2", JSON.stringify(world));
+      localStorage.setItem("whistle.kiosk.v1", JSON.stringify({ bridge: address, mapping: { originX: 0, originZ: 0, width: 6, depth: 6, rotation: 0 } }));
+    }, { world, address });
+    await page.goto("./kiosk/");
+    const menu = await page.getByRole("link", { name: "전시 화면" }).getAttribute("href");
+    const screen = await display.newPage();
+    await screen.goto(menu!);
+    const m1 = await screen.getByRole("link", { name: "M1", exact: true }).getAttribute("href");
+    const url = new URL(m1!, screen.url());
+    expect(url.searchParams.get("bridge")).toBe(address);
+    await screen.goto(url.href);
+    const canvas = screen.locator("canvas");
+    await expect(canvas).toHaveAttribute("data-subject", "stone-0");
+    const yaw = () => canvas.getAttribute("data-sector-yaw").then(Number);
+    await expect.poll(yaw).toBeGreaterThan(2);
+    x = .4;
+    await expect.poll(yaw).toBeLessThan(-2);
+    await page.getByRole("button", { name: "흐름", exact: true }).click();
+    // M1 at (1, .8) metres is nearest to grid cell (2, 1).
+    await page.locator('[data-cell="14"]').click();
+    await expect(canvas).toHaveAttribute("data-subject", "water-14");
+    clearInterval(timer);
+    await expect.poll(async () => Math.abs(await yaw()), { timeout: 15000 }).toBeLessThan(.45);
+    await screen.close();
+    const reopened = await display.newPage();
+    await reopened.goto(url.href);
+    await expect(reopened.locator("canvas")).toHaveAttribute("data-subject", "water-14");
+    await page.locator('[data-cell="14"]').click();
+    await expect(reopened.locator("canvas")).toHaveAttribute("data-subject", "stone-0");
+  } finally {
+    clearInterval(timer);
+    udp.close();
+    await display.close();
+    await bridge.close();
+  }
 });

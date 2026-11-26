@@ -337,6 +337,7 @@ export default function Home({meeting,kiosk=false}:{meeting:MeetingSession;kiosk
         connectionStatus={meeting.status}
         makeButton={makeButton}
         editOnly={kiosk}
+        displayBridge={kiosk ? link.settings.bridge : undefined}
         onEnter={enter}
         onExit={exit}
         onNew={() => setNewDialog(true)}

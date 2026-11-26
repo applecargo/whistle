@@ -12,6 +12,7 @@ type Props = {
   makeButton: RefObject<HTMLButtonElement | null>;
   /** 만들기만(키오스크): 플레이 탭과 멀티플레이 버튼을 숨긴다 */
   editOnly?: boolean;
+  displayBridge?: string;
   onEnter: () => void;
   onExit: () => void;
   onNew: () => void;
@@ -20,7 +21,7 @@ type Props = {
 };
 
 export function EditorToolbar({
-  playing, saveStatus, onlineCount, multiplayerEnabled, onToggleMultiplayer, connectionStatus, makeButton, editOnly = false, onEnter, onExit, onNew, onImport, onSave,
+  playing, saveStatus, onlineCount, multiplayerEnabled, onToggleMultiplayer, connectionStatus, makeButton, editOnly = false, displayBridge, onEnter, onExit, onNew, onImport, onSave,
 }: Props) {
   const { language, setLanguage, t } = useLanguage();
   const presenceLabel = !multiplayerEnabled ? t("혼자 플레이") : onlineCount === null
@@ -77,7 +78,7 @@ export function EditorToolbar({
           </button>
         </div>
         <div className="file-actions">
-          <a className="exhibition-link" href={`${import.meta.env.BASE_URL}?display=monitors`} target="_blank" rel="noopener">{language === "ko" ? "전시 화면" : "Exhibition"}</a>
+          <a className="exhibition-link" href={`${import.meta.env.BASE_URL}?display=monitors${displayBridge ? `&bridge=${encodeURIComponent(displayBridge)}` : ""}`} target="_blank" rel="noopener">{language === "ko" ? "전시 화면" : "Exhibition"}</a>
           <button onClick={onNew}>{t("다시 시작")}</button>
           <button onClick={onImport}>
             {t("불러오기")}

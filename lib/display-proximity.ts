@@ -1,3 +1,4 @@
+import { TRACKING_TIMEOUT_MS } from "./uwb/protocol.ts";
 import type { Monitor } from "./observation.ts";
 import type { Sector } from "./exhibition.ts";
 import type { Position2D } from "./uwb-position.ts";
@@ -25,6 +26,22 @@ export function readMount(sector: Sector | Monitor, query: URLSearchParams): Dis
   return values.every(Number.isFinite) ? { x: values[0], z: values[1], facing: values[2] } : exampleMount(sector);
 }
 
+const reactionRadius = 1.8;
+
+export function selectMonitorTag(mount: DisplayMount, poses: ReadonlyMap<string, VisitorPose>, current: string | undefined, now: number) {
+  const angle = mount.facing * Math.PI / 180;
+  let nearest: string | undefined, best = Infinity;
+  for (const [tag, pose] of poses) {
+    if (now - pose.at > TRACKING_TIMEOUT_MS) continue;
+    const dx = pose.room.x - mount.x, dz = pose.room.z - mount.z;
+    const distance = Math.hypot(dx, dz);
+    if (distance >= reactionRadius || dx * Math.sin(angle) + dz * Math.cos(angle) <= 0) continue;
+    const score = distance - (tag === current ? .2 : 0);
+    if (score < best) { best = score; nearest = tag; }
+  }
+  return nearest;
+}
+
 const smooth = (fraction: number) => {
   const t = Math.min(1, Math.max(0, fraction));
   return t * t * (3 - 2 * t);
@@ -37,7 +54,7 @@ export function cameraOffset(mount: DisplayMount, visitor: VisitorPose | null, n
   const dx = visitor.room.x - mount.x, dz = visitor.room.z - mount.z;
   const forward = dx * Math.sin(angle) + dz * Math.cos(angle);
   const side = dx * Math.cos(angle) - dz * Math.sin(angle);
-  const near = smooth((1.8 - Math.hypot(dx, dz)) / 1.4) * smooth(forward / .25);
+  const near = smooth((reactionRadius - Math.hypot(dx, dz)) / 1.4) * smooth(forward / .25);
   if (near === 0) return { yaw: 0, tilt: 0 };
   return {
     yaw: near * Math.sign(side) * smooth((Math.abs(side) - .10) / .65) * 10 * Math.PI / 180,
