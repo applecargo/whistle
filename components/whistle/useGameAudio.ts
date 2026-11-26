@@ -81,10 +81,14 @@ async function createGameMix(onBlocked: () => void) {
     const rules = new Map<string, Partial<SpatialRule>>();
     // 이벤트 소리(fallingstar 등): 이름은 만드는 쪽이 정한다(패치의 $1)
     const events = createEventSources(scape, (patch, name) => engine.start(patch, name), (message) => console.warn(`[Whistle:Audio] ${message}`));
-    // Pd → JS: main.pd가 whistle-spawn·whistle-source를 [list trim]해서 넘긴다(audio/spatial-sources.md)
+    // Pd → JS: 패치가 이름을 앞에 붙인 리스트로 보낸다([list prepend $1] → [s whistle-source]. audio/spatial-sources.md)
+    const named = (listener: (name: string, words: (string | number)[]) => void) => ([name, ...words]: (string | number)[]) => {
+      if (typeof name === "string") listener(name, words);
+      else console.warn(`[Whistle:Audio] 이름(글자)으로 시작해야 합니다: ${[name, ...words].join(" ")}`);
+    };
     const listening = [
-      engine.onMessage("whistle-js-spawn", (name, words) => events.fromPdSpawn(name, words)),
-      engine.onMessage("whistle-js-source", (name, words) => {
+      engine.onList("whistle-spawn", named((name, words) => events.fromPdSpawn(name, words))),
+      engine.onList("whistle-source", named((name, words) => {
         if (events.set(name, words)) return;
         // 영역·배치한 소리의 슬롯(vK): 규칙이면 그 패치 이름의 모든 소스에
         const voice = scape.snapshot().voices.find((v) => v.instance === name);
@@ -93,7 +97,7 @@ async function createGameMix(onBlocked: () => void) {
         if (!Object.keys(rule).length) return;
         rules.set(voice.patch, { ...rules.get(voice.patch), ...rule });
         log(`${voice.patch} 공간화 규칙: ${words.join(" ")}`);
-      }),
+      })),
     ];
     log(`오디오 시작: ${context.sampleRate}Hz, 상호작용 패치 edit·player·event 준비됨 (${Math.round(performance.now() - started)}ms), 비상관 필터 ${diffuse ? "켬" : "끔"}, 지연 설정 ${hint} (${(context.baseLatency * 1000).toFixed(1)}ms)`);
     return {

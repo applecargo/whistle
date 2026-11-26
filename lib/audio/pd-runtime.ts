@@ -57,8 +57,9 @@ export type PdEngine = {
   files: string[];
   /** 패치 하나를 빈 슬롯에 띄운다(main.pd에 on을 보낸다). id: 패치의 $1(없으면 새 이름 v1, v2…. 주는 쪽은 v+숫자 꼴을 쓰지 않는다) */
   start(name: string, id?: string): Promise<PatchInstance>;
-  /** 전역 버스로 오는 메시지(Pd → JS, 선택자가 있는 것: [s 버스]에 "star1 alive 0"처럼 글자로 시작하는 것). 그만 받기 함수를 돌려준다 */
-  onMessage(bus: string, listener: (selector: string, values: PdMessage) => void): () => void;
+  /** 전역 버스로 오는 리스트(Pd → JS: [list prepend $1] → [s 버스]). 그만 받기 함수를 돌려준다.
+   *  리스트만 받는다(pd4web은 한 이름을 한 종류로만 받을 수 있다: audio/pd-to-js-fix.md). 메시지 상자에서 바로 보낸 것은 오지 않는다 */
+  onList(bus: string, listener: (values: PdMessage) => void): () => void;
   /** 전역 버스로 보낸다(whistle-player 등. main.pd 안의 패치가 받는다) */
   send(bus: string, message: PdMessage): void;
   /** 믹스다운(채널 1–2): main.pd가 공간화 없이 내보내는 소리 */
@@ -256,8 +257,8 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
     };
   };
   const send = (bus: string, values: PdMessage) => { globalLast.set(key(bus, values), deliver(bus, values)); };
-  const onMessage = (bus: string, listener: (selector: string, values: PdMessage) => void) =>
-    pd.onMessageReceived(bus, (_r: string, selector: string, values: PdMessage) => listener(selector, values ?? [])) ?? (() => {});
+  const onList = (bus: string, listener: (values: PdMessage) => void) =>
+    pd.onListReceived(bus, (_r: string, values: PdMessage) => listener(values ?? [])) ?? (() => {});
   const removeFile = (path: string) => {
     try { module.FS.unlink(`/${path}`); } catch { /* 이미 없음 */ }
   };
@@ -307,7 +308,7 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
     return [...words].some((word) => word && files.includes(`${word}.pd`) && uses(word, changed, seen));
   };
 
-  return { context, files, start, send, onMessage, mixdown, slotsInUse: () => used.size, writeFile, removeFile };
+  return { context, files, start, send, onList, mixdown, slotsInUse: () => used.size, writeFile, removeFile };
 }
 
 /** 터치·키 처리 안에서 부른다. 엔진의 AudioContext가 막혀(suspended) 있으면 켠다. 엔진이 아직 없으면 아무것도 안 한다. */

@@ -1,5 +1,5 @@
 #N canvas 703 141 379 230 12;
-#N canvas 0 33 560 480 spacialization 0;
+#N canvas 0 33 492 341 spacialization 0;
 #X obj 20 20 r whistle-slot;
 #X obj 20 50 route on off;
 #X msg 20 140 \; pd-slot\$1 clear \, obj 20 20 \$2 \$3 \, obj 20 80 dac~ \$4 \$5 \, connect 0 0 1 0 \, connect 0 1 1 1 \, loadbang;
@@ -34,20 +34,9 @@
 #X restore 290 280 pd slot13;
 #N canvas 0 0 300 200 slot14 0;
 #X restore 380 280 pd slot14;
-#X obj 20 330 r whistle-spawn;
-#X obj 20 355 list trim;
-#X obj 20 380 s whistle-js-spawn;
-#X obj 220 330 r whistle-source;
-#X obj 220 355 list trim;
-#X obj 220 380 s whistle-js-source;
-#X text 20 410 Pd -> JS. whistle-spawn <name> <patch> x y z [range r] [width w] [curve lin|pow n|exp|log]: JS opens a slot for it like a region. whistle-source <name> alive 0 | pos x y z | range r | width w | curve ...: change a source's values (JS sends them back to <name>-whistle-source). x z = 0..1 like whistle-player position. [list trim] so lists and messages both arrive as "<name> ...".;
 #X connect 0 0 1 0;
 #X connect 1 0 2 0;
 #X connect 1 1 3 0;
-#X connect 19 0 20 0;
-#X connect 20 0 21 0;
-#X connect 22 0 23 0;
-#X connect 23 0 24 0;
 #X restore 12 134 pd spacialization;
 #N canvas 0 0 484 426 sound_bank 0;
 #X text 20 10 sound_bank: uploaded sounds as arrays \, read once and shared. Put one [sound_bank] in main.pd. JS writes each sound as a wav on the engine disk and sends "<name> <path>" to whistle-sound-bank. This makes [array define <name>-L] and [array define <name>-R] in [pd sounds] and reads the file into them (a mono file fills only -L). Patches read them by name (placed_sound.pd: set <name>-L <name>-R).;

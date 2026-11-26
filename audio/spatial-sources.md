@@ -35,7 +35,7 @@ width = width + (1 − width) · x   range에서 시작값, 닿으면 1(방향 �
 
 ## Pd가 규칙을 바꾸기
 
-패치가 자기 이름(`$1`)을 앞에 붙여 `[s whistle-source]`로 보낸다. 예: `environment_water.pd`
+패치가 자기 이름(`$1`)을 앞에 붙인 리스트로 `[s whistle-source]`에 보낸다. 예: `environment_water.pd`
 
 ```
 [loadbang]
@@ -57,7 +57,7 @@ width = width + (1 − width) · x   range에서 시작값, 닿으면 1(방향 �
 ### 만들기
 
 - 게임: `useGameAudio`의 `spawn(이름, 패치, pos, 규칙)`. 지금은 디버그 화면(백틱)의 1 키가 `fallingstar`를 플레이어 앞 4칸, 6 위에 띄운다.
-- Pd: `[s whistle-spawn]`에 `<이름> <패치> x y z [규칙…]`. 예: `star1 fallingstar_source 0.5 3 0.5 range 8 curve exp`.
+- Pd: `[s whistle-spawn]`에 리스트 `<이름> <패치> x y z [규칙…]`(아래 "보내는 모양"). 예: `star1 fallingstar_source 0.5 3 0.5 range 8 curve exp`.
   - 좌표는 `whistle-player position`과 같다: x, z = 0~1, y = 높이(발 높이와 같은 단위).
   - 이름은 만드는 쪽이 정한다. `v`+숫자 꼴(엔진이 쓰는 이름)과 지금 살아 있는 이름은 받지 않는다(콘솔에 경고).
     끝난 이름은 다시 쓸 수 있지만, 끝나자마자 같은 이름이면 페이드 아웃 중인 것과 겹칠 수 있어 `star1`, `star2`처럼 늘려 쓰는 게 안전하다.
@@ -77,10 +77,20 @@ width = width + (1 − width) · x   range에서 시작값, 닿으면 1(방향 �
 
 `fallingstar_source.pd`는 `alive`를 `[fallingstar]`의 입구로 넣는다(1 = 별이 떨어지기 시작).
 
-### 통로 (main.pd)
+### 보내는 모양: 이름을 앞에 붙인 리스트
 
-`[pd spacialization]` 안에서 `[r whistle-spawn] → [list trim] → [s whistle-js-spawn]`, `whistle-source`도 같다.
-리스트(`[list prepend $1]`)로 보내든 메시지 상자로 보내든 JS에는 `<이름> …`으로 온다.
+`whistle-spawn`과 `whistle-source`는 JS가 바로 받는다(main.pd를 거치지 않는다). 패치는 늘 **리스트**로 보낸다.
+
+```
+[curve exp(            [star1 fallingstar_source 0.5 3 0.5(
+|                      |
+[list prepend $1]      [list]
+|                      |
+[s whistle-source]     [s whistle-spawn]
+```
+
+메시지 상자에서 `[s]`로 바로 보내거나 `[; whistle-spawn star1 …(`로 보내면 리스트가 아니라 메시지라서 JS에 오지 않는다(아무 일도 없다).
+pd4web은 한 이름을 한 종류로만 받을 수 있어서(두 종류로 받으면 겹쳐 불린다, [`pd-to-js-fix.md`](pd-to-js-fix.md)) 리스트 하나로 정했다.
 
 ## 시험
 

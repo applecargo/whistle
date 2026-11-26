@@ -1,5 +1,5 @@
 // 이벤트 소리(공간화 슬롯)와 Pd ↔ JS 공유 값을 실제 엔진으로 확인한다(audio/spatial-sources.md).
-// - Pd가 whistle-spawn으로 만들고 whistle-source alive 0으로 끈다(main.pd의 [list trim] 통로 → JS)
+// - Pd가 whistle-spawn으로 만들고 whistle-source alive 0으로 끈다(이름을 앞에 붙인 리스트 → JS)
 // - 디버그 화면의 1 키: 게임이 fallingstar_source를 플레이어 앞 위쪽에 띄운다
 // - 영역 슬롯(vK)에 규칙을 보내면 그 패치 이름의 규칙이 된다
 import { test, expect, type Page } from "@playwright/test";
@@ -17,10 +17,10 @@ const slots = (page: Page) => page.evaluate(() => {
   }
   return [...live.values()];
 });
-/** Pd 안에서 [s bus]로 보낸 것과 같다: JS → Pd 버스 → main.pd 통로 → JS */
+/** Pd 안에서 [list prepend $1] → [s bus]로 보낸 것과 같다(이름을 앞에 붙인 리스트가 Pd 버스를 지나 JS로) */
 const fromPd = (page: Page, bus: string, name: string, words: (string | number)[]) =>
-  page.evaluate(([bus, name, words]) => (window as unknown as { Pd4Web: { sendMessage(t: string, s: string, l: unknown[]): boolean } })
-    .Pd4Web.sendMessage(bus as string, name as string, words as unknown[]), [bus, name, words] as const);
+  page.evaluate(([bus, list]) => (window as unknown as { Pd4Web: { sendList(t: string, l: unknown[]): boolean } })
+    .Pd4Web.sendList(bus, list), [bus, [name, ...words]] as [string, (string | number)[]]);
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(world => {
