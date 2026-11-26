@@ -1,4 +1,4 @@
-#N canvas 120 33 1316 606 12;
+#N canvas 0 33 1316 606 12;
 #X text 20 10 Whistle simulator: runs ../patches/main.pd in a [pd~] sub-process and plays it like the browser does (no server).;
 #X text 20 62 channels 1-2: as is. 3-32: 15 regions \, each panned (equal-power). all -> limiter -> dac~ 1 2;
 #X obj 20 100 loadbang;
@@ -162,7 +162,7 @@
 #X obj 59 441 throw~ outR;
 #X obj 627 50 catch~ outL;
 #X obj 787 50 catch~ outR;
-#N canvas 527 33 450 300 region(slot) 1;
+#N canvas 986 33 450 300 region(slot) 0;
 #X obj 21 260 s sim-sub;
 #X msg 31 55 whistle-slot off 0;
 #X msg 21 25 whistle-slot on 0 environment_grass v1 3 4;
