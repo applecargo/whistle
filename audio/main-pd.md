@@ -59,6 +59,7 @@ JS는 어느 영역이 켜지고 꺼지는지 메시지로 알리고, 나온 소
 | `whistle-slot` | `off 번호` | 예: `off 3` → `[pd slot3]`을 비운다 |
 | `<이름>-whistle-region` | `amount 0~1`, `distance 타일` | 영역 값(지금과 같음, [`pd-receive.md`](pd-receive.md)) |
 | `whistle-player`, `whistle-edit`, `whistle-event`, `whistle-board-height` | (지금과 같음) | 상호작용 값([`pd-receive.md`](pd-receive.md)) |
+| `whistle-js-spawn`, `whistle-js-source` (Pd → JS) | `<이름> …` | `[pd spacialization]`이 `whistle-spawn`·`whistle-source`를 `[list trim]`해서 JS로 넘긴다. 이벤트 소리와 공유 값([`spatial-sources.md`](spatial-sources.md)) |
 | `whistle-player-stop` | `bang` | 3D 이동음을 끈다. 다음 `whistle-player` 메시지부터 다시 소리를 내는 것은 패치가 한다 |
 
 - 배치한 소리(업로드): `main.pd` 안의 서브패치 `[pd sound_bank]`가 받는다. JS가 소리마다 한 번 `whistle-sound-bank <이름> <경로>`를 보내면

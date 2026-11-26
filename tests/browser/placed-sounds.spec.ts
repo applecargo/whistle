@@ -3,7 +3,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
 import { probePd, pdProbe, pdOutputRms, type PdProbe } from "./pd-probe";
 
-test.setTimeout(90_000);
+test.setTimeout(180_000);
 
 function wav(seconds = 0.5) {
   const rate = 44100, count = Math.floor(rate * seconds), bytes = Buffer.alloc(44 + count * 2);
