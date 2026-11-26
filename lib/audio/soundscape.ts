@@ -28,15 +28,17 @@ export type Vec3 = { x: number; y: number; z: number };
 export type PdMessage = (string | number)[];
 export type SoundscapeSource = {
   id: string; patch: string; position: Vec3; gain?: number; width?: number;
-  /** 패치로 보낼 메시지(수신 버스 이름 → 값). 값이 바뀔 때만 보낸다. 패치에 그 버스가 없으면 건너뛴다. */
-  messages?: Record<string, PdMessage>;
+  /** 패치를 띄우는 함수(없으면 옵션의 start(context, patch)). 배치한 소리처럼 띄운 뒤 할 일이 있는 소스가 쓴다 */
+  start?: () => Promise<PatchHandle>;
+  /** 패치로 보낼 메시지(수신 버스 이름 → 메시지들). 버스의 값이 하나라도 바뀌면 그 버스의 메시지를 다시 보낸다. */
+  messages?: Record<string, PdMessage[]>;
 };
 export type SoundscapeEvent =
   | { type: "loading" | "active" | "releasing" | "released"; id: string; patch: string }
   | { type: "error"; id: string; patch: string; error: unknown };
 
 /** 패치 하나를 시작해 연결되지 않은 노드를 돌려준다. 실제로는 pd-runtime 엔진의 start. */
-export type PatchHandle = { node: AudioNode; destroy(): void; send?(bus: string, message: PdMessage): void };
+export type PatchHandle = { node: AudioNode; destroy(): void; send?(bus: string, message: PdMessage): void; /** Pd 안의 이름($1, 디버그용) */ id?: string };
 type StartPatch = (context: BaseAudioContext, name: string) => Promise<PatchHandle>;
 
 export type SoundscapeOptions = {
@@ -207,12 +209,12 @@ export function createSoundscape(options: SoundscapeOptions) {
     const send = voice.patch?.send;
     if (!send || !voice.source.messages) return;
     voice.sent ??= new Map();
-    for (const [bus, message] of Object.entries(voice.source.messages)) {
+    for (const [bus, messages] of Object.entries(voice.source.messages)) {
       const last = voice.sent.get(bus);
-      const key = JSON.stringify(message);
+      const key = JSON.stringify(messages);
       if (last === null || last === key) continue;
       try {
-        send.call(voice.patch, bus, message);
+        for (const message of messages) send.call(voice.patch, bus, message);
         voice.sent.set(bus, key);
       } catch {
         voice.sent.set(bus, null);
@@ -257,7 +259,7 @@ export function createSoundscape(options: SoundscapeOptions) {
 
   const load = async (id: string, voice: Voice) => {
     try {
-      const patch = await start(context, voice.source.patch);
+      const patch = await (voice.source.start ? voice.source.start() : start(context, voice.source.patch));
       if (disposed || !voice.wanted || voices.get(id) !== voice) {
         voice.patch = patch;
         release(id, voice);
@@ -378,7 +380,7 @@ export function createSoundscape(options: SoundscapeOptions) {
     snapshot() {
       return {
         sources: sources.size,
-        voices: [...voices].map(([id, v]) => ({ id, patch: v.source.patch, state: v.state })),
+        voices: [...voices].map(([id, v]) => ({ id, patch: v.source.patch, state: v.state, ...(v.patch?.id ? { instance: v.patch.id } : {}) })),
       };
     },
     dispose() {

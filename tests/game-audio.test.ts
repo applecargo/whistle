@@ -5,7 +5,7 @@ import { editSound, playerSound } from "../lib/audio/game-parameters.ts";
 import { createWorldDeriver } from "../lib/world-derivation.ts";
 import { starterWorld } from "../lib/world.ts";
 import { flatTerrain } from "../lib/terrain.ts";
-import type { InteractionSession, PlayerSound } from "../lib/audio/pd-session.ts";
+import { interactionMessages, type InteractionSession, type PlayerSound } from "../lib/audio/pd-session.ts";
 import { validateBoardHeight } from "../lib/audio/pd-session.ts";
 
 test("board height accepts metres within the test range and rejects invalid measurements", () => {
@@ -27,14 +27,14 @@ function session() {
       edit: (value: unknown) => edits.push(value),
       player: (value: PlayerSound) => moves.push(value),
       stopPlayer: () => { stops++; },
-      event: (...values: number[]) => events.push(values),
+      event: (name: string, on: boolean) => events.push([name, on]),
       mute: (value: boolean) => gates.push(value),
       close: async () => { closed++; },
     } as Pick<InteractionSession, "context" | "edit" | "player" | "stopPlayer" | "event" | "mute" | "close">,
   };
 }
 const sound = { x: 0.5, z: 0.5, overlap: 0 };
-const moving: PlayerSound = { x: 0.5, y: 0, z: 0.5, grass: 1, rough: 0 };
+const moving: PlayerSound = { x: 0.5, y: 0, z: 0.5, grass: 1 };
 
 test("edit parameters identify terrain combinations and ignore regenerated IDs in cumulative strokes", () => {
   const before = starterWorld();
@@ -80,7 +80,7 @@ test("one session keeps only the latest edit during startup and cancels it on pl
   const moveCount = stub.moves.length;
   audio.pause();
   audio.movement(moving);
-  audio.event(440, 0.1, 0);
+  audio.event("fallingstar", true);
   assert.equal(stub.moves.length, moveCount);
   assert.equal(stub.stops, 2);
   assert.equal(stub.gates.at(-1), true);
@@ -145,4 +145,61 @@ test("pause: 잠시 뒤 AudioContext를 멈추고(패치 처리 중단), 그 전
   await new Promise((resolve) => setTimeout(resolve, 250));
   assert.equal(stub.suspends, 1, "곧바로 다시 켜면 suspend하지 않는다");
   audio.dispose();
+});
+
+test("player state goes to Pd as four route-able messages", () => {
+  const sent: string[] = [];
+  const to = { send: (bus: string, message: (string | number)[]) => { sent.push(`${bus} ${message.join(" ")}`); } };
+  interactionMessages({ edit: to, player: to, event: to }).player({
+    x: 0.25, y: 1.5, z: 0.75, yaw: 2, crouch: true, run: false, grounded: true, falling: false, grass: 0.4, water: 1,
+  });
+  assert.deepEqual(sent, [
+    "whistle-player position 0.25 1.5 0.75",
+    "whistle-player yaw 2",
+    "whistle-player stat 1 0 1 0",
+    "whistle-player footed 0.4 1",
+  ]);
+});
+
+test("events set while loading or paused reach Pd once the session runs; play/stop forget them", async () => {
+  const stub = session();
+  let finish!: (value: typeof stub.value) => void;
+  const audio = createGameAudio(() => new Promise((resolve) => { finish = resolve; }), (error) => assert.fail(String(error)));
+  audio.play();
+  audio.event("rain", true);
+  finish(stub.value);
+  await tick();
+  assert.deepEqual(stub.events, [["rain", true]], "엔진이 열리면 보낸다");
+  audio.pause();
+  audio.event("rain", false);
+  assert.equal(stub.events.length, 1, "멈춘 동안은 보내지 않는다");
+  audio.resume();
+  await tick();
+  assert.deepEqual(stub.events.at(-1), ["rain", false], "다시 켜면 마지막 값을 보낸다");
+  audio.stop();
+  audio.play();
+  await tick();
+  assert.equal(stub.events.length, 2, "새 플레이는 지난 값을 다시 보내지 않는다");
+  audio.dispose();
+});
+
+test("player speed goes to Pd as a fifth message only when measured", () => {
+  const sent: string[] = [];
+  const to = { send: (bus: string, message: (string | number)[]) => { sent.push(`${bus} ${message.join(" ")}`); } };
+  const messages = interactionMessages({ edit: to, player: to, event: to });
+  messages.player({ x: 0.5, y: 0, z: 0.5, grass: 0, speed: 1.5 });
+  assert.equal(sent.at(-1), "whistle-player speed 1.5");
+  sent.length = 0;
+  messages.player({ x: 0.5, y: 0, z: 0.5, grass: 0 });
+  assert.equal(sent.length, 4);
+});
+
+test("game events go to Pd as whistle-event <name> 1/0", () => {
+  const sent: string[] = [];
+  const to = { send: (bus: string, message: (string | number)[]) => { sent.push(`${bus} ${message.join(" ")}`); } };
+  const messages = interactionMessages({ edit: to, player: to, event: to });
+  messages.event("fallingstar", true);
+  messages.event("fallingstar", false);
+  messages.event("rain", true);
+  assert.deepEqual(sent, ["whistle-event fallingstar 1", "whistle-event fallingstar 0", "whistle-event rain 1"]);
 });

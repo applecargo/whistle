@@ -33,8 +33,9 @@ if (typeof window === "undefined") {
                       credentials: "omit",
                   })
                 : r;
-        event.respondWith(
-            fetch(request)
+        // [whistle 수정] 받기가 실패하면 원래 요청을 복사하지 않고 주소만으로 한 번 더 받는다.
+        // (폰 Firefox에서 pd4web 작업자 4개의 스크립트 요청이 여기서 실패해 엔진이 멈췄다. 주소로 다시 받으면 된다.)
+        const forward = (req) => fetch(req)
                 .then((response) => {
                     if (response.status === 0) {
                         return response;
@@ -55,7 +56,10 @@ if (typeof window === "undefined") {
                         statusText: response.statusText,
                         headers: newHeaders,
                     });
-                })
+                });
+        event.respondWith(
+            forward(request)
+                .catch(() => forward(new Request(r.url, { credentials: "same-origin" })))
                 .catch((e) => console.error(e)),
         );
     });

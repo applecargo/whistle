@@ -13,15 +13,14 @@
 import { mkdir, writeFile, copyFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const engineDir = join(root, "audio/engine");
 const pd4web = process.env.PD4WEB || "pd4web";
-/** wasm 메모리(MB). 메모리가 늘어나지 않는 빌드라 동시에 띄울 패치 수(슬롯)를 감당할 만큼 잡는다. */
-const MEMORY_MB = 64;
+/** wasm 메모리(MB). 메모리가 늘어나지 않는 빌드라 슬롯과 업로드한 소리(1분 스테레오 하나에 wav 사본 11.5MB + 배열 23MB)를 감당할 만큼 잡는다. */
+const MEMORY_MB = 256;
 /** 엔진 결과물 중 앱이 쓰는 파일 */
 const FILES = ["pd4web.js", "pd4web.wasm", "pd4web.data"];
 
@@ -86,11 +85,6 @@ const work = join(root, "output/pd4web-engine");
     if (bytes.includes("pdlua") || bytes.includes("pd.lua")) throw new Error(`pdlua 제거 실패: ${name}에 pdlua 흔적이 있습니다`);
   }
   await mkdir(engineDir, { recursive: true });
-  const files = {};
-  for (const name of FILES) {
-    await copyFile(join(out, "WebPatch", name), join(engineDir, name));
-    files[name] = createHash("sha256").update(await readFile(join(engineDir, name))).digest("hex").slice(0, 16);
-  }
-  await writeFile(join(engineDir, "engine.json"), JSON.stringify({ pd4web: version, memoryMB: MEMORY_MB, pdlua: false, files }, null, 2) + "\n");
-  console.log(`pd4web 엔진 빌드 완료 (${((Date.now() - started) / 1000).toFixed(0)}s) → audio/engine/`);
+  for (const name of FILES) await copyFile(join(out, "WebPatch", name), join(engineDir, name));
+  console.log(`pd4web ${version} 엔진 빌드 완료 (${((Date.now() - started) / 1000).toFixed(0)}s) → audio/engine/`);
 }

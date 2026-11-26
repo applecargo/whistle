@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Scene from "../components/whistle/Scene";
-import { createSimulation } from "../lib/world";
+import { createSimulation, stepSimulation, SIMULATION_INTERVAL_MS } from "../lib/world";
 import { createWorldDeriver } from "../lib/world-derivation";
-import { createInteractionSession, validateBoardHeight, type InteractionSession } from "../lib/audio/pd-session";
-import { openEngine } from "../lib/audio/pd-runtime";
+import { unlockAudio } from "../lib/audio/pd-runtime";
+import { validateBoardHeight } from "../lib/audio/pd-session";
+import { createGameMix } from "../lib/audio/game-mix";
+import type { PlayerAudioFrame } from "../lib/audio/game-parameters";
 import { roomPositionAt, sampleTrackedPosition, type RoomMapping } from "../lib/uwb-position";
-import { resonanceAt } from "../lib/audio/world-resonance";
 import { createLabWorld } from "./world";
 import { useLiveWorld } from "./useLiveWorld";
 import { useDevicePosition } from "./useDevicePosition";
@@ -19,12 +20,12 @@ const labels: Record<keyof RoomMapping, string> = {
 };
 const statusLabels = { tracking: "위치 연결됨", outside: "공간 범위를 벗어났습니다.", "no-ground": "바닥이 없습니다." };
 
-export default function Lab() {
+export default function Lab({ exhibitionTag }: { exhibitionTag?: string }) {
   const [world, setWorld] = useState(createLabWorld);
   const [mapping, setMapping] = useState(initialMapping);
   const [manualPosition, setPosition] = useState({ x: 1, z: 3 });
   const [manualHeight, setBoardHeight] = useState(0);
-  const [inputMode, setInputMode] = useState<"manual" | "device">("manual");
+  const [inputMode, setInputMode] = useState<"manual" | "device">(exhibitionTag ? "device" : "manual");
   const deviceMode = inputMode === "device";
   const [anchorSetup, setAnchorSetup] = useState<RectangleSetup | null>(null);
   const calibration = useMemo(() => anchorSetup ? rectangleConfig(anchorSetup) : null, [anchorSetup]);
@@ -36,14 +37,19 @@ export default function Lab() {
   const [audioState, setAudioState] = useState<"off" | "loading" | "on">("off");
   const [audioError, setAudioError] = useState("");
   const [received, setReceived] = useState<Record<string, (string | number)[]>>({});
-  const session = useRef<InteractionSession | null>(null);
+  const mix = useRef<Awaited<ReturnType<typeof createGameMix>> | null>(null);
+  const lifecycle = useRef(Promise.resolve());
+  const listener = useRef<PlayerAudioFrame | null>(null);
+  const rain = useRef<boolean | undefined>(undefined);
   const generation = useRef(0);
-  const live = useLiveWorld(setWorld);
+  const live = useLiveWorld(setWorld, !!exhibitionTag);
   const liveActive = useRef(live.active);
   liveActive.current = live.active;
   const derive = useMemo(createWorldDeriver, []);
-  const derivation = useMemo(() => derive(world), [derive, world]);
-  const simulation = useMemo(() => createSimulation(world), [world]);
+  const initialSimulation = useMemo(() => createSimulation(world), [world]);
+  const [step, setStep] = useState<{ initial: typeof initialSimulation; value: typeof initialSimulation } | null>(null);
+  const simulation = audioState === "on" && step?.initial === initialSimulation ? step.value : initialSimulation;
+  const derivation = useMemo(() => derive(world, simulation.actors), [derive, world, simulation.actors]);
   const sample = useMemo(() => {
     try {
       if (live.active && live.status !== "connected" && live.status !== "saved") throw new Error("편집기에 연결되지 않았습니다.");
@@ -60,62 +66,90 @@ export default function Lab() {
 
   const stopAudio = useCallback(() => {
     generation.current++;
-    const previous = session.current;
-    session.current = null;
+    rain.current = undefined;
+    const previous = mix.current;
+    mix.current = null;
+    listener.current = null;
     setAudioState("off");
     if (previous) {
-      previous.stopPlayer();
-      previous.mute(true);
-      void previous.close().catch(() => setAudioError("오디오를 종료할 수 없습니다."));
+      previous.session.mute(true);
+      lifecycle.current = previous.session.close().catch(() => setAudioError("오디오를 종료할 수 없습니다."));
     }
   }, []);
 
   useEffect(() => {
-    const current = session.current;
+    const current = mix.current;
     if (!current || audioState !== "on") return;
-    if (sample.value?.sound && !heightError) {
-      current.boardHeight(boardHeight);
-      current.player({ ...sample.value.sound, resonance: resonanceAt(derivation.environment, sample.value.frame) });
-      current.mute(false);
+    const frame = sample.value?.frame;
+    listener.current = frame && !heightError ? frame : null;
+    if (frame && sample.value?.sound && !heightError) {
+      current.session.boardHeight(boardHeight);
+      current.session.player(sample.value.sound);
+      const raining = world.weather === "rain";
+      if (rain.current !== raining) { current.session.event("rain", raining); rain.current = raining; }
+      current.worldFrame(frame, world, simulation.actors, derivation);
+      current.session.mute(false);
     } else {
-      current.stopPlayer();
-      current.mute(true);
+      current.session.stopPlayer();
+      current.session.mute(true);
+      current.stopWorld(false);
     }
-  }, [sample, audioState, boardHeight, heightError, derivation.environment]);
+  }, [sample, audioState, boardHeight, heightError, derivation, world, simulation.actors]);
 
   useEffect(() => {
-    const blur = () => { if (!liveActive.current) stopAudio(); };
+    if (audioState !== "on" || !world.rules.some(rule => rule.enabled)) return;
+    let state = initialSimulation;
+    const timer = window.setInterval(() => {
+      const player = listener.current;
+      if (!player || !mix.current) return;
+      state = stepSimulation(world, state, player);
+      setStep({ initial: initialSimulation, value: state });
+    }, SIMULATION_INTERVAL_MS);
+    return () => { clearInterval(timer); setStep(null); };
+  }, [world, initialSimulation, audioState]);
+
+  useEffect(() => {
+    const blur = () => { if (!liveActive.current && !exhibitionTag) stopAudio(); };
     const hidden = () => { if (document.hidden) blur(); };
     window.addEventListener("blur", blur);
     window.addEventListener("pagehide", stopAudio);
+    window.addEventListener("pointerup", unlockAudio);
+    window.addEventListener("keydown", unlockAudio);
     document.addEventListener("visibilitychange", hidden);
     return () => {
       window.removeEventListener("blur", blur);
       window.removeEventListener("pagehide", stopAudio);
+      window.removeEventListener("pointerup", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
       document.removeEventListener("visibilitychange", hidden);
       generation.current++;
-      void session.current?.close();
-      session.current = null;
+      if (mix.current) lifecycle.current = mix.current.session.close().catch(() => {});
+      mix.current = null;
     };
-  }, [stopAudio]);
+  }, [stopAudio, exhibitionTag]);
 
-  async function startAudio() {
+  function startAudio() {
     const request = ++generation.current;
     setAudioState("loading");
     setAudioError("");
     setReceived({});
-    try {
-      const created = await createInteractionSession(await openEngine(`${import.meta.env.BASE_URL}audio-test/`), (bus, message) => {
+    lifecycle.current = lifecycle.current.then(async () => {
+      if (request !== generation.current) return;
+      const created = await createGameMix(() => {
+        if (request === generation.current) setAudioError("페이지를 눌러 오디오를 시작하세요.");
+      }, (bus, message) => {
         if (request === generation.current) setReceived((previous) => ({ ...previous, [bus]: message }));
-      }, undefined, true);
-      if (request !== generation.current) { await created.close(); return; }
-      session.current = created;
+      }, exhibitionTag ? 0.25 : 1);
+      if (request !== generation.current) { await created.session.close(); return; }
+      setAudioError("");
+      mix.current = created;
       setAudioState("on");
-    } catch (error) {
+    }).catch(error => {
       if (request !== generation.current) return;
       setAudioState("off");
-      setAudioError(error instanceof Error ? error.message : "오디오를 시작할 수 없습니다.");
-    }
+      setAudioError("오디오를 시작할 수 없습니다.");
+      console.warn("[Whistle:Audio]", error);
+    });
   }
 
   function selectSample() {
@@ -142,7 +176,7 @@ export default function Lab() {
     grid: sample.value.grid, pd: sample.value.sound } : { error: sample.error };
 
   return <main>
-    <header><h1>UWB 위치 테스트</h1></header>
+    <header><h1>{exhibitionTag ? `T${exhibitionTag} · 전시장 출력` : "UWB 위치 테스트"}</h1></header>
     <section className="world-controls" aria-label="공간 선택">
       <nav className="world-menu" aria-label="테스트 공간">
         <button aria-pressed={!live.active} onClick={selectSample}>샘플</button>
@@ -196,13 +230,13 @@ export default function Lab() {
             <input type="number" step="any" value={Number.isFinite(mapping[key]) ? mapping[key] : ""}
               onChange={(event) => setMapping({ ...mapping, [key]: event.target.valueAsNumber })} /></label>)}
         </fieldset>
-        <fieldset><legend>위치 입력 방식</legend>
+        {!exhibitionTag && <fieldset><legend>위치 입력 방식</legend>
           <label><input type="radio" name="input-mode" checked={!deviceMode} onChange={() => {
             device.disconnect(); setInputMode("manual");
           }} />가상 좌표 직접 입력</label>
           <label><input type="radio" name="input-mode" checked={deviceMode} onChange={() => setInputMode("device")} />실제 데이터 · PC 수신기</label>
-        </fieldset>
-        {deviceMode ? <DeviceControls device={device} /> : null}
+        </fieldset>}
+        {deviceMode ? <DeviceControls device={device} exhibitionTag={exhibitionTag} /> : null}
         {deviceMode ? <AnchorControls applied={anchorSetup} onApply={(setup) => {
           setAnchorSetup(setup);
           setMapping({ originX: 0, originZ: 0, width: setup.width, depth: setup.depth, rotation: 0 });

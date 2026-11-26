@@ -1,21 +1,28 @@
 "use client";
 import { userErrorMessage } from "./Language";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { abstractWorld, validateWorld, type World } from "@/lib/world";
 import { upgradeTerrain } from "@/lib/terrain";
 import { createTerrainWorld } from "@/lib/create-world";
+import type { BrowserWorldStore } from "@/lib/browser-world";
 
 const STORAGE = "whistle.world.v2";
+const TAB_STORAGE = "whistle.world.tab.v1";
 
 type Options = {
   world: World;
   onLoad: (world: World, beforeUpgrade: World) => void;
   onImport: (world: World) => void;
   notify: (message: string) => void;
+  enabled?: boolean;
+  libraryLimit?: number;
+  storage?: BrowserWorldStore;
+  fallbackWorld?: World;
 };
 
-export function useWorldPersistence({ world, onLoad, onImport, notify }: Options) {
-  const [ready, setReady] = useState(false);
+export function useWorldPersistence({ world, onLoad, onImport, notify, enabled = true, libraryLimit, storage, fallbackWorld }: Options) {
+  const [ready, setReady] = useState(!enabled);
+  const [loading, setLoading] = useState(enabled);
   const [saveStatus, setSaveStatus] = useState("준비 중");
   const autosaveAllowed = useRef(false);
   const resumeAutosave = useCallback(() => {
@@ -27,19 +34,26 @@ export function useWorldPersistence({ world, onLoad, onImport, notify }: Options
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     let active = true;
-    const load = () => {
+    const load = async () => {
       autosaveAllowed.current = false;
       setReady(false);
+      setLoading(true);
       try {
         let incoming: World | undefined;
-        const stored = localStorage.getItem(STORAGE);
-        if (stored !== null) incoming = validateWorld(JSON.parse(stored));
-        else {
-          const previous = localStorage.getItem("whistle.world.v1");
-          if (previous !== null) incoming = abstractWorld(validateWorld(JSON.parse(previous)));
+        if (storage) {
+          const stored=await storage.read();
+          if(stored)incoming=validateWorld(stored,libraryLimit);
+        } else {
+          const stored = sessionStorage.getItem(TAB_STORAGE) ?? localStorage.getItem(STORAGE);
+          if (stored !== null) incoming = validateWorld(JSON.parse(stored),libraryLimit);
+          else {
+            const previous = localStorage.getItem("whistle.world.v1");
+            if (previous !== null) incoming = abstractWorld(validateWorld(JSON.parse(previous)));
+          }
         }
-        if (!incoming) incoming = createTerrainWorld();
+        if (!incoming) incoming = fallbackWorld ?? createTerrainWorld();
         const beforeUpgrade = incoming;
         incoming = upgradeTerrain(incoming);
         if (!active) return;
@@ -49,39 +63,52 @@ export function useWorldPersistence({ world, onLoad, onImport, notify }: Options
         if (active) {
           setSaveStatus("불러오기에 실패해 자동 저장이 중지되었습니다.");
         }
+      } finally {
+        if(active)setLoading(false);
       }
     };
     load();
     return () => {
       active = false;
     };
-  }, [onLoad, resumeAutosave]);
+  }, [onLoad, resumeAutosave, enabled, libraryLimit, storage, fallbackWorld]);
 
-  useEffect(() => {
-    if (!ready) return;
+  useLayoutEffect(() => {
+    if (!ready || !enabled) return;
     setSaveStatus("저장 중");
-    const timeout = setTimeout(() => {
-      if (!autosaveAllowed.current) return;
+    let pending = true, active = true;
+    const save = async () => {
+      if (!pending || !autosaveAllowed.current) return;
+      pending = false;
       try {
-        localStorage.setItem(STORAGE, JSON.stringify(world));
-        setSaveStatus("이 브라우저에 저장됨");
+        if(storage)await storage.write(world);
+        else {
+          const serialized = JSON.stringify(world);
+          sessionStorage.setItem(TAB_STORAGE, serialized);
+          localStorage.setItem(STORAGE, serialized);
+        }
+        if(active)setSaveStatus("이 브라우저에 저장됨");
       } catch {
-        setSaveStatus("저장 공간이 부족합니다.");
+        pending = true;
+        if(active)setSaveStatus("저장 공간이 부족합니다.");
       }
-    }, 350);
-    return () => clearTimeout(timeout);
-  }, [world, ready]);
+    };
+    const timeout = storage ? undefined : setTimeout(save, 350);
+    if(storage)void save();
+    window.addEventListener("pagehide", save);
+    return () => { active=false;clearTimeout(timeout); window.removeEventListener("pagehide", save); };
+  }, [world, ready, enabled, storage]);
 
   const importFile = useCallback(async (file?: File) => {
     if (!file) return;
     try {
-      const imported = upgradeTerrain(validateWorld(JSON.parse(await file.text())));
+      const imported = upgradeTerrain(validateWorld(JSON.parse(await file.text()),libraryLimit));
       onImport(imported);
       resumeAutosave();
     } catch (e) {
       notify(userErrorMessage(e, "파일을 읽을 수 없습니다."));
     }
-  }, [notify, onImport, resumeAutosave]);
+  }, [notify, onImport, resumeAutosave, libraryLimit]);
 
-  return { ready, saveStatus, resumeAutosave, importFile };
+  return { ready, loading, saveStatus, resumeAutosave, importFile };
 }

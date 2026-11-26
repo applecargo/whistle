@@ -28,6 +28,7 @@ export function makeWeather(size: number) {
   group.add(rain,snow);
   const wrap = (v:number, width:number) => ((v%width)+width)%width;
   return { group, update(time:number, weather:Weather, camera:THREE.Camera, daylight:number, overview:boolean) {
+    sky.visible = !overview;
     sky.position.copy(camera.position);
     sky.material.uniforms.daylight.value=daylight;
     sky.material.uniforms.cloudAmount.value=weather === "clear" ? .25 : weather === "rain" ? 1 : .75;

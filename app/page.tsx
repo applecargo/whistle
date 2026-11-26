@@ -4,34 +4,37 @@ import { lazy, Suspense, type ComponentProps } from "react";
 import { useLanguage, SceneLoading } from "@/components/whistle/Language";
 
 import {
-  starterWorld,
   createSimulation,
   stepSimulation,
-  uid,
+  SIMULATION_INTERVAL_MS,
   type World,
   type Asset,
   type Player,
   type Event,
   type Simulation,
 } from "@/lib/world";
-import { isHole, type TerrainTool } from "@/lib/tile";
+import type { TerrainTool } from "@/lib/tile";
 import { downloadWorld } from "@/lib/sharing";
-import { createTerrainWorld } from "@/lib/create-world";
 import { useWorldDocument } from "@/components/whistle/useWorldDocument";
 import { SoundMaker } from "@/components/whistle/SoundMaker";
-import { contentKind, contentLimitMessage, MAX_CONTENT_COUNT, validateContentCounts } from "@/lib/content-limits";
+import { contentKind, contentLimitMessage, MAX_CONTENT_COUNT, MAX_LIBRARY_SIZE, validateContentCounts } from "@/lib/content-limits";
 import { useGameAudio } from "@/components/whistle/useGameAudio";
-import { DebugOverlay } from "@/components/whistle/DebugOverlay";
-import { resonanceAt } from "@/lib/audio/world-resonance";
 import { editSound } from "@/lib/audio/game-parameters";
 import { useWorldPersistence } from "@/components/whistle/useWorldPersistence";
+import { browserWorldStore } from "@/lib/browser-world";
 import { useLiveWorldPublisher } from "@/components/whistle/useLiveWorldPublisher";
 import { EditorToolbar } from "@/components/whistle/EditorToolbar";
 import { EditorPalette } from "@/components/whistle/EditorPalette";
 import { EditorBoard } from "@/components/whistle/EditorBoard";
 import { PlayControls } from "@/components/whistle/PlayControls";
+import { DebugOverlay } from "@/components/whistle/DebugOverlay";
+import type { MeetingSession } from "@/components/whistle/ConnectedWorld";
+import { MeetingOverlay, meetingVisuals } from "@/components/whistle/MeetingTools";
+import { createMeetingWorld, fixMeetingStart, withLocalMeetingWorld, withLocalMeetingFootings, meetingGlobal, meetingLocal, meetingOwner, meetingReturnPosition, authoredMaterialCount, MEETING_MATERIAL_LIMIT, MEETING_MATERIAL_MESSAGE } from "@/lib/meeting";
+import { useMeetingWhistle } from "@/components/whistle/useMeetingWhistle";
+import { portalWorld } from "@/lib/portal-protocol";
 import {
-  tileAt,
+  floorHeight,
   type Surface,
 } from "@/lib/terrain";
 import {
@@ -42,9 +45,13 @@ const LazyScene = lazy(() => import("@/components/whistle/Scene"));
 function Scene(props: ComponentProps<typeof LazyScene>) {
   return <Suspense fallback={<SceneLoading />}><LazyScene {...props} /></Suspense>;
 }
-export default function Home() {
+export default function Home({meeting}:{meeting:MeetingSession}) {
   const { t } = useLanguage();
-  const initialWorld = useMemo(starterWorld, []);
+  const initialWorld = useMemo(() => meeting.view.ownWorld, []);
+  const initialPlayer = useMemo(() => ({...meetingGlobal(0,initialWorld.start),yaw:0}), []);
+  const receivedMaterials = useRef(new Set(meeting.view.received ?? []));
+  const sharedWorld = useRef<World | null>(null);
+  const browserStorage = useMemo(() => browserWorldStore(meeting.key,meeting.documentId),[meeting.key,meeting.documentId]);
   const [selected, setSelected] = useState<string | null>(null),
     [placingAsset, setPlacingAsset] = useState<string | null>(null),
     [contentType, setContentType] = useState<"image" | "text" | "sound">("image"),
@@ -75,12 +82,13 @@ export default function Home() {
     };
   }, [playing]);
   const [movementMode, setMovementMode] = useState<"walk" | "crouch">("walk");
+  const [spawn, setSpawn] = useState<Player>(initialPlayer);
   const [surface, setSurface] = useState<Surface>("soft"),
     [terrainTool, setTerrainTool] = useState<TerrainTool>("surface");
   const simulationRef = useRef(simulation),
-    player = useRef<Player>({ ...initialWorld.start, yaw: 0 }),
+    player = useRef<Player>(initialPlayer),
     controls = useRef(new Set<string>()),
-    padPressedAt = useRef(new Map<string, number>()),
+    stick = useRef({ x: 0, y: 0 }),
     file = useRef<HTMLInputElement>(null),
     toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   simulationRef.current = simulation;
@@ -89,38 +97,75 @@ export default function Home() {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(""), 4200);
   }, []);
-  const audio = useGameAudio();
+  const audio = useGameAudio(notify);
+  const whistle = useMeetingWhistle(meeting, playing, player);
+  const meetingReset = useRef(meeting.view.reset.id);
+  useLayoutEffect(() => {
+    const reset=meeting.view.reset;
+    if(reset.id!==meetingReset.current){
+      meetingReset.current=reset.id;player.current={...reset.player};setSpawn({...reset.player});
+      controls.current.clear();setMovementMode("walk");setPlayKey(k=>k+1);
+    }else if(meeting.status!=="online"){
+      const owner=meetingOwner(Math.round(player.current.x),Math.round(player.current.z));
+      const gate=meeting.view.connections.find(c=>!c.retired&&c.x===(owner===1?12:owner===2?25:-1));
+      if(gate){const next=meetingReturnPosition(gate,player.current.yaw,"disconnect");player.current=next;setSpawn(next);controls.current.clear();setPlayKey(k=>k+1);}
+    }
+  },[meeting.view.reset,meeting.status]);
   const resetSimulation = useCallback((w: World) => {
     audio.reset();
     const next = createSimulation(w);
     simulationRef.current = next;
     setSimulation(next);
     setLog([]);
-    player.current = { ...w.start, yaw: 0 };
+
   }, [audio]);
   const {
     world, getWorld, deriveWorld, feedback, canUndo, canRedo,
     commit: updateWorld, edit: change, load: loadDocument,
-    undo: undoDocument, redo: redoDocument, paint: paintDocument, endStroke,
+    undo: undoDocument, redo: redoDocument, paint: paintDocument, endStroke, receiveAssets, syncConnectionFootings,
   } = useWorldDocument(initialWorld, resetSimulation);
+  const sharedIds = useMemo(() => new Set([
+    ...(meeting.view.materials.map(a => a.id) ?? []),...world.assets.filter(a=>a.received).map(a=>a.id),
+  ]), [meeting.view.materials,world.assets]);
+  const ownActors = simulation.actors;
+  const visibleMeeting=useMemo(()=>({...meeting,view:withLocalMeetingFootings(meeting.view,world)}),[meeting,world]);
   const derivation = useMemo(
-    () => deriveWorld(world, simulation.actors),
-    [deriveWorld, world, simulation.actors],
+    () => deriveWorld(world, ownActors),
+    [deriveWorld, world, ownActors],
   );
+  const activeWorld = useMemo(()=>withLocalMeetingWorld(meeting.view,world,meeting.status==="online"),[meeting.view,world,meeting.status]);
+  const baseSimulation = useMemo(() => createSimulation(activeWorld), [activeWorld]);
+  const [playState,setPlayState]=useState<{world:World;simulation:Simulation}|null>(null);
+  const activeSimulation=playState?.world===activeWorld?playState.simulation:baseSimulation;
+  const playingState=useRef({world:activeWorld,simulation:activeSimulation});
+  playingState.current={world:activeWorld,simulation:activeSimulation};
+  const activeDerivation = useMemo(() => playing?deriveWorld(activeWorld, activeSimulation.actors):derivation,
+    [playing,deriveWorld, activeWorld, activeSimulation.actors,derivation]);
+  useEffect(()=>{
+    if(!playing)return;
+    const timer=setInterval(()=>{
+      const current=playingState.current;
+      if(player.current.falling||!current.world.rules.some(rule=>rule.enabled))return;
+      const next=stepSimulation(current.world,current.simulation,player.current);
+      playingState.current={world:current.world,simulation:next};setPlayState(playingState.current);
+      if(next.events.length)setLog(previous=>[...next.events,...previous].slice(0,12));
+    },SIMULATION_INTERVAL_MS);
+    return()=>clearInterval(timer);
+  },[playing]);
   const symbols = world.assets.filter(asset => asset.image || asset.text?.trim() || asset.sound);
   const nextSoundName = String(Math.max(0, ...world.assets.filter(a => a.sound && /^[1-9]\d{0,5}$/.test(a.name)).map(a => Number(a.name))) + 1);
   const activeAsset = symbols.find(asset => asset.id === placingAsset)?.id ?? null;
   const createSymbol = (type: "image" | "text" | "sound") => {
-    if (world.assets.filter(asset => contentKind(asset) === type).length >= MAX_CONTENT_COUNT) {
-      notify(contentLimitMessage[type]); return;
+    if (world.assets.length >= MAX_LIBRARY_SIZE) { notify("재료 목록이 가득 찼습니다. 사용하지 않는 재료를 삭제해 주세요."); return; }
+    if (authoredMaterialCount(world, sharedIds) >= MEETING_MATERIAL_LIMIT) {
+      notify(MEETING_MATERIAL_MESSAGE); return;
     }
     setPlacingStart(false); setSelected(null); setEditingAsset(undefined);
     setContentType(type); setShowMaker(true);
   };
   const editSymbol = (asset: Asset, objectId: string | null = null) => {
     setPlacingStart(false); setSelected(objectId);
-    const shared = objectId && world.objects.some(object => object.id !== objectId && object.asset === asset.id);
-    setEditingAsset({ ...asset, id: shared ? uid() : asset.id, ...(shared && asset.sound ? { name: "" } : {}) });
+    setEditingAsset({ ...asset });
     setContentType(asset.sound ? "sound" : asset.text !== undefined ? "text" : "image");
     setShowMaker(true);
   };
@@ -131,60 +176,64 @@ export default function Home() {
   };
   const handleLoad = useCallback((incoming: World, beforeUpgrade: World) => {
     audio.stop();
+    if(incoming.size===12){fixMeetingStart(incoming);fixMeetingStart(beforeUpgrade);}
+    receivedMaterials.current=new Set([...(incoming.receivedMaterialIds??[]),...incoming.assets.filter(a=>a.received).map(a=>a.id)]);
     loadDocument(incoming, beforeUpgrade);
     setSelected(null); setPlacingAsset(null); setShowMaker(false);
     setPlaying(false);
   }, [audio, loadDocument]);
   const handleImport = useCallback((imported: World) => {
-    updateWorld(imported);
+    if(imported.size!==12){notify("12×12 맵을 사용합니다.");return;}
+    if (authoredMaterialCount(imported, sharedIds) > MEETING_MATERIAL_LIMIT) { notify(MEETING_MATERIAL_MESSAGE); return; }
+    receivedMaterials.current=new Set([...(imported.receivedMaterialIds??[]),...imported.assets.filter(a=>a.received).map(a=>a.id)]);
+    updateWorld(fixMeetingStart(imported));
     setSelected(null); setPlacingAsset(null); setShowMaker(false);
-  }, [updateWorld]);
-  const { ready, saveStatus, resumeAutosave, importFile: loadFile } = useWorldPersistence({
-    world, onLoad: handleLoad, onImport: handleImport, notify,
+  }, [updateWorld, notify, sharedIds]);
+  const { ready, loading, saveStatus, resumeAutosave, importFile: loadFile } = useWorldPersistence({
+    world, onLoad: handleLoad, onImport: handleImport, notify, libraryLimit: MAX_LIBRARY_SIZE,
+    storage:browserStorage,fallbackWorld:initialWorld,
   });
-  useLiveWorldPublisher(world, ready);
-  const reset = useCallback((w: World = getWorld()) => {
-    resetSimulation(w);
-  }, [getWorld, resetSimulation]);
+  useLiveWorldPublisher(world,ready);
+  useEffect(()=>{
+    if(ready&&meeting.status==="online"&&meeting.view.documentReady)
+      syncConnectionFootings(meeting.view.ownWorld.connectionFootings);
+  },[ready,meeting.status,meeting.view.documentReady,meeting.view.ownWorld.connectionFootings,syncConnectionFootings]);
+  useEffect(() => {
+    if(!ready)return;
+    const incoming = meeting.view.materials.filter(a => !receivedMaterials.current.has(a.id)) ?? [];
+    if (!incoming.length) return;
+    for (const asset of receiveAssets(incoming)) receivedMaterials.current.add(asset.id);
+  }, [meeting.view.materials, receiveAssets, ready]);
+  useEffect(() => {
+    if(!ready || meeting.status!=="online" || !sharedWorld.current)return;
+    meeting.send({type:"publish",world:portalWorld({...sharedWorld.current,connectionFootings:getWorld().connectionFootings}),share:true,received:[...receivedMaterials.current]});
+  },[ready,meeting.status,meeting.send,getWorld]);
+  useEffect(() => {
+    if(!ready || meeting.status!=="online")return;
+    const send=()=>meeting.send({type:"publish",world:portalWorld(getWorld()),received:[...receivedMaterials.current]});
+    const timer=setTimeout(send,100);
+    window.addEventListener("pagehide",send);
+    return()=>{clearTimeout(timer);window.removeEventListener("pagehide",send);};
+  },[world,ready,meeting.send,meeting.status,getWorld]);
   const undo = () => {
     if (undoDocument()) setSelected(null);
   };
   const redo = () => {
     if (redoDocument()) setSelected(null);
   };
-  const step = useCallback(() => {
-    if (player.current.falling) return;
-    const next = stepSimulation(
-      getWorld(),
-      simulationRef.current,
-      player.current,
-    );
-    simulationRef.current = next;
-    setSimulation(next);
-    if (next.events.length) {
-      setLog((prev) => [...next.events, ...prev].slice(0, 12));
-      next.events.filter((e) => e.action === "sound").forEach((event) => audio.event(event, player.current));
-    }
-  }, [audio, getWorld]);
-  useEffect(() => {
-    if (!playing) return;
-    const interval = setInterval(step, 700);
-    return () => clearInterval(interval);
-  }, [playing, step]);
   const enter = () => {
-    reset();
-    audio.play();
-    setPlaying(true);
-    setPlayKey((k) => k + 1);
-    controls.current.clear();
-    setMovementMode("walk");
+    setPlayState(null);
+    sharedWorld.current=getWorld();
+    meeting.send({type:"publish",world:portalWorld(sharedWorld.current),share:true,received:[...receivedMaterials.current]});
+    const p=player.current;
+    const next=floorHeight(activeWorld,p.x,p.z,deriveWorld(activeWorld).structures)!==null?{...p,falling:false}:{...activeWorld.start,yaw:0};
+    setSpawn(next);player.current=next;audio.play();setPlaying(true);setPlayKey(k=>k+1);
+    controls.current.clear();setMovementMode("walk");
+    meeting.position({...next,grounded:true},true);
   };
   const exit = () => {
-    audio.stop();
-    setPlaying(false);
-    controls.current.clear();
-    setMovementMode("walk");
-    reset();
+    meeting.position({...player.current,grounded:!!player.current.grounded},false);
+    audio.stop();setPlaying(false);controls.current.clear();setMovementMode("walk");
   };
   useEffect(() => {
     if (!playing) return;
@@ -200,33 +249,7 @@ export default function Home() {
     },
     [],
   );
-  const clickedCell = (x: number, z: number) => {
-    const existing = world.objects.find((o) => o.x === x && o.z === z);
-    if (placingStart) {
-      if (!tileAt(world, x, z) || isHole(tileAt(world, x, z))) {
-        notify("시작점에는 바닥이 필요합니다.");
-        return;
-      }
-      if (
-        existing &&
-        world.assets.find((a) => a.id === existing.asset)?.solid
-      ) {
-        notify("시작점이 막혀 있습니다.");
-        return;
-      }
-      change((w) => {
-        w.start = { x, z };
-      });
-      setPlacingStart(false);
-      return;
-    }
-  };
   const paint = (cells: number[], erase: boolean) => {
-    if (placingStart) {
-      const i = cells[cells.length - 1];
-      clickedCell(i % world.size, Math.floor(i / world.size));
-      return;
-    }
     const before = getWorld();
     const kind = contentKind(before.assets.find(a => a.id === activeAsset));
     if (!erase && kind) {
@@ -237,26 +260,29 @@ export default function Home() {
     paintDocument(cells, erase, { layer: activeAsset ? "symbols" : "tiles", assetId: activeAsset ?? undefined, surface, terrainTool });
     const after = getWorld();
     if (before !== after) {
-      const derived = deriveWorld(after);
-      const sound = editSound(before, after, cells, derived);
-      if (sound) audio.edit({ ...sound, resonance: resonanceAt(derived.environment) });
+      const sound = editSound(before, after, cells, deriveWorld(after));
+      if (sound) audio.edit(sound);
     }
   };
   const saveAsset = (asset: Asset) => {
+    if (!world.assets.some(a=>a.id===asset.id) && world.assets.length >= MAX_LIBRARY_SIZE) { notify("재료 목록이 가득 찼습니다. 사용하지 않는 재료를 삭제해 주세요."); return; }
+    if (!world.assets.some(a => a.id === asset.id) && authoredMaterialCount(world, sharedIds) >= MEETING_MATERIAL_LIMIT) {
+      notify(MEETING_MATERIAL_MESSAGE); return;
+    }
     if ((!asset.image && !asset.sound) || (contentType === "text" && !asset.text?.trim())) return;
     if (asset.sound) {
       asset = { ...asset, name: asset.name.trim().slice(0, 12) || nextSoundName };
     }
     change(w => {
       const index = w.assets.findIndex(a => a.id === asset.id);
-      if (index >= 0) w.assets[index] = { ...asset, glyphColor: w.assets[index].glyphColor };
+      if (index >= 0) w.assets[index] = { ...asset, glyphColor: w.assets[index].glyphColor, ...(w.assets[index].received?{received:true}:{}) };
       else w.assets.push({ ...asset, glyphColor: undefined });
       const object = w.objects.find(o => o.id === selected);
       if (object) { object.asset = asset.id; object.scale = asset.defaultScale ?? 1; }
       else if (editingAsset) {
         for (const placed of w.objects) if (placed.asset === asset.id) placed.scale = asset.defaultScale ?? 1;
       }
-      validateContentCounts(w);
+      validateContentCounts(w, MAX_LIBRARY_SIZE);
     });
     setShowMaker(false); setEditingAsset(undefined); setSelected(null); setPlacingAsset(asset.id);
   };
@@ -285,17 +311,28 @@ export default function Home() {
     }
   };
   const newWorld = () => {
-    const next = createTerrainWorld();
-    updateWorld(next);
+    const next = createMeetingWorld();
+    sharedWorld.current=null;
+    receivedMaterials.current.clear();
+    loadDocument(next,next);
+    player.current={...meetingGlobal(0,next.start),yaw:0};setSpawn(player.current);
+    meetingReset.current=0;
+    meeting.restart(next);
     resumeAutosave();
     setSelected(null); setPlacingAsset(null); setPlacingStart(false);
     setNewDialog(false);
   };
+  if(loading)return <SceneLoading />;
   return (
-    <main className={`studio ${playing ? "playing" : ""}`}>
+    <main className={`studio ${playing ? "playing" : ""}`}
+      data-meeting-id={meeting.view.id} data-meeting-slot={meeting.view.slot} data-meeting-status={meeting.status} data-meeting-joined={meeting.view.joined.length}>
       <EditorToolbar
         playing={playing}
         saveStatus={saveStatus}
+        onlineCount={meeting.status==="online" ? meeting.presence.onlineCount ?? meeting.presence.peers.filter(p=>p.online).length : null}
+        multiplayerEnabled={meeting.enabled}
+        onToggleMultiplayer={() => meeting.setMultiplayer(!meeting.enabled,getWorld())}
+        connectionStatus={meeting.status}
         makeButton={makeButton}
         onEnter={enter}
         onExit={exit}
@@ -307,23 +344,31 @@ export default function Home() {
         <section className="play-shell">
           <Scene
             key={playKey}
-            world={world}
-            simulation={simulation}
-            derivation={derivation}
+            world={activeWorld}
+            simulation={activeSimulation}
+            derivation={activeDerivation}
             mode="play"
-            onPlayer={(p) => (player.current = p)}
-            onAudioFrame={frame => audio.movement(frame, getWorld(), simulationRef.current.actors, derivation)}
+            onPlayer={(p) => {player.current = p;meeting.position({...p,grounded:!!p.grounded},true);}}
+            onAudioFrame={frame => audio.movement(frame, activeWorld, activeSimulation.actors, activeDerivation)}
             controls={controls}
+            stick={stick}
             onControlsReset={() => setMovementMode("walk")}
+            initialPlayer={spawn}
+            meeting={meetingVisuals(visibleMeeting)}
           />
           <button className="play-return" aria-label={t("만들기로 돌아가기")} onClick={exit}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle className="return-outline" cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="8" /></svg>
           </button>
+          <button className="meeting-whistle" aria-label="휘슬" disabled={!whistle.enabled}
+            onKeyDown={event => { if (event.repeat) event.preventDefault(); }} onClick={whistle.blow}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /></svg>
+          </button>
           <div className="crosshair" />
-          <DebugOverlay audio={audio} getWorld={getWorld} derivation={derivation} />
+          <DebugOverlay audio={audio} getWorld={() => activeWorld} derivation={activeDerivation} />
           <PlayControls
+            key={`controls-${playKey}`}
             controls={controls}
-            padPressedAt={padPressedAt}
+            stick={stick}
             player={player}
             movementMode={movementMode}
             onMovementModeChange={setMovementMode}
@@ -337,6 +382,11 @@ export default function Home() {
           <EditorPalette
             weather={world.weather} timeOfDay={world.timeOfDay} surface={surface} terrainTool={terrainTool} placingStart={placingStart}
             symbols={symbols} selectedSymbol={activeAsset ?? undefined}
+            sharedSymbolIds={sharedIds}
+            materialCount={authoredMaterialCount(world, sharedIds)}
+            materialLimit={MEETING_MATERIAL_LIMIT}
+            startLocked
+            extraTools={meeting.view.pendingMaterials > 0 ? <small role="status">보관 공간이 부족해 재료 {meeting.view.pendingMaterials}개가 대기 중입니다.</small> : undefined}
             onSelectSurface={next => { setPlacingStart(false); setPlacingAsset(null); setSurface(next); setTerrainTool("surface"); }}
             onSelectTerrainTool={next => { setPlacingStart(false); setPlacingAsset(null); setTerrainTool(next); }}
             onTimeOfDayChange={timeOfDay => change(w => { w.timeOfDay = timeOfDay; })}
@@ -348,7 +398,7 @@ export default function Home() {
           />
           <EditorBoard
             world={world}
-            actors={simulation.actors}
+            actors={ownActors}
             derivation={derivation}
             feedback={feedback}
             placingAsset={activeAsset}
@@ -361,6 +411,7 @@ export default function Home() {
             onEnd={endStroke}
             onUndo={undo}
             onRedo={redo}
+            overlay={<MeetingOverlay meeting={visibleMeeting} />}
           />
           <aside className="preview-panel" aria-label={t("배치 결과")}>
             <div className="live-preview">
@@ -370,6 +421,7 @@ export default function Home() {
                 derivation={derivation}
                 mode="overview"
                 feedback={feedback}
+                    meeting={meetingVisuals(visibleMeeting,true)}
               />}
               <button onClick={enter} aria-label={t("들어가기")}>
                 <span aria-hidden="true">↗</span>
@@ -427,6 +479,7 @@ export default function Home() {
           {t(toast)}
         </div>
       )}
+      {meeting?.error && <div className="toast" role="status">{meeting.error}</div>}
     </main>
   );
 }

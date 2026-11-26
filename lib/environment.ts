@@ -1,6 +1,6 @@
 import { limitEffectAreas } from "./effect-limits.ts";
 import { applyTileEffects, tileEffectDefaults } from "./tile-effects.ts";
-import { groundTileHeight, isHole } from "./tile.ts";
+import { groundTileHeight, isGap } from "./tile.ts";
 import type { World } from "./world.ts";
 import { isWaterTile, WATER_INSET, waterLevelAt } from "./water.ts";
 import {
@@ -54,11 +54,11 @@ export function deriveEnvironment(
       .filter((n) => n >= 0);
   const height = (x: number, z: number) => {
     const tile = tiles[index(x, z)];
-    return !tile || isHole(tile) ? -Infinity : groundTileHeight(tile);
+    return !tile || isGap(tile) ? -Infinity : groundTileHeight(tile);
   };
   const cells: EnvironmentCell[] = tiles.map((tile) => ({
     ...tileEffectDefaults,
-    hole: isHole(tile),
+    hole: isGap(tile),
     growth: 0,
     grass: 0,
     water: null,
@@ -92,8 +92,8 @@ export function deriveEnvironment(
   const outlets: { index: number; height: number }[] = [];
   for (let i = 0; i < count; i++) {
     const x = i % size, z = Math.floor(i / size);
-    if (x !== 0 && z !== 0 && x !== size-1 && z !== size-1 && !isHole(tiles[i])) continue;
-    spill[i] = isHole(tiles[i]) ? -Infinity : groundTileHeight(tiles[i]);
+    if (x !== 0 && z !== 0 && x !== size-1 && z !== size-1 && !isGap(tiles[i])) continue;
+    spill[i] = isGap(tiles[i]) ? -Infinity : groundTileHeight(tiles[i]);
     outlets.push({ index: i, height: spill[i] });
   }
   while (outlets.length) {
@@ -120,7 +120,7 @@ export function deriveEnvironment(
       const i = group[cursor];
       cells[i].moisture = 1;
       for (const n of adjacent(i)) {
-        if (isHole(tiles[n]) || cells[n].water !== null) continue;
+        if (isGap(tiles[n]) || cells[n].water !== null) continue;
         if (!isWaterTile(world, n % size, Math.floor(n / size)) && groundTileHeight(tiles[n]) * LEVEL >= level) continue;
         cells[n].water = level;
         group.push(n);
@@ -130,7 +130,7 @@ export function deriveEnvironment(
   }
 
   for (let i = 0; i < count; i++) {
-    if (isHole(tiles[i])) continue;
+    if (isGap(tiles[i])) continue;
     const x = i % size,
       z = Math.floor(i / size),
       h = tiles[i].height;
@@ -165,7 +165,7 @@ export function deriveEnvironment(
   for (const axis of [0, 1]) {
     const candidate = (x: number, z: number) => {
       const i = index(x, z);
-      if (i < 0 || isHole(tiles[i])) return false;
+      if (i < 0 || isGap(tiles[i])) return false;
       const h = tiles[i].height;
       return axis === 0
         ? height(x, z - 1) > h && height(x, z + 1) > h
@@ -200,7 +200,7 @@ export function deriveEnvironment(
         if (before > tiles[start].height || after > tiles[end].height) continue;
         for (let d = -2; d < run.length + 2; d++) {
           const i = index(x + (axis === 0 ? d : 0), z + (axis === 1 ? d : 0));
-          if (i < 0 || isHole(tiles[i])) continue;
+          if (i < 0 || isGap(tiles[i])) continue;
           const strength = d < 0 || d >= run.length ? 0.4 : 0.9;
           if (axis === 0) cells[i].windX = strength;
           else cells[i].windZ = -strength;
@@ -212,7 +212,7 @@ export function deriveEnvironment(
   for (const group of components(
     (i) =>
       tiles[i].surface === "soft" &&
-      !isHole(tiles[i]) &&
+      !isGap(tiles[i]) &&
       cells[i].water === null,
   )) {
     for (const i of group) if (cells[i].light > 0.2) {
@@ -242,7 +242,7 @@ export function deriveEnvironment(
   }
 
   for (let i = 0; i < count; i++) {
-    if (isHole(tiles[i])) continue;
+    if (isGap(tiles[i])) continue;
     const x = i % size,
       z = Math.floor(i / size);
     for (const tree of trees) {
@@ -302,7 +302,7 @@ export function environmentAt(
       "windX",
       "windZ",
       "fog",
-      "dust", "bounce", "flowX", "flowZ", "lift", "liftCeiling", "glide", "flicker",
+      "dust", "flowX", "flowZ", "lift", "liftCeiling", "flicker",
     ] as const)
       out[key] += c[key] * w;
   }

@@ -3,10 +3,13 @@ import { validateWorld, type World } from "../lib/world";
 import { upgradeTerrain } from "../lib/terrain";
 import { LIVE_WORLD_CHANNEL } from "../lib/live-world";
 
+import { browserWorldStore } from "../lib/browser-world";
+import { MAX_LIBRARY_SIZE } from "../lib/content-limits";
+
 type Status = "off" | "saved" | "waiting" | "connected" | "disconnected" | "unavailable";
 
-export function useLiveWorld(receive: (world: World) => void) {
-  const [active, setActive] = useState(false);
+export function useLiveWorld(receive: (world: World) => void, initiallyActive = false) {
+  const [active, setActive] = useState(initiallyActive);
   const [status, setStatus] = useState<Status>("off");
   const [error, setError] = useState("");
   const receiveRef = useRef(receive);
@@ -23,17 +26,21 @@ export function useLiveWorld(receive: (world: World) => void) {
     if (!active) return;
     let source: string | null = null;
     let lastSeen = performance.now();
-    const loadSaved = () => {
+    let readVersion = 0;
+    const loadSaved = async () => {
+      const version = ++readVersion;
       try {
-        const stored = localStorage.getItem("whistle.world.v2");
-        if (stored === null) {
+        const stored = await browserWorldStore("uwb", "uwb-listener").read();
+        if (version !== readVersion) return;
+        if (!stored) {
           setStatus("waiting");
         } else {
-          receiveRef.current(upgradeTerrain(validateWorld(JSON.parse(stored))));
+          receiveRef.current(upgradeTerrain(validateWorld(stored, MAX_LIBRARY_SIZE)));
           setStatus("saved");
         }
         setError("");
       } catch {
+        if (version !== readVersion) return;
         setStatus("unavailable");
         setError("작업을 불러올 수 없습니다.");
       }
@@ -42,9 +49,10 @@ export function useLiveWorld(receive: (world: World) => void) {
     const channel = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(LIVE_WORLD_CHANNEL);
     if (channel) channel.onmessage = ({ data }) => {
       if (typeof data?.source !== "string") return;
+      if (data.type === "world" || data.type === "unavailable" || data.type === "closed") readVersion++;
       if (data.type === "world") {
         try {
-          const world = validateWorld(data.world);
+          const world = validateWorld(data.world, MAX_LIBRARY_SIZE);
           receiveRef.current(world);
           source = data.source;
           lastSeen = performance.now();
@@ -85,6 +93,7 @@ export function useLiveWorld(receive: (world: World) => void) {
     window.addEventListener("storage", saved);
     document.addEventListener("visibilitychange", visible);
     return () => {
+      readVersion++;
       clearInterval(timer);
       window.removeEventListener("storage", saved);
       document.removeEventListener("visibilitychange", visible);

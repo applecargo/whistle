@@ -455,10 +455,10 @@ test("setDiffuse: 실행 중에 켜고 끄면 경로 비율만 옮기고, 확산
   assert.equal(paths(started[1].node).wetDiffuse.gain.value, 0);
 });
 
-test("messages: 연결 직후와 값이 바뀔 때만 패치로 보내고, 패치에 없는 버스는 건너뛴다", async () => {
+test("messages: 연결 직후와 값이 바뀔 때만 패치로 보내고, 보내기에 실패한 버스는 건너뛴다", async () => {
   const { scape, started } = setup(0.5);
   const set = (amount: number) => scape.set({
-    id: "a", patch: "p", position: origin, messages: { "whistle-region": [amount], "whistle-missing": [1] },
+    id: "a", patch: "p", position: origin, messages: { "whistle-region": [["amount", amount], ["distance", 0]], "whistle-missing": [[1]] },
   });
   set(0.5);
   scape.activate("a");
@@ -467,6 +467,8 @@ test("messages: 연결 직후와 값이 바뀔 때만 패치로 보내고, 패�
   set(0.5);
   set(0.2);
   set(0.2);
-  assert.deepEqual(started[0].sent, ["whistle-region 0.5", "whistle-region 0.2"]);
+  assert.deepEqual(started[0].sent, [
+    "whistle-region amount 0.5", "whistle-region distance 0", "whistle-region amount 0.2", "whistle-region distance 0",
+  ]);
   assert.equal(scape.snapshot().voices[0].state, "active", "없는 버스 때문에 멈추지 않음");
 });

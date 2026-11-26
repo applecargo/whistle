@@ -1,3 +1,4 @@
+import { savedWorld } from "./world-storage";
 import { test, expect, type Page } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
 
@@ -19,10 +20,7 @@ async function openMedia(page: Page, kind: "image" | "text" = "image") {
   await page.getByRole("button", { name: kind === "image" ? "이미지 만들기" : "텍스트 만들기", exact: true }).click();
 }
 
-const savedAssets = (page: Page) => page.evaluate(() =>
-  JSON.parse(localStorage.getItem("whistle.world.v2")!).assets as {
-    image?: string; originalImage?: string; text?: string;
-  }[]);
+const savedAssets = async(page:Page) => (await savedWorld(page)).assets;
 
 test("large photos are compressed with transparency and without a duplicate original", async ({ page }) => {
   await openMedia(page);

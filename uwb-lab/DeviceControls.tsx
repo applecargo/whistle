@@ -1,15 +1,22 @@
 import { useState } from "react";
 import type { useDevicePosition } from "./useDevicePosition";
 
-export default function DeviceControls({ device }: { device: ReturnType<typeof useDevicePosition> }) {
+export default function DeviceControls({ device, exhibitionTag }: { device: ReturnType<typeof useDevicePosition>; exhibitionTag?: string }) {
   const [url, setUrl] = useState("ws://127.0.0.1:5194");
-  const [tagId, setTagId] = useState("0");
+  const [tagId, setTagId] = useState(exhibitionTag ?? "0");
   return <fieldset><legend>PC 수신기 연결</legend>
     <label>수신기 주소<input type="url" value={url} onChange={(event) => setUrl(event.target.value)} /></label>
-    <label>관객 태그 ID<input value={tagId} maxLength={32} onChange={(event) => setTagId(event.target.value)} /></label>
+    <label>관객 태그 ID<input value={tagId} readOnly={!!exhibitionTag} maxLength={32} onChange={(event) => setTagId(event.target.value)} /></label>
     <button onClick={() => device.connect(url, tagId)} disabled={!url || !/^[a-zA-Z0-9_-]{1,32}$/.test(tagId)}>연결 / 다시 연결</button>
     <button onClick={device.disconnect} disabled={!device.connected}>연결 종료</button>
     <p id="device-status" role="status">{device.status}</p>
+    {!exhibitionTag && <nav aria-label="전시장 재생 탭">
+      전시장 재생 탭 {["0", "1", "2", "3"].map((id) => {
+        const query = new URLSearchParams(location.search);
+        query.set("tag", id);
+        return <span key={id}> <a href={`?${query}`} target={`whistle-uwb-tag-${id}`}>T{id}</a> </span>;
+      })}
+    </nav>}
     {device.ranges ? <div id="range-data">
       <table>
         <caption>태그 → 앵커 실측 거리</caption>

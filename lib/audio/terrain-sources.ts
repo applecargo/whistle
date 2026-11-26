@@ -18,9 +18,10 @@
 // - 격자 좌표: 타일 (x, z)의 중심은 정수 좌표. 플레이어 위치도 격자 단위(실수).
 // - 장면 좌표: toScene(n) = n × 2 − size + 1  (타일 한 칸 = 2m). 높이 = tile.height × LEVEL.
 // - 바라보는 방향: yaw 0 = −Z, 이동 방향 (sin yaw, 0, −cos yaw).
+import { LINEAR, ruleGain, ruleWidth, type SpatialRule } from "./spatial-rule.ts";
 import { LEVEL, type Structure, type Tile } from "../terrain.ts";
 import type { Environment } from "../environment.ts";
-import { isHole } from "../tile.ts";
+import { isGap } from "../tile.ts";
 import type { Vec3 } from "./soundscape.ts";
 
 export const toScene = (n: number, size: number) => n * 2 - size + 1;
@@ -29,7 +30,7 @@ export const forwardOf = (yaw: number): Vec3 => ({ x: Math.sin(yaw), y: 0, z: -M
 export const LAYERS = ["surface", "water", "grass", "tree", "fog", "wind", "structure"] as const;
 export type Layer = (typeof LAYERS)[number];
 
-/** 종류별 패치. 지금은 빌드된 지형 패치가 terrain_clock 하나뿐이라 모두 같은 패치. */
+/** 종류별 패치(audio/patches/<이름>.pd) */
 export const KIND_PATCHES: Record<string, string> = {
   plain: "terrain_plain",
   rough: "terrain_rough",
@@ -40,7 +41,7 @@ export const KIND_PATCHES: Record<string, string> = {
   tree: "environment_tree",
   fog: "environment_fog",
   wind: "environment_wind",
-  stairs: "structure_stairs",
+  stairs: "structure_ladder", // 게임 코드의 이름은 stairs, 화면에서는 사다리
   bridge: "structure_bridge",
   canopy: "structure_canopy",
 };
@@ -88,7 +89,7 @@ function classify(layer: Layer, field: SoundField): Classified | null {
     amount[i] = clamp01(value);
   };
   if (layer === "surface") {
-    for (let i = 0; i < count; i++) if (!isHole(tiles[i])) mark(i, tiles[i].surface, 1);
+    for (let i = 0; i < count; i++) if (!isGap(tiles[i])) mark(i, tiles[i].surface, 1);
     return { kinds, amount };
   }
   if (layer === "structure") {
@@ -123,7 +124,7 @@ export function terrainRegions(field: SoundField): Regions {
   const list: Region[] = [];
   const layers: LayerMap[] = [];
   const groundHeight = new Float64Array(size * size);
-  for (let i = 0; i < groundHeight.length; i++) groundHeight[i] = isHole(tiles[i]) ? 0 : tiles[i].height * LEVEL;
+  for (let i = 0; i < groundHeight.length; i++) groundHeight[i] = isGap(tiles[i]) ? 0 : tiles[i].height * LEVEL;
   for (const layer of LAYERS) {
     const classified = classify(layer, field);
     if (!classified) continue;
@@ -198,9 +199,15 @@ export function nearbyRegions(
   regions: Regions,
   active: ReadonlySet<string>,
   options: NearbyOptions = DEFAULT_NEARBY,
+  rules?: ReadonlyMap<string, Partial<SpatialRule>>,
 ): NearbyRegion[] {
   const { field: { size }, list, layers } = regions;
-  const keep = options.radius + options.hysteresis;
+  // 공간화 규칙(spatial-rule.ts): 기본은 radius에서 0 → 외곽 1(선형), width는 blend부터. 패치가 바꾼 값(rules, 패치 이름별)이 있으면 그것.
+  const ruleOf = (patch: string): SpatialRule => ({ range: options.radius, width: 0, curve: LINEAR, ...rules?.get(patch) });
+  const blendOf = (patch: string) => rules?.get(patch)?.range === undefined ? options.blend : undefined;
+  let reachRange = options.radius;
+  for (const rule of rules?.values() ?? []) if (rule.range !== undefined) reachRange = Math.max(reachRange, rule.range);
+  const keep = reachRange + options.hysteresis;
   const reach = Math.ceil(keep + 1);
   const cx = Math.round(player.x), cz = Math.round(player.z);
   type Nearest = { distance: number; x: number; z: number; index: number; map: LayerMap };
@@ -221,16 +228,19 @@ export function nearbyRegions(
     }
   }
   const found = [...nearest]
-    .filter(([r, n]) => n.distance <= options.radius || active.has(list[r].id))
+    .filter(([r, n]) => {
+      const range = ruleOf(list[r].patch).range;
+      return n.distance <= range || (active.has(list[r].id) && n.distance <= range + options.hysteresis);
+    })
     .map(([r, n]) => {
-      const region = list[r];
+      const region = list[r], rule = ruleOf(region.patch);
       return {
         rank: active.has(region.id) ? n.distance - options.hysteresis : n.distance,
         region: {
           id: region.id, patch: region.patch,
           position: { x: toScene(n.x, size), y: n.map.height[n.index], z: toScene(n.z, size) },
-          gain: clamp(1 - n.distance / options.radius, 0, 1),
-          width: options.blend > 0 ? clamp(1 - n.distance / options.blend, 0, 1) : n.distance > 0 ? 0 : 1,
+          gain: ruleGain(rule, n.distance),
+          width: ruleWidth(rule, n.distance, blendOf(region.patch)),
           distance: n.distance,
           amount: n.map.amount[n.index],
         },

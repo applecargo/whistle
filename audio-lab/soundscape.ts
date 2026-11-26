@@ -1,7 +1,7 @@
 import { openEngine } from "../lib/audio/pd-runtime";
 import { createSoundscape, type Soundscape } from "../lib/audio/soundscape";
 
-const base = `${import.meta.env.BASE_URL}audio-test/`;
+const base = `${import.meta.env.BASE_URL}audio/`;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const start = $<HTMLButtonElement>("start");
 const stop = $<HTMLButtonElement>("stop");
@@ -154,7 +154,7 @@ start.onclick = async () => {
       context: ctx,
       destination: output,
       panning,
-      start: (_c, name) => engine.start(name, { scoped: true }),
+      start: (_c, name) => engine.start(name),
       onEvent: (event) => {
         log(event.type === "error"
           ? `${event.id} ${event.patch} 오류: ${event.error instanceof Error ? event.error.message : String(event.error)}`
@@ -163,11 +163,11 @@ start.onclick = async () => {
       },
     });
     scape.setListener({ x: 0, y: 0, z: 0 }, forward());
-    const manifest = engine.manifest;
-    select.replaceChildren(...Object.keys(manifest.patches).map((name) => new Option(name, name)));
+    const patches = engine.files.filter((f) => f.endsWith(".pd") && !f.endsWith("-help.pd")).map((f) => f.slice(0, -3));
+    select.replaceChildren(...patches.map((name) => new Option(name, name)));
     controls.disabled = false;
     stop.disabled = false;
-    log(`시작: 패닝 ${panning}, 패치 ${Object.keys(manifest.patches).join(", ")}`);
+    log(`시작: 패닝 ${panning}, 패치 ${patches.join(", ")}`);
     tick();
   } catch (error) {
     log(`시작 실패: ${error instanceof Error ? error.message : String(error)}`);

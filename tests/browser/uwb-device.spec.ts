@@ -1,4 +1,4 @@
-import { outputGain, probeUwbOutput } from "./pd-probe";
+import { probePd, pdProbe, probeOutputGain, outputGain } from "./pd-probe";
 import { test, expect, type Page } from "@playwright/test";
 import { createSocket } from "node:dgram";
 import { readFileSync } from "node:fs";
@@ -7,7 +7,7 @@ import { parseConfig, distanceTo } from "../../lib/uwb/solver";
 import { createLabWorld } from "../../uwb-lab/world";
 import { rectangleConfig } from "../../lib/uwb/rectangle";
 
-test.beforeEach(async ({ page }) => { await probeUwbOutput(page); });
+test.beforeEach(async ({ page }) => { await probeOutputGain(page); });
 test.setTimeout(60_000);
 const config = parseConfig({ ...JSON.parse(readFileSync("config/uwb.example.json", "utf8")), mode: "3d", smoothingMs: 0 });
 const data = async (page: Page) => JSON.parse((await page.locator("#position-data").textContent())!);
@@ -40,6 +40,7 @@ async function setup(page: Page, sourceConfig = config, rangesOnly = false, bias
 }
 
 test("UDP ranges reach the existing scene and Pd; height, invalid frames and timeouts stay separate", async ({ page }) => {
+  await probePd(page);
   const device = await setup(page);
   try {
     await expect(page.getByRole("button", { name: "오디오 시작", exact: true })).toBeDisabled();
@@ -53,13 +54,15 @@ test("UDP ranges reach the existing scene and Pd; height, invalid frames and tim
     await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
     await expect(page.locator("#audio-status")).toHaveText("오디오 실행 중");
     await expect.poll(async () => (await messages(page))["whistle-board-height"]?.[0]).toBeCloseTo(1.2, 4);
+    await expect.poll(async () => (await pdProbe(page)).starts).toContain("terrain_soft");
     const ground = (await data(page)).pd.y;
     device.move({ x: 1, z: 3, boardHeight: 2.1 });
     await expect.poll(async () => (await messages(page))["whistle-board-height"]?.[0]).toBeCloseTo(2.1, 4);
     expect((await data(page)).pd.y).toBeCloseTo(ground, 8);
     device.move({ x: 3, z: 3, boardHeight: 2.1 });
     await expect(page.locator("#rough")).toHaveText("1.000");
-    expect((await messages(page))["whistle-player"]).toHaveLength(9);
+    await expect.poll(async () => (await pdProbe(page)).starts).toContain("terrain_rough");
+    expect((await messages(page))["whistle-player position"]).toHaveLength(3);
     device.invalid();
     await expect(page.locator("#device-status")).toContainText("앵커가 4개 이상");
     await expect.poll(() => outputGain(page)).toBe(0);
@@ -112,10 +115,10 @@ test("page rectangle settings turn raw ranges into terrain audio and clear stale
     await page.getByRole("button", { name: "오디오 시작", exact: true }).click();
     await expect.poll(() => outputGain(page)).toBe(1);
     await expect.poll(async () => (await messages(page))["whistle-board-height"]).toEqual([1.2]);
-    await expect.poll(async () => (await messages(page))["whistle-player"]?.[4]).toBeCloseTo(0);
+    await expect.poll(async () => (await data(page)).pd?.rough).toBeCloseTo(0);
     device.move({ x: 3, z: 2, boardHeight: 1.2 });
     await expect(page.locator("#rough")).toHaveText("1.000");
-    await expect.poll(async () => (await messages(page))["whistle-player"]?.[4]).toBeCloseTo(1);
+    await expect.poll(async () => (await data(page)).pd?.rough).toBeCloseTo(1);
     device.invalid();
     await expect(page.locator("#device-status")).toContainText("앵커가 3개 이상");
     await expect(page.locator("#range-data")).toContainText("미수신");
@@ -201,4 +204,49 @@ test("centre calibration corrects biased distances, follows movement and resets 
     await expect(page.locator("#correction-status")).toHaveText("거리 보정 없음");
     await expect(page.locator("#range-data")).not.toContainText("보정 거리");
   } finally { await device.close(); }
+});
+
+test("four exhibition tabs follow their own tag and mute independently", async ({ context }) => {
+  test.setTimeout(120_000);
+  const bridge = await startBridge(config, { wsPort: 0, udpPort: 0, log: () => {} });
+  const udp = createSocket("udp4");
+  const xs = [1, 3, 5, 2];
+  let seq = 0;
+  let paused = -1;
+  const timer = setInterval(() => {
+    seq++;
+    xs.forEach((x, id) => {
+      if (id === paused) return;
+      const point = { x, z: 3, boardHeight: 1.2 };
+      udp.send(JSON.stringify({ type: "ranges", tagId: String(id), seq,
+        ranges: config.anchors.map(a => ({ anchorId: a.id, distance: distanceTo(point, a) })) }),
+      bridge.udpPort, "127.0.0.1");
+    });
+  }, 100);
+  const tabs: Page[] = [];
+  try {
+    await context.addInitScript(world => localStorage.setItem("whistle.world.v2", JSON.stringify(world)), createLabWorld());
+    for (const [id, x] of xs.entries()) {
+      const tab = await context.newPage();
+      tabs.push(tab);
+      await probeOutputGain(tab);
+      await tab.goto(`uwb-lab/index.html?tag=${id}`);
+      await expect(tab.getByLabel("관객 태그 ID")).toHaveValue(String(id));
+      await tab.getByLabel("수신기 주소").fill(`ws://127.0.0.1:${bridge.wsPort}`);
+      await tab.getByRole("button", { name: "연결 / 다시 연결" }).click();
+      await tab.getByRole("button", { name: "오디오 시작" }).click();
+      await expect.poll(async () => (await messages(tab))["whistle-player position"]?.[0]).toBeCloseTo(x / 6, 4);
+    }
+    const levels = () => Promise.all(tabs.map(outputGain));
+    await expect.poll(levels).toEqual([1, 1, 1, 1]);
+    paused = 1;
+    await expect.poll(levels).toEqual([1, 0, 1, 1]);
+    paused = -1;
+    await expect.poll(levels).toEqual([1, 1, 1, 1]);
+  } finally {
+    clearInterval(timer);
+    udp.close();
+    await bridge.close();
+    await Promise.all(tabs.map(tab => tab.close()));
+  }
 });

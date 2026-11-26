@@ -7,6 +7,7 @@ export type PlayerAudioFrame = {
   x: number; y: number; z: number; size: number;
   grass: number; rough: number; water: number;
   grounded: boolean; falling: boolean; yaw: number;
+  crouch?: boolean; run?: boolean;
 };
 
 export function playerSound(frame: PlayerAudioFrame): PlayerSound {
@@ -24,7 +25,7 @@ export function editSound(
   const at = (world: World, i: number) => {
     const tile = world.terrain?.tiles[i];
     const objects = world.objects.filter((o) => o.x === i % world.size && o.z === Math.floor(i / world.size));
-    return JSON.stringify([tile?.height, tile?.surface, tile ? isHole(tile) : false,
+    return JSON.stringify([tile?.height, tile?.surface, tile ? isHole(tile) : false, !!tile?.void,
       objects.map((o) => [o.asset, o.rotation, o.scale])]);
   };
   const index = [...cells].reverse().find((i) => at(before, i) !== at(after, i));
