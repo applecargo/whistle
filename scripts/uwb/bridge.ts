@@ -3,6 +3,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { MAX_PACKET_BYTES, TRACKING_TIMEOUT_MS, parseRanges, type BridgeMessage, type PositionMessage, type RangePacket } from "../../lib/uwb/protocol.ts";
 import { parseMakerfabs } from "./input.ts";
 import { solvePosition, type BridgeConfig } from "../../lib/uwb/solver.ts";
+import { MAX_WORLD_BYTES, WORLD_PATH, parseWorldLink } from "../../lib/uwb/world-link.ts";
 
 export function createProcessor(config: BridgeConfig, publish: (message: BridgeMessage) => void, rangesOnly = false) {
   const states = new Map<string, { inputSeq: number; lastInput: number; point: PositionMessage | null }>();
@@ -38,16 +39,23 @@ export function createProcessor(config: BridgeConfig, publish: (message: BridgeM
 }
 
 export async function startBridge(config: BridgeConfig, options: {
-  wsPort?: number; udpPort?: number; udpHost?: string; log?: (message: string) => void; rangesOnly?: boolean;
+  wsPort?: number; wsHost?: string; udpPort?: number; udpHost?: string; log?: (message: string) => void; rangesOnly?: boolean;
 } = {}) {
   const log = options.log ?? console.log;
-  const server = new WebSocketServer({ host: "127.0.0.1", port: options.wsPort ?? 5194, maxPayload: MAX_PACKET_BYTES,
-    verifyClient: ({ origin }: { origin: string }) => {
+  // wsHost: 기본은 이 PC만(127.0.0.1). 0.0.0.0이면 공유기의 다른 PC(플레이어)도 붙는다.
+  // 페이지 출처는 이 PC(localhost) 또는 수신기에 접속한 주소와 같은 호스트(키오스크 PC의 개발 서버)만 받는다.
+  const server = new WebSocketServer({ host: options.wsHost ?? "127.0.0.1", port: options.wsPort ?? 5194, maxPayload: MAX_WORLD_BYTES,
+    verifyClient: ({ origin, req }: { origin: string; req: { headers: { host?: string } } }) => {
       if (!origin) return true;
-      try { return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(origin).hostname); }
-      catch { return false; }
+      try {
+        const from = new URL(origin).hostname, host = new URL(`http://${req.headers.host ?? ""}`).hostname;
+        return ["127.0.0.1", "localhost", "[::1]"].includes(from) || from === host;
+      } catch { return false; }
     },
   });
+  // 맵 길(WORLD_PATH, lib/uwb/world-link.ts): 키오스크가 보낸 마지막 맵을 들고 있다가 다른 접속에 돌린다
+  const worldClients = new Set<WebSocket>();
+  let lastWorld: string | undefined;
   const udp = createSocket("udp4");
   let closed = false;
   const close = async () => {
@@ -64,12 +72,32 @@ export async function startBridge(config: BridgeConfig, options: {
       udp.bind(options.udpPort ?? 5195, options.udpHost ?? "127.0.0.1", resolve);
     });
   } catch (error) { await close(); throw error; }
-  server.on("connection", (client) => { client.on("error", () => client.terminate()); });
+  server.on("connection", (client, req) => {
+    client.on("error", () => client.terminate());
+    if (new URL(req.url ?? "/", "http://x").pathname !== WORLD_PATH) {
+      // 위치 길: 받는 것만 한다(작은 패킷만)
+      client.on("message", () => client.terminate());
+      return;
+    }
+    worldClients.add(client);
+    client.on("close", () => worldClients.delete(client));
+    if (lastWorld) client.send(lastWorld);
+    client.on("message", (data, binary) => {
+      try {
+        const text = data.toString();
+        if (binary) throw new Error("글자 메시지만 받습니다.");
+        parseWorldLink(text);
+        lastWorld = text;
+        for (const other of worldClients) if (other !== client && other.readyState === WebSocket.OPEN) other.send(text);
+      } catch (error) { log(`맵 무시: ${(error as Error).message}`); }
+    });
+  });
   server.on("error", (error) => log(`WebSocket 오류: ${error.message}`));
   udp.on("error", (error) => log(`UDP 오류: ${error.message}`));
   const receive = createProcessor(config, (message) => {
     const json = JSON.stringify(message);
     for (const client of server.clients) {
+      if (worldClients.has(client)) continue;
       if (client.bufferedAmount > MAX_PACKET_BYTES * 4) { client.terminate(); continue; }
       if (client.readyState === WebSocket.OPEN) client.send(json);
     }

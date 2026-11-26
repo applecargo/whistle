@@ -11,6 +11,7 @@ import { createProcessor, startBridge } from "../scripts/uwb/bridge.ts";
 import { parseMakerfabs, attachLines } from "../scripts/uwb/input.ts";
 import { startSimulator } from "../scripts/uwb/simulator.ts";
 import { rectangleConfig } from "../lib/uwb/rectangle.ts";
+import { WORLD_PATH, parseWorldLink } from "../lib/uwb/world-link.ts";
 import { calibrateAtCentre, correctRanges } from "../lib/uwb/range-calibration.ts";
 
 const config = parseConfig(JSON.parse(await readFile(new URL("../config/uwb.example.json", import.meta.url), "utf8")));
@@ -285,4 +286,43 @@ test("Makerfabs UDP forwards one raw line per datagram across sequence wrap and 
   }
   await done;
   assert.deepEqual(distances, [1, 2, 4]);
+});
+
+test("world path relays the kiosk's latest map to players, late joiners included, and keeps it off the position path", async (t) => {
+  const bridge = await startBridge(config, { wsPort: 0, udpPort: 0, log: () => {} });
+  t.after(() => bridge.close());
+  const url = `ws://127.0.0.1:${bridge.wsPort}${WORLD_PATH}`;
+  const open = async (address: string) => { const c = new WebSocket(address); t.after(() => c.terminate()); await once(c, "open"); return c; };
+  const kiosk = await open(url), player = await open(url), positions = await open(`ws://127.0.0.1:${bridge.wsPort}`);
+  let positionTraffic = 0;
+  positions.on("message", () => positionTraffic++);
+  let echoed = false;
+  kiosk.on("message", () => { echoed = true; });
+  const mapping = { originX: 0, originZ: 0, width: 6, depth: 6, rotation: 0 };
+  const first = once(player, "message", { signal: AbortSignal.timeout(3000) });
+  kiosk.send("not json");
+  kiosk.send(JSON.stringify({ type: "world", world: { size: 12 }, mapping }));
+  assert.deepEqual(parseWorldLink((await first)[0].toString()).world, { size: 12 });
+  kiosk.send(JSON.stringify({ type: "world", world: { size: 12, title: "b" }, mapping: { ...mapping, width: 0 } }));
+  kiosk.send(JSON.stringify({ type: "world", world: { size: 12, title: "c" }, mapping }));
+  const late = new WebSocket(url);
+  t.after(() => late.terminate());
+  const [message] = await once(late, "message", { signal: AbortSignal.timeout(3000) });
+  assert.deepEqual(parseWorldLink(message.toString()).world, { size: 12, title: "c" });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(echoed, false);
+  assert.equal(positionTraffic, 0);
+});
+
+test("bridge accepts pages served from the same host it is reached at, and refuses other origins", async (t) => {
+  const bridge = await startBridge(config, { wsPort: 0, udpPort: 0, log: () => {} });
+  t.after(() => bridge.close());
+  const attempt = (origin: string) => new Promise<boolean>((resolve) => {
+    const c = new WebSocket(`ws://127.0.0.1:${bridge.wsPort}${WORLD_PATH}`, { origin });
+    c.on("open", () => { c.terminate(); resolve(true); });
+    c.on("error", () => resolve(false));
+  });
+  assert.equal(await attempt("http://localhost:5173"), true);
+  assert.equal(await attempt("http://127.0.0.1:5173"), true);
+  assert.equal(await attempt("http://evil.example"), false);
 });
