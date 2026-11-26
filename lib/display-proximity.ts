@@ -6,13 +6,13 @@ export type DisplayMount = Position2D & { facing: number };
 export type VisitorPose = { room: Position2D; at: number };
 
 const monitorLocations: Record<Monitor, [number, number]> = {
-  M1: [1, .8], M2: [4.8, .8], M3: [3, 3], M4: [1, 4.8], M5: [4.8, 4.8],
+  M1: [1, .8], M2: [4.8, .8], M3: [3, 3],
 };
 
 export function exampleMount(sector: Sector | Monitor): DisplayMount {
   if (sector in monitorLocations) {
     const [x, z] = monitorLocations[sector as Monitor];
-    return { x, z, facing: z > 3 ? 180 : 0 };
+    return { x, z, facing: 0 };
   }
   return { x: 1 + 2 * "ABC".indexOf(sector[0]), z: (Number(sector[1]) - 1) * 2, facing: 0 };
 }

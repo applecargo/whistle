@@ -4,7 +4,7 @@ import { treeAppearance } from "./vegetation.ts";
 import type { Actor, World } from "./world.ts";
 import type { Position2D } from "./uwb-position.ts";
 
-export const monitors = ["M1", "M2", "M3", "M4", "M5"] as const;
+export const monitors = ["M1", "M2", "M3"] as const;
 export type Monitor = typeof monitors[number];
 
 export type Subject = Position2D & { id: string; y: number; height: number };
