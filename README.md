@@ -46,6 +46,7 @@ npm run uwb:demo  # 별도 터미널에서 실행
 - 기본값: 6×6m 공간 · 보드 높이 1.2m 고정
 - 수신: USB·UDP · 최대 4명 / 화면 표시: 선택한 1명
 - [T0~T3 서버 PC 동시 출력](docs/uwb-bridge.md#서버-pc에서-4명-동시-재생)
+- [키오스크 + 플레이어 PC 여러 대 (다중 플레이어 전시)](docs/uwb-multiplayer.md)
 
 ### 실제 T0로 테스트
 
