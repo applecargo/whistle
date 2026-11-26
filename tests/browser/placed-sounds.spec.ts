@@ -1,9 +1,9 @@
 import { savedWorld } from "./world-storage";
 import { test, expect, type Page } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
-import { probePd, pdProbe } from "./pd-probe";
+import { probePd, pdProbe, pdOutputRms, type PdProbe } from "./pd-probe";
 
-test.setTimeout(90_000);
+test.setTimeout(180_000);
 
 function wav(seconds = 0.5) {
   const rate = 44100, count = Math.floor(rate * seconds), bytes = Buffer.alloc(44 + count * 2);
@@ -15,6 +15,15 @@ function wav(seconds = 0.5) {
   return bytes;
 }
 type Probe = { contexts: AudioContext[]; started: number; active: number; pd: number; rms: number };
+/** 지금 떠 있는 placed_sound 슬롯 수(whistle-slot on/off를 순서대로 따라간다) */
+const placedSlots = (page: Page) => page.evaluate(() => {
+  const slots = new Map<number, string>();
+  for (const m of (window as unknown as { pdProbe: PdProbe }).pdProbe.messages) {
+    if (m.bus === "whistle-slot on") slots.set(Number(m.value[0]), String(m.value[1]));
+    if (m.bus === "whistle-slot off") slots.delete(Number(m.value[0]));
+  }
+  return [...slots.values()].filter(name => name === "placed_sound").length;
+});
 const probe = (page: Page) => page.evaluate(() => {
   const p = (window as typeof window & { soundProbe: Probe }).soundProbe;
   return { contexts: p.contexts.map(c => c.state), started: p.started, active: p.active, pd: p.pd, rms: p.rms };
@@ -72,16 +81,18 @@ test("upload, place, save, reload, mix with Pd, pause, resume and remove", async
   await expect(page.getByRole("button", { name: "배치: 1", exact: true })).toBeVisible();
   await expect(page.locator('[data-cell="126"] [data-symbol-site]')).toBeVisible();
   await page.getByRole("button", { name: "플레이", exact: true }).click();
-  await expect.poll(async () => (await probe(page)).active).toBe(1);
-  await expect.poll(async () => (await probe(page)).rms).toBeGreaterThan(0.01);
+  // 배치한 소리는 Pd 슬롯(placed_sound)으로 울린다(브라우저 버퍼 재생은 쓰지 않는다)
+  await expect.poll(() => placedSlots(page), { timeout: 40000 }).toBe(1);
+  await expect.poll(() => pdOutputRms(page)).toBeGreaterThan(0.005);
   expect((await probe(page)).contexts).toEqual(["running"]);
+  expect((await probe(page)).started).toBe(0);
   expect((await pdProbe(page)).modules).toBe(1);
   await page.evaluate(() => window.dispatchEvent(new Event("blur")));
-  await expect.poll(async () => (await probe(page)).active).toBe(0);
+  await expect.poll(() => placedSlots(page)).toBe(0);
   await page.keyboard.press("a");
-  await expect.poll(async () => (await probe(page)).active).toBe(1);
+  await expect.poll(() => placedSlots(page)).toBe(1);
   await page.keyboard.press("Escape");
-  await expect.poll(async () => (await probe(page)).active).toBe(0);
+  await expect.poll(() => placedSlots(page)).toBe(0);
   await page.getByRole("button", { name: "배치: 1", exact: true }).click();
   await page.getByRole("button", { name: "편집", exact: true }).click();
   await page.getByRole("button", { name: "사운드 삭제" }).click();

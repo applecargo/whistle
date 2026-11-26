@@ -8,6 +8,9 @@ import { createPdSounds } from "@/lib/audio/pd-sounds";
 import { engineStage, openEngine, unlockAudio } from "@/lib/audio/pd-runtime";
 import { createSoundscape } from "@/lib/audio/soundscape";
 import { createGameSoundscape, type GameSoundscape } from "@/lib/audio/game-soundscape";
+import { createEventSources, type Position } from "@/lib/audio/event-sources";
+import { parseRule, type SpatialRule } from "@/lib/audio/spatial-rule";
+import { DEFAULT_NEARBY, forwardOf } from "@/lib/audio/terrain-sources";
 import { flatTerrain } from "@/lib/terrain";
 import type { Actor, World } from "@/lib/world";
 import type { WorldDerivation } from "@/lib/world-derivation";
@@ -35,7 +38,7 @@ const tilesOf = (world: World) => world.terrain?.tiles ?? flatTiles.get(world.si
  * pd4web 엔진 1개(AudioContext도 엔진의 것. 페이지와 함께 계속 산다):
  *   상호작용 패치(edit·player·event) ─┐
  *   사운드스케이프(층별 영역 패치들) ──┼─→ 마스터 게인(음소거 fade) → 리미터 → 출력
- *   배치한 녹음 사운드(Pd 슬롯, 10배로 늘림) ┘
+ *   (배치한 소리도 사운드스케이프 소스: Pd 슬롯 placed_sound) ┘
  */
 /** 소리 켜기를 이만큼(ms) 기다려도 안 되면 알린다(계속 기다리고, 다음 터치·키에서 켜진다: unlockAudio). */
 const RESUME_NOTICE_MS = 3000;
@@ -74,9 +77,31 @@ async function createGameMix(onBlocked: () => void) {
         else if (event.type === "active" || event.type === "released") log(`${event.id} ${event.patch} ${event.type === "active" ? "켜짐" : "꺼짐"}`);
       },
     });
+    // 패치 이름 → 패치가 알린 공간화 규칙(영역·배치한 소리. 예: environment_water가 loadbang에 "$1 curve exp")
+    const rules = new Map<string, Partial<SpatialRule>>();
+    // 이벤트 소리(fallingstar 등): 이름은 만드는 쪽이 정한다(패치의 $1)
+    const events = createEventSources(scape, (patch, name) => engine.start(patch, name), (message) => console.warn(`[Whistle:Audio] ${message}`));
+    // Pd → JS: 패치가 이름을 앞에 붙인 리스트로 보낸다([list prepend $1] → [s whistle-source]. audio/spatial-sources.md)
+    const named = (listener: (name: string, words: (string | number)[]) => void) => ([name, ...words]: (string | number)[]) => {
+      if (typeof name === "string") listener(name, words);
+      else console.warn(`[Whistle:Audio] 이름(글자)으로 시작해야 합니다: ${[name, ...words].join(" ")}`);
+    };
+    const listening = [
+      engine.onList("whistle-spawn", named((name, words) => events.fromPdSpawn(name, words))),
+      engine.onList("whistle-source", named((name, words) => {
+        if (events.set(name, words)) return;
+        // 영역·배치한 소리의 슬롯(vK): 규칙이면 그 패치 이름의 모든 소스에
+        const voice = scape.snapshot().voices.find((v) => v.instance === name);
+        const rule = parseRule(words);
+        if (!voice) { console.warn(`[Whistle:Audio] whistle-source ${name}: 그런 소스가 없습니다`); return; }
+        if (!Object.keys(rule).length) return;
+        rules.set(voice.patch, { ...rules.get(voice.patch), ...rule });
+        log(`${voice.patch} 공간화 규칙: ${words.join(" ")}`);
+      })),
+    ];
     log(`오디오 시작: ${context.sampleRate}Hz, 상호작용 패치 edit·player·event 준비됨 (${Math.round(performance.now() - started)}ms), 비상관 필터 ${diffuse ? "켬" : "끔"}, 지연 설정 ${hint} (${(context.baseLatency * 1000).toFixed(1)}ms)`);
     return {
-      context, master: output, scape, diffuse, game: createGameSoundscape(scape, log),
+      context, master: output, scape, diffuse, game: createGameSoundscape(scape, log, DEFAULT_NEARBY, rules), rules, events,
       // 배치한 소리: Pd 슬롯(placed_sound.pd)
       playSound: createPdSounds(engine),
       session: {
@@ -89,6 +114,8 @@ async function createGameMix(onBlocked: () => void) {
           gain.linearRampToValueAtTime(muted ? 0 : 1, now + MASTER_FADE);
         },
         async close() {
+          for (const stop of listening) stop();
+          events.stop();
           scape.dispose();
           await session.close();
           output.disconnect();
@@ -103,6 +130,15 @@ async function createGameMix(onBlocked: () => void) {
   }
 }
 
+/** 디버그 1 키의 fallingstar: 이름(패치의 $1), 패치, 플레이어 앞 몇 칸·몇 위(장면 단위)에, 공간화 규칙 */
+const FALLINGSTAR = { name: "fallingstar", patch: "fallingstar_source", ahead: 4, up: 6,
+  rule: { range: 10, width: 0.3, curve: { type: "lin" } } as Partial<SpatialRule> };
+/** 플레이어가 보는 쪽으로 tiles칸 앞, up만큼 위. whistle-player position과 같은 좌표(x, z = (격자 + 0.5) / 크기) */
+function ahead(frame: PlayerAudioFrame, tiles: number, up: number): Position {
+  const f = forwardOf(frame.yaw), size = frame.size;
+  return { x: (frame.x + f.x * tiles + 0.5) / size, y: frame.y + up, z: (frame.z + f.z * tiles + 0.5) / size };
+}
+
 const INTERACTION_PATCH_NAMES = ["edit", "player", "event"];
 
 export type GameAudioDebug = {
@@ -111,8 +147,8 @@ export type GameAudioDebug = {
   context: { state: AudioContextState; sampleRate: number; latencyHint: AudioContextLatencyCategory; baseLatency: number; outputLatency?: number } | null;
   /** 시작된 상호작용 패치(오디오가 시작되면 3개가 계속 돈다) */
   interaction: string[];
-  /** 사운드스케이프 패치 인스턴스(loading·active·releasing 모두 Pd 엔진 슬롯 하나씩) */
-  voices: { id: string; patch: string; state: string }[];
+  /** 사운드스케이프 패치 인스턴스(영역·배치한 소리. loading·active·releasing 모두 Pd 엔진 슬롯 하나씩) */
+  voices: { id: string; patch: string; state: string; instance?: string }[];
   soundscape: ReturnType<GameSoundscape["debug"]> | null;
   diffuse: boolean;
   enabled: boolean;
@@ -122,6 +158,8 @@ export type GameAudioDebug = {
   speed: number;
   /** 배치한 소리(Pd 슬롯 placed_sound) */
   placed: ReturnType<ReturnType<typeof createPlacedSounds>["snapshot"]>;
+  /** 이벤트 소리(fallingstar 등) */
+  events: ReturnType<ReturnType<typeof createEventSources>["snapshot"]>;
 };
 
 export function useGameAudio(notify: (message: string) => void) {
@@ -144,13 +182,13 @@ export function useGameAudio(notify: (message: string) => void) {
       async () => {
         const mix = await createGameMix(failed);
         mixRef.current = mix;
-        recordings.current = createPlacedSounds(mix.context, () => {}, mix.master, mix.playSound);
+        recordings.current = createPlacedSounds(mix.scape, mix.playSound, mix.rules);
         soundscape.current = mix.game;
         return mix.session;
       },
       (error) => { console.warn("[Whistle:Audio] 오류", error); failed(); },
     );
-    const quiet = () => soundscape.current?.stop();
+    const quiet = () => { soundscape.current?.stop(); mixRef.current?.events.stop(); };
     return {
       edit: (sound: EditSound) => { enabled.current = false; quiet(); recordings.current?.stop(); get().edit(sound); },
       play: () => { enabled.current = true; paused.current = false; rain.current = undefined; recordings.current?.stop(); get().play(); },
@@ -176,6 +214,7 @@ export function useGameAudio(notify: (message: string) => void) {
           structures: derivation?.structures,
         });
         if (actors) recordings.current?.update(world, actors, frame, derivation?.environment);
+        mixRef.current?.events.frame(frame);
       },
       /** 디버그 오버레이용 현재 상태(읽기 전용 사본) */
       debug: (): GameAudioDebug => {
@@ -193,16 +232,30 @@ export function useGameAudio(notify: (message: string) => void) {
           frame: lastFrame.current,
           speed: motion.current?.speed ?? 0,
           placed: recordings.current?.snapshot() ?? [],
+          events: mix?.events.snapshot() ?? [],
         };
       },
-      /** whistle-event <이름> 1/0 (fallingstar: 디버그 화면의 1 키. rain은 위 movement가 날씨로 보낸다) */
-      event: (name: GameEvent, on: boolean) => controller.current?.event(name, on),
+      /** whistle-event <이름> 1/0 (fallingstar: 디버그 화면의 1 키. rain은 위 movement가 날씨로 보낸다).
+       *  fallingstar는 공간화한다: 켜면 플레이어 앞 위쪽에 이벤트 소리(fallingstar_source)를 띄우고, 끄면 alive 0 */
+      event: (name: GameEvent, on: boolean) => {
+        controller.current?.event(name, on);
+        const events = mixRef.current?.events, frame = lastFrame.current;
+        if (name !== "fallingstar" || !events) return;
+        if (!on) { events.set(FALLINGSTAR.name, ["alive", 0]); return; }
+        if (!frame || !enabled.current) return;
+        events.spawn(FALLINGSTAR.name, FALLINGSTAR.patch, ahead(frame, FALLINGSTAR.ahead, FALLINGSTAR.up), FALLINGSTAR.rule);
+      },
+      /** 이벤트 소리를 띄운다(게임 쪽 whistle-spawn과 같다). pos는 whistle-player position과 같은 좌표 */
+      spawn: (name: string, patch: string, pos: Position, rule?: Partial<SpatialRule>) => mixRef.current?.events.spawn(name, patch, pos, rule),
+      /** 이벤트 소리의 값을 바꾼다(whistle-source와 같다. 예: ["alive", 0], ["pos", x, y, z], ["curve", "exp"]) */
+      setSource: (name: string, words: (string | number)[]) => mixRef.current?.events.set(name, words),
     };
   }, []);
   useEffect(() => {
     const pause = () => {
       paused.current = true;
       soundscape.current?.stop();
+      mixRef.current?.events.stop();
       recordings.current?.stop(false);
       controller.current?.pause();
     };

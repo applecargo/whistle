@@ -88,15 +88,19 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
 
   // 오디오
   const c = info.context;
-  const byState = info.voices.reduce<Record<string, number>>((n, v) => ((n[v.state] = (n[v.state] ?? 0) + 1), n), {});
-  const playing = info.placed.filter((p) => p.state === "playing").length;
-  const slots = info.voices.length + playing;
+  // 사운드스케이프 소스 = 영역 + 배치한 소리(id가 placed:로 시작) + 이벤트 소리(id = 이름). 모두 Pd 슬롯 하나씩
+  const eventNames = new Set(info.events.map((e) => e.name));
+  const regions = info.voices.filter((v) => !v.id.startsWith("placed:") && !eventNames.has(v.id));
+  const byState = regions.reduce<Record<string, number>>((n, v) => ((n[v.state] = (n[v.state] ?? 0) + 1), n), {});
+  const playing = info.voices.filter((v) => v.id.startsWith("placed:")).length;
+  const eventing = info.voices.filter((v) => eventNames.has(v.id)).length;
+  const slots = info.voices.length;
   lines.push(c
     ? `오디오 ${c.state} · ${c.sampleRate} Hz · 지연(${c.latencyHint}) ${f(c.baseLatency * 1000, 1)}+${f((c.outputLatency ?? NaN) * 1000, 1)} ms · 비상관 ${info.diffuse ? "켬" : "끔"}`
     : `오디오 시작 전${info.stage ? ` · 단계 ${info.stage}` : " · 아직 시작 안 함"} · 격리 ${crossOriginIsolated ? "됨" : "안 됨"}`);
   // 상호작용 패치는 항상 edit·player·event 세 개라 이름은 생략(줄이 길어지면 폭을 넘는다)
-  lines.push(`Pd 슬롯 ${slots}개 = 사운드스케이프 ${info.voices.length} + 배치한 소리 ${playing}` +
-    (info.voices.length ? ` (${Object.entries(byState).map(([s, n]) => `${s} ${n}`).join(", ")})` : ""));
+  lines.push(`Pd 슬롯 ${slots}개 = 영역 ${regions.length} + 배치한 소리 ${playing} + 이벤트 ${eventing}` +
+    (regions.length ? ` (${Object.entries(byState).map(([s, n]) => `${s} ${n}`).join(", ")})` : ""));
   lines.push(`사운드스케이프 ${info.enabled ? (info.paused ? "일시정지" : "켜짐") : "꺼짐"}` +
     (info.soundscape ? ` · 등록 영역 ${info.soundscape.registered}개 · 반경 ${info.soundscape.options.radius} · 패닝 전환 ${info.soundscape.options.blend} · 최대 ${info.soundscape.options.max}` : ""));
 
@@ -123,7 +127,9 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
   }
 
   // 실행 중인 패치 전체(Pd 엔진 슬롯): 상호작용 패치 + 사운드스케이프 패치(이번 프레임에 고른 영역 + 꺼지는 중인 영역)
-  if (info.interaction.length || info.voices.length || info.placed.length) {
+  const rules = Object.entries(info.soundscape?.rules ?? {});
+  if (rules.length) lines.push(`패치가 알린 규칙 ${rules.map(([patch, rule]) => `${patch}: ${Object.entries(rule).map(([k, v]) => `${k} ${typeof v === "object" ? Object.values(v).join(" ") : v}`).join(" ")}`).join(" · ")}`);
+  if (info.interaction.length || info.voices.length || info.placed.length || info.events.length) {
     lines.push("");
     // 한글은 폭이 두 칸이라 열이 어긋나므로 머리글은 영문(거리 d, 음량 gain, 폭 width, 농도 amount)
     lines.push(`${pad("patch", 20)}${pad("id / bus", 16)}${pad("kind", 8)}${pad("d", 6)}${pad("gain", 6)}${pad("width", 6)}${pad("amount", 7)}state`);
@@ -133,7 +139,7 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
     }
     const near = info.soundscape?.near ?? [];
     const order = (id: string) => { const k = near.findIndex((n) => n.id === id); return k === -1 ? Infinity : k; };
-    for (const voice of [...info.voices].sort((a, b) => order(a.id) - order(b.id) || (a.id < b.id ? -1 : 1))) {
+    for (const voice of [...regions].sort((a, b) => order(a.id) - order(b.id) || (a.id < b.id ? -1 : 1))) {
       const n = near.find((r) => r.id === voice.id);
       const kind = n?.kind ?? info.soundscape?.kindOf(voice.id) ?? "?";
       const values = n
@@ -141,10 +147,16 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
         : pad("", 25);
       lines.push(`${pad(voice.patch, 20)}${pad(voice.id, 16)}${pad(kind, 8)}${values}${voice.state}`);
     }
-    // 배치한 소리: 슬롯 이름(vK)과 거리·음량(width·amount 대신 pan·재생 방식)
+    // 배치한 소리: 슬롯 이름(vK)과 거리·음량(amount 대신 재생 방식)
     for (const p of info.placed)
       lines.push(`${pad("placed_sound", 20)}${pad(p.slot, 16)}${pad("sound", 8)}${pad(f(p.distance), 6)}${pad(f(p.gain), 6)}` +
-        `${pad(f(p.pan), 6)}${pad(p.mode, 7)}${p.state}`);
+        `${pad(f(p.width), 6)}${pad(p.mode, 7)}${p.state}`);
+    // 이벤트 소리: 이름(= $1)과 규칙
+    for (const e of info.events) {
+      const state = info.voices.find((v) => v.id === e.name)?.state ?? "waiting";
+      lines.push(`${pad(e.patch, 20)}${pad(e.name, 16)}${pad("event", 8)}${pad(f(e.distance), 6)}${pad(f(e.gain), 6)}${pad(f(e.width), 6)}${pad("", 7)}${state}`);
+      lines.push(`${pad("", 20)}${e.rule}`);
+    }
   }
   if (recentErrors.length) {
     lines.push("");

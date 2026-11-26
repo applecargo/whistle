@@ -4,6 +4,7 @@
 // 외곽에 닿으면 좌우 모두 1, 안에서는 계속 1. 농도는 음량에 쓰지 않고 패치로 보낸다.
 import type { Soundscape } from "./soundscape.ts";
 import type { PlayerAudioFrame } from "./game-parameters.ts";
+import type { SpatialRule } from "./spatial-rule.ts";
 import {
   terrainRegions, nearbyRegions, diffActive, toScene, forwardOf, DEFAULT_NEARBY,
   type NearbyOptions, type NearbyRegion, type Regions, type SoundField,
@@ -17,7 +18,9 @@ export const REGION_BUS = "whistle-region";
 
 type Scape = Pick<Soundscape, "set" | "remove" | "activate" | "deactivate" | "setListener">;
 
-export function createGameSoundscape(scape: Scape, log: (message: string) => void, options: NearbyOptions = DEFAULT_NEARBY) {
+/** rules: 패치 이름 → 패치가 알린 공간화 규칙(spatial-rule.ts. 패치가 [s whistle-source]로 "$1 curve exp" 등을 보내면 그 패치의 모든 영역에) */
+export function createGameSoundscape(scape: Scape, log: (message: string) => void, options: NearbyOptions = DEFAULT_NEARBY,
+  rules?: ReadonlyMap<string, Partial<SpatialRule>>) {
   let regions: Regions | undefined;
   let active = new Set<string>();
   /** 마지막 프레임에서 고른 영역(디버그 표시용) */
@@ -57,7 +60,7 @@ export function createGameSoundscape(scape: Scape, log: (message: string) => voi
         { x: toScene(frame.x, frame.size), y: frame.y + EAR_HEIGHT, z: toScene(frame.z, frame.size) },
         forwardOf(frame.yaw),
       );
-      const near = nearbyRegions(frame, regions!, active, options);
+      const near = nearbyRegions(frame, regions!, active, options, rules);
       lastNear = near;
       const next = new Set(near.map((r) => r.id));
       const { on, off } = diffActive(active, next);
@@ -78,6 +81,7 @@ export function createGameSoundscape(scape: Scape, log: (message: string) => voi
       /** 영역 id → 종류(꺼지는 중이라 이번 프레임 목록에 없는 영역도) */
       kindOf: (id: string) => regions?.list.find((r) => r.id === id)?.kind ?? "?",
       options,
+      rules: rules ? Object.fromEntries(rules) : {},
     }),
   };
 }

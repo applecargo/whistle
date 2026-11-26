@@ -55,8 +55,11 @@ export type PdEngine = {
   context: AudioContext;
   /** 엔진 가상 디스크에 복사한 패치 폴더의 파일(폴더 기준 경로) */
   files: string[];
-  /** 영역 패치 하나를 빈 슬롯에 띄운다(main.pd에 on을 보낸다) */
-  start(name: string): Promise<PatchInstance>;
+  /** 패치 하나를 빈 슬롯에 띄운다(main.pd에 on을 보낸다). id: 패치의 $1(없으면 새 이름 v1, v2…. 주는 쪽은 v+숫자 꼴을 쓰지 않는다) */
+  start(name: string, id?: string): Promise<PatchInstance>;
+  /** 전역 버스로 오는 리스트(Pd → JS: [list prepend $1] → [s 버스]). 그만 받기 함수를 돌려준다.
+   *  리스트만 받는다(pd4web은 한 이름을 한 종류로만 받을 수 있다: audio/pd-to-js-fix.md). 메시지 상자에서 바로 보낸 것은 오지 않는다 */
+  onList(bus: string, listener: (values: PdMessage) => void): () => void;
   /** 전역 버스로 보낸다(whistle-player 등. main.pd 안의 패치가 받는다) */
   send(bus: string, message: PdMessage): void;
   /** 믹스다운(채널 1–2): main.pd가 공간화 없이 내보내는 소리 */
@@ -190,7 +193,6 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   const splitter = context.createChannelSplitter(CHANNELS);
   worklet.connect(splitter);
 
-  // Pd → JS 메시지(onBangReceived 등)는 아직 쓰지 않는다(audio/pd-to-js.md). 시작 확인은 동기 생성으로 충분하다.
 
   const message = (target: string, selector: string, args: PdMessage) => {
     if (!pd.sendMessage(target, selector, args)) throw new Error(`Pd 메시지 실패: ${target} ${selector} ${args.join(" ")}`);
@@ -223,12 +225,13 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   /** 떠 있는 슬롯: 패치 이름, 다시 띄우는 함수, 버스마다 마지막으로 보낸 메시지 */
   const live = new Map<number, { name: string; id: string; on(): void; last: Map<string, () => void> }>();
 
-  const start = async (name: string): Promise<PatchInstance> => {
+  const start = async (name: string, given?: string): Promise<PatchInstance> => {
     let index = 0;
     while (used.has(index)) index++;
     if (index >= SLOTS) throw new Error(`Pd 슬롯 ${SLOTS}개를 모두 쓰고 있습니다: ${name}`);
+    if (given !== undefined && [...live.values()].some((slot) => slot.id === given)) throw new Error(`이미 떠 있는 이름입니다: ${given}`);
     used.add(index);
-    const id = `v${++count}`;
+    const id = given ?? `v${++count}`;
     const merger = context.createChannelMerger(2);
     const last = new Map<string, () => void>();
     const listening: (() => void)[] = [];
@@ -271,6 +274,8 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
     };
   };
   const send = (bus: string, values: PdMessage) => { globalLast.set(key(bus, values), deliver(bus, values)); };
+  const onList = (bus: string, listener: (values: PdMessage) => void) =>
+    pd.onListReceived(bus, (_r: string, values: PdMessage) => listener(values ?? [])) ?? (() => {});
   const removeFile = (path: string) => {
     try { module.FS.unlink(`/${path}`); } catch { /* 이미 없음 */ }
   };
@@ -321,7 +326,7 @@ async function createEngine(baseUrl: string, latencyHint: AudioContextLatencyCat
   };
 
   engineStage = "열림";
-  return { context, files, start, send, mixdown, slotsInUse: () => used.size, writeFile, removeFile };
+  return { context, files, start, send, onList, mixdown, slotsInUse: () => used.size, writeFile, removeFile };
 }
 
 /** 터치·키 처리 안에서 부른다. 엔진의 AudioContext가 막혀(suspended) 있으면 켠다. 엔진이 아직 없으면 아무것도 안 한다. */

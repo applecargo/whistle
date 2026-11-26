@@ -16,6 +16,7 @@
 | `whistle-player-stop` | bang | 3D 이동음을 끌 때(UWB 테스트 페이지 등). 다음 `whistle-player`부터 다시 소리를 내는 것은 패치가 한다 |
 | `whistle-sound-bank` | `<이름> <경로>` | `main.pd`의 `[pd sound_bank]` 전용. 업로드한 소리를 `[pd sounds]`의 `<이름>-L`·`<이름>-R` 배열로 읽는다(맵의 소리마다 한 번) |
 | `$1-whistle-sound` | `[route set distance]` | `placed_sound.pd` 전용. `set <이름>-L [<이름>-R]`(모노면 -L만, 열 때 한 번) · `distance <타일> <반경>` 플레이어까지 거리와 들리는 반경(열 때와 그 뒤 매 프레임). 지금 패치는 거리/반경을 `[moving_average 10]`으로 고른 뒤 재생 빠르기로 쓴다(가까우면 0.5배, 반쯤이면 1배, 가장자리 2배) |
+| `$1-whistle-source` | `[route alive pos range width curve distance]` | 이벤트 소리 패치 전용(`fallingstar_source.pd` 등, [`spatial-sources.md`](spatial-sources.md)). 열 때 `alive 1`과 지금 값 모두, 그 뒤 누가 바꾸든 바뀐 값. `distance <타일>`은 바뀔 때마다 |
 | `whistle-slot` | `[route on off]` | `main.pd` 전용. 영역 켜기 `on 번호 패치 이름 L R`, 끄기 `off 번호`([`main-pd.md`](main-pd.md)) |
 
 ## whistle-player (플레이어 상태)
@@ -80,7 +81,7 @@
 
 | 이벤트 | 언제 오나 |
 |---|---|
-| `fallingstar` `1`/`0` | 지금은 시험용: 3D 플레이 중 디버그 화면(백틱 키)을 켜고 1 키를 누를 때마다 1, 0, 1, … |
+| `fallingstar` `1`/`0` | 지금은 시험용: 3D 플레이 중 디버그 화면(백틱 키)을 켜고 1 키를 누를 때마다 1, 0, 1, …. 소리는 공간화한다: 1이면 게임이 `fallingstar_source`를 플레이어 앞 위쪽 슬롯에 띄우고 0이면 끈다(`[pd event]`는 이벤트만 받고 소리는 내지 않는다) |
 | `rain` `1`/`0` | 날씨가 비(편집 화면의 날씨 버튼)이면 1, 아니면 0. 3D 플레이를 시작할 때 한 번, 그 뒤로는 바뀔 때만 |
 
 ## whistle-board-height (UWB 테스트)
