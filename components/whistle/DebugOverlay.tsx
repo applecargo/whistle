@@ -132,7 +132,7 @@ function describe(info: GameAudioDebug, world: World, derivation: WorldDerivatio
     // 배치한 소리: 슬롯 이름(vK)과 거리·음량(amount 대신 재생 방식)
     for (const p of info.placed)
       lines.push(`${pad("placed_sound", 20)}${pad(p.slot, 16)}${pad("sound", 8)}${pad(f(p.distance), 6)}${pad(f(p.gain), 6)}` +
-        `${pad("0", 6)}${pad(p.mode, 7)}${p.state}`);
+        `${pad(f(p.width), 6)}${pad(p.mode, 7)}${p.state}`);
   }
   return lines.join("\n");
 }
