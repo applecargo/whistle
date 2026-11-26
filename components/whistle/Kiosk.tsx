@@ -18,7 +18,7 @@ export type KioskPlayer = { tag: string; state: "none" | "outside" | "tracking";
 /** 이 페이지를 연 주소의 호스트(같은 PC면 127.0.0.1). 수신기 기본 포트 5194 */
 const defaultBridge = () => `ws://${["localhost", "[::1]", ""].includes(location.hostname) ? "127.0.0.1" : location.hostname}:5194`;
 const defaultSettings = (): Settings => ({ bridge: defaultBridge(), mapping: { originX: 0, originZ: 0, width: 6, depth: 6, rotation: 0 } });
-function readSettings(): Settings {
+export function readSettings(): Settings {
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "null");
     if (saved && typeof saved.bridge === "string" && validMapping(saved.mapping)) return saved;
@@ -92,6 +92,31 @@ export function KioskPlayers({ players, size }: { players: KioskPlayer[]; size: 
 const linkLabel: Record<Link, string> = { off: "꺼짐", connecting: "연결 중", connected: "연결됨", disconnected: "끊김 · 다시 연결 중", invalid: "주소 오류" };
 const mappingLabels: Record<keyof RoomMapping, string> = { originX: "원점 X", originZ: "원점 Z", width: "가로", depth: "세로", rotation: "회전°" };
 
+function KioskStatus({ link }: { link: KioskLink }) {
+  return <>
+    <p role="status" data-kiosk-world={link.world}>맵 보내기: {linkLabel[link.world]}{link.mappingValid ? "" : " · 매핑을 고쳐 주세요"}</p>
+    <p role="status" data-kiosk-positions={link.positions}>태그 수신: {linkLabel[link.positions]}</p>
+  </>;
+}
+
+function KioskTags({ players }: { players: KioskPlayer[] }) {
+  return (
+    <ul className="kiosk-tags">
+      {players.map((p) => <li key={p.tag} data-kiosk-tag={p.tag} data-state={p.state}>
+        <b>T{p.tag}</b> {p.state === "none" ? "수신 없음" : `${p.metres!.x.toFixed(2)}, ${p.metres!.z.toFixed(2)} m${p.state === "outside" ? " · 공간 밖" : ""}`}
+      </li>)}
+    </ul>
+  );
+}
+
+export function KioskLog({ link }: { link: KioskLink }) {
+  return <section className="kiosk-panel" aria-label="수신 로그">
+    <h2>수신 로그</h2>
+    <KioskStatus link={link} />
+    <KioskTags players={link.players} />
+  </section>;
+}
+
 export function KioskPanel({ link }: { link: KioskLink }) {
   const { settings, setSettings } = link;
   const [bridge, setBridge] = useState(settings.bridge);
@@ -102,18 +127,13 @@ export function KioskPanel({ link }: { link: KioskLink }) {
       <label>UWB 수신기 <input value={bridge} onChange={(event) => setBridge(event.target.value)} spellCheck={false} /></label>
       <button type="submit" disabled={bridge.trim() === settings.bridge}>적용</button>
     </form>
-    <p role="status" data-kiosk-world={link.world}>맵 보내기: {linkLabel[link.world]}{link.mappingValid ? "" : " · 매핑을 고쳐 주세요"}</p>
-    <p role="status" data-kiosk-positions={link.positions}>태그 수신: {linkLabel[link.positions]}</p>
+    <KioskStatus link={link} />
     <fieldset><legend>전시장 매핑 (m)</legend>
       {(Object.keys(mappingLabels) as (keyof RoomMapping)[]).map((key) => <label key={key}>{mappingLabels[key]}
         <input type="number" step="any" value={Number.isFinite(settings.mapping[key]) ? settings.mapping[key] : ""}
           onChange={(event) => setSettings({ ...settings, mapping: { ...settings.mapping, [key]: event.target.valueAsNumber } })} /></label>)}
     </fieldset>
-    <ul className="kiosk-tags">
-      {link.players.map((p) => <li key={p.tag} data-kiosk-tag={p.tag} data-state={p.state}>
-        <b>T{p.tag}</b> {p.state === "none" ? "수신 없음" : `${p.metres!.x.toFixed(2)}, ${p.metres!.z.toFixed(2)} m${p.state === "outside" ? " · 공간 밖" : ""}`}
-      </li>)}
-    </ul>
+    <KioskTags players={link.players} />
     <p className="kiosk-hint">플레이어 PC: <code>http://{host}/whistle/player/?tag=0</code> (태그 0~3)</p>
   </section>;
 }

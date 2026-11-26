@@ -23,7 +23,7 @@ import { editSound } from "@/lib/audio/game-parameters";
 import { useWorldPersistence } from "@/components/whistle/useWorldPersistence";
 import { browserWorldStore } from "@/lib/browser-world";
 import { useLiveWorldPublisher } from "@/components/whistle/useLiveWorldPublisher";
-import { KioskPanel, KioskPlayers, useKioskLink } from "@/components/whistle/Kiosk";
+import { KioskLog, KioskPanel, KioskPlayers, useKioskLink } from "@/components/whistle/Kiosk";
 import { EditorToolbar } from "@/components/whistle/EditorToolbar";
 import { EditorPalette } from "@/components/whistle/EditorPalette";
 import { EditorBoard } from "@/components/whistle/EditorBoard";
@@ -46,7 +46,7 @@ const LazyScene = lazy(() => import("@/components/whistle/Scene"));
 function Scene(props: ComponentProps<typeof LazyScene>) {
   return <Suspense fallback={<SceneLoading />}><LazyScene {...props} /></Suspense>;
 }
-export default function Home({meeting,kiosk=false}:{meeting:MeetingSession;kiosk?:boolean}) {
+export default function Home({meeting,kiosk=false,exhibitionEditor=false}:{meeting:MeetingSession;kiosk?:boolean;exhibitionEditor?:boolean}) {
   const { t } = useLanguage();
   const initialWorld = useMemo(() => meeting.view.ownWorld, []);
   const initialPlayer = useMemo(() => ({...meetingGlobal(0,initialWorld.start),yaw:0}), []);
@@ -327,8 +327,8 @@ export default function Home({meeting,kiosk=false}:{meeting:MeetingSession;kiosk
   if(loading)return <SceneLoading />;
   return (
     <main className={`studio ${playing ? "playing" : ""}`}
-      data-meeting-id={meeting.view.id} data-meeting-slot={meeting.view.slot} data-meeting-status={meeting.status} data-meeting-joined={meeting.view.joined.length}>
-      <EditorToolbar
+      data-kiosk-editor={exhibitionEditor || undefined} data-meeting-id={meeting.view.id} data-meeting-slot={meeting.view.slot} data-meeting-status={meeting.status} data-meeting-joined={meeting.view.joined.length}>
+      {!exhibitionEditor && <EditorToolbar
         playing={playing}
         saveStatus={saveStatus}
         onlineCount={meeting.status==="online" ? meeting.presence.onlineCount ?? meeting.presence.peers.filter(p=>p.online).length : null}
@@ -343,7 +343,7 @@ export default function Home({meeting,kiosk=false}:{meeting:MeetingSession;kiosk
         onNew={() => setNewDialog(true)}
         onImport={() => file.current?.click()}
         onSave={saveFile}
-      />
+      />}
       {playing && (
         <section className="play-shell">
           <Scene
@@ -423,7 +423,7 @@ export default function Home({meeting,kiosk=false}:{meeting:MeetingSession;kiosk
             overlay={<><MeetingOverlay meeting={visibleMeeting} />{kiosk && <KioskPlayers players={link.players} size={world.size} />}</>}
           />
           <aside className="preview-panel" aria-label={t("배치 결과")}>
-            <div className="live-preview">
+            {!exhibitionEditor && <div className="live-preview">
               {!playing && <Scene
                 world={world}
                 simulation={simulation}
@@ -435,8 +435,8 @@ export default function Home({meeting,kiosk=false}:{meeting:MeetingSession;kiosk
               {!kiosk && <button onClick={enter} aria-label={t("들어가기")}>
                 <span aria-hidden="true">↗</span>
               </button>}
-            </div>
-            {kiosk && <KioskPanel link={link} />}
+            </div>}
+            {kiosk && (exhibitionEditor ? <KioskLog link={link} /> : <KioskPanel link={link} />)}
           </aside>
         </div>
       <input

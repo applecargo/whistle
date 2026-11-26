@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
@@ -29,7 +30,17 @@ const server = createServer(async (request, response) => {
 const relay = attachPortalRelay(server);
 const meetingRelay = attachMeetingRelay(server);
 const port = Number(process.env.PORT ?? 5173);
-server.listen(port, process.env.HOST ?? "0.0.0.0", () => console.log(`Whistle: http://localhost:${port}/whistle/`));
+server.listen(port, process.env.HOST ?? "0.0.0.0", () => {
+  console.log(`Whistle: http://localhost:${port}/whistle/`);
+  if (process.platform === "win32" && process.env.WHISTLE_KIOSK !== "0") {
+    const launcher = fileURLToPath(new URL("./windows-kiosk.ps1", import.meta.url));
+    const displays = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "RemoteSigned",
+      "-File", launcher, "-Port", String(port), "-ServerProcessId", String(process.pid)],
+      { windowsHide: true, stdio: ["ignore", "inherit", "inherit"] });
+    displays.on("error", error => console.error("Whistle kiosk:", error.message));
+    displays.on("exit", code => { if (code) console.error("Whistle kiosk launcher exited:", code); });
+  }
+});
 const stop = async () => { relay.close(); await meetingRelay.close(); server.close(); server.closeAllConnections(); };
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);

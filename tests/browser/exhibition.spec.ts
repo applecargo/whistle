@@ -236,3 +236,35 @@ test("a separate M1 profile follows kiosk edits and UDP positions and restores t
     await bridge.close();
   }
 });
+
+test("Windows kiosk channels show the editor and its live 3D overview separately", async ({ page, context }) => {
+  const bridge = await startBridge(config, { wsPort: 0, udpPort: 0, log: () => {} });
+  try {
+    await context.addInitScript(port => {
+      localStorage.setItem("whistle.kiosk.v1", JSON.stringify({ bridge: `ws://127.0.0.1:${port}`,
+        mapping: { originX: 0, originZ: 0, width: 6.8, depth: 7.2, rotation: 0 } }));
+    }, bridge.wsPort);
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const scene = await context.newPage();
+    const messages: string[] = [];
+    scene.on("websocket", socket => {
+      if (socket.url().endsWith("/world")) socket.on("framereceived", frame => {
+        messages.push(JSON.stringify(JSON.parse(String(frame.payload)).world.terrain.tiles));
+      });
+    });
+    await scene.goto("./kiosk/?channel=scene");
+    await expect(scene.getByRole("status")).toHaveText("키오스크 맵 수신 대기 중");
+    await page.goto("./kiosk/?channel=editor");
+    await expect(page.locator(".world-grid [data-cell]")).toHaveCount(144);
+    await expect(page.locator('[data-kiosk-world="connected"]')).toBeVisible();
+    await expect(page.locator(".topbar, .live-preview, canvas")).toHaveCount(0);
+    await expect(scene.locator("canvas")).toHaveAttribute("data-ready", "true");
+    await expect(scene.getByRole("button")).toHaveCount(0);
+    const before = messages.at(-1);
+    await page.getByRole("button", { name: "흐름", exact: true }).click();
+    await page.locator('[data-cell="65"]').click();
+    await expect.poll(() => messages.at(-1)).not.toBe(before);
+    await scene.reload();
+    await expect(scene.locator("canvas")).toHaveAttribute("data-ready", "true");
+  } finally { await bridge.close(); }
+});
