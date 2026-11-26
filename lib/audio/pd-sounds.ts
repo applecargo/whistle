@@ -23,8 +23,8 @@ export type PlacedVoice = {
   node: AudioNode;
   /** 소리를 끝까지 한 번 다 재생했을 때(placed_sound.pd가 [s $1-whistle-sound-end]로 알린다. 패치가 늘리거나 빠르게 해도 맞다) */
   onEnd(listener: () => void): void;
-  /** 패치에 보낸다(placed_sound.pd의 [r $1-whistle-sound]: distance <타일> <반경>) */
-  send(message: PdMessage): void;
+  /** 패치에 보낸다(<이름>-<bus>. placed_sound.pd는 [r $1-whistle-sound]: distance <타일> <반경>) */
+  send(bus: string, message: PdMessage): void;
   destroy(): void;
 };
 export type PlaySound = {
@@ -92,7 +92,7 @@ export function createPdSounds(engine: Pick<PdEngine, "context" | "start" | "sen
       const voice = await engine.start(PLACED_PATCH);
       voice.send("whistle-sound", stereo ? ["set", `${name}-L`, `${name}-R`] : ["set", `${name}-L`]);
       return { id: voice.id, node: voice.node, onEnd: (listener) => voice.onBang("whistle-sound-end", listener),
-        send: (message) => voice.send("whistle-sound", message), destroy: voice.destroy };
+        send: voice.send, destroy: voice.destroy };
     },
   };
 }

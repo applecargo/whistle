@@ -35,7 +35,7 @@ const tilesOf = (world: World) => world.terrain?.tiles ?? flatTiles.get(world.si
  * pd4web 엔진 1개(AudioContext도 엔진의 것. 페이지와 함께 계속 산다):
  *   상호작용 패치(edit·player·event) ─┐
  *   사운드스케이프(층별 영역 패치들) ──┼─→ 마스터 게인(음소거 fade) → 리미터 → 출력
- *   배치한 녹음 사운드(Pd 슬롯, 10배로 늘림) ┘
+ *   (배치한 소리도 사운드스케이프 소스: Pd 슬롯 placed_sound) ┘
  */
 /** 소리 켜기를 이만큼(ms) 기다려도 안 되면 알린다(계속 기다리고, 다음 터치·키에서 켜진다: unlockAudio). */
 const RESUME_NOTICE_MS = 3000;
@@ -109,8 +109,8 @@ export type GameAudioDebug = {
   context: { state: AudioContextState; sampleRate: number; latencyHint: AudioContextLatencyCategory; baseLatency: number; outputLatency?: number } | null;
   /** 시작된 상호작용 패치(오디오가 시작되면 3개가 계속 돈다) */
   interaction: string[];
-  /** 사운드스케이프 패치 인스턴스(loading·active·releasing 모두 Pd 엔진 슬롯 하나씩) */
-  voices: { id: string; patch: string; state: string }[];
+  /** 사운드스케이프 패치 인스턴스(영역·배치한 소리. loading·active·releasing 모두 Pd 엔진 슬롯 하나씩) */
+  voices: { id: string; patch: string; state: string; instance?: string }[];
   soundscape: ReturnType<GameSoundscape["debug"]> | null;
   diffuse: boolean;
   enabled: boolean;
@@ -142,7 +142,7 @@ export function useGameAudio(notify: (message: string) => void) {
       async () => {
         const mix = await createGameMix(failed);
         mixRef.current = mix;
-        recordings.current = createPlacedSounds(mix.context, () => {}, mix.master, mix.playSound);
+        recordings.current = createPlacedSounds(mix.scape, mix.playSound);
         soundscape.current = mix.game;
         return mix.session;
       },

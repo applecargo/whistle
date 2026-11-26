@@ -6,6 +6,8 @@ import { createPlacedSounds, nearbySounds } from "../lib/audio/placed-sounds.ts"
 import { wavFile, type PlaySound } from "../lib/audio/pd-sounds.ts";
 import { validRecording, type Recording } from "../lib/audio/recording.ts";
 import type { PlayerAudioFrame } from "../lib/audio/game-parameters.ts";
+import type { PatchHandle, SoundscapeSource } from "../lib/audio/soundscape.ts";
+import { toScene } from "../lib/audio/terrain-sources.ts";
 
 const sound: Recording = { data: "data:audio/wav;base64,AAAA", duration: 1, radius: 4, volume: 1, mode: "loop" };
 const player: PlayerAudioFrame = { x: 6, y: 0, z: 6, size: 12, grass: 0, rough: 0, water: 0, grounded: true, falling: false, yaw: 0 };
@@ -15,29 +17,53 @@ function worldWithSounds(count = 1) {
   world.objects = Array.from({ length: count }, (_, i) => ({ id: `sound${i}`, asset: "recording", x: 6 + i % 5, z: 5 + Math.floor(i / 5), scale: 1, rotation: 0 }));
   return world;
 }
-/** 가짜 AudioContext와 가짜 play(Pd 슬롯 대신). plays: play 호출 수, active: 살아 있는 소리 수 */
-/** 가짜 AudioContext와 가짜 play(Pd 슬롯 대신). plays: play 호출 수, active: 살아 있는 소리 수, end(): 재생 중인 소리가 끝났다고 알림 */
-function contextProbe(deferred = false) {
+/** 가짜 사운드스케이프(소스를 켜면 source.start로 슬롯을 연다)와 가짜 play(Pd 슬롯 대신).
+ *  plays: play 호출 수, active: 살아 있는 소리 수, end(): 재생 중인 소리가 끝났다고 알림, sent: 패치로 보낸 메시지 */
+function scapeProbe(deferred = false) {
   let plays = 0, active = 0;
   const sent: string[] = [];
   const waiting: (() => void)[] = [], ends: (() => void)[] = [];
-  const param = () => ({ value: 0, setValueAtTime() {}, setTargetAtTime() {} });
-  const node = () => ({ connect(next: unknown) { return next; }, disconnect() {} });
-  const ctx = {
-    currentTime: 2, state: "running", destination: {},
-    createGain: () => ({ ...node(), gain: param() }),
-    createStereoPanner: () => ({ ...node(), pan: param() }),
-  } as unknown as AudioContext;
+  const sources = new Map<string, SoundscapeSource>();
+  type FakeVoice = { state: "loading" | "active"; wanted: boolean; patch?: PatchHandle };
+  const voices = new Map<string, FakeVoice>();
+  const deliver = (id: string) => {
+    const voice = voices.get(id), source = sources.get(id);
+    for (const [bus, messages] of Object.entries(source?.messages ?? {}))
+      for (const message of messages) voice?.patch?.send?.(bus, message);
+  };
+  const scape = {
+    set(source: SoundscapeSource) { sources.set(source.id, source); if (voices.get(source.id)?.state === "active") deliver(source.id); },
+    remove(id: string) { scape.deactivate(id); sources.delete(id); },
+    activate(id: string) {
+      if (voices.has(id)) return;
+      const voice: FakeVoice = { state: "loading", wanted: true };
+      voices.set(id, voice);
+      sources.get(id)!.start!().then((patch) => {
+        if (!voice.wanted) { patch.destroy(); return; }
+        Object.assign(voice, { state: "active", patch });
+        deliver(id);
+      }, () => voices.delete(id));
+    },
+    deactivate(id: string) {
+      const voice = voices.get(id);
+      if (!voice) return;
+      voice.wanted = false;
+      voice.patch?.destroy();
+      voices.delete(id);
+    },
+    snapshot: () => ({ sources: sources.size, voices: [...voices].map(([id, v]) => ({ id, patch: "placed_sound", state: v.state, instance: v.patch?.id })) }),
+  };
+  const node = { connect(next: unknown) { return next; }, disconnect() {} } as unknown as AudioNode;
   const voice = () => {
     active++;
-    return { id: `v${plays}`, node: node() as unknown as AudioNode, onEnd: (listener: () => void) => { ends.push(listener); },
-      send: (message: (string | number)[]) => { sent.push(message.join(" ")); }, destroy() { active--; } };
+    return { id: `v${plays}`, node, onEnd: (listener: () => void) => { ends.push(listener); },
+      send: (_bus: string, message: (string | number)[]) => { sent.push(message.join(" ")); }, destroy() { active--; } };
   };
   const play: PlaySound = {
     prepare: () => Promise.resolve(),
     play: () => { plays++; return deferred ? new Promise(resolve => waiting.push(() => resolve(voice()))) : Promise.resolve(voice()); },
   };
-  return { ctx, play, finish: () => waiting.splice(0).forEach(go => go()), end: () => ends.splice(0).forEach(go => go()), state: () => ({ plays, active }), sent };
+  return { scape, sources, play, finish: () => waiting.splice(0).forEach(go => go()), end: () => ends.splice(0).forEach(go => go()), state: () => ({ plays, active }), sent };
 }
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
@@ -51,20 +77,24 @@ test("recordings survive validation and reject URLs, malformed data, excessive d
   assert.throws(() => validateWorld(world), /사물 데이터/);
 });
 
-test("distance reduces volume and turning reverses left and right", () => {
+test("distance reduces volume; the source sits on its tile like a region (direction comes from the panner)", async () => {
   const world = worldWithSounds(); world.objects[0].x = 7; world.objects[0].z = 6;
   const actors = createSimulation(world).actors;
   const near = nearbySounds(world, actors, player)[0];
   const far = nearbySounds(world, actors, { ...player, x: 4 })[0];
   assert.ok(near.gain > far.gain);
-  assert.equal(near.pan, 1);
-  assert.equal(nearbySounds(world, actors, { ...player, yaw: Math.PI })[0].pan, -1);
   assert.equal(nearbySounds(world, actors, { ...player, x: 0 })[0].gain, 0);
+  const probe = scapeProbe(), audio = createPlacedSounds(probe.scape, probe.play);
+  audio.update(world, actors, player);
+  const source = probe.sources.get("placed:sound0")!;
+  assert.deepEqual([source.position.x, source.position.z], [toScene(7, world.size), toScene(6, world.size)]);
+  assert.equal(source.gain, near.gain);
+  audio.stop();
 });
 
 test("only three nearby voices play and stop on exit", async () => {
-  const world = worldWithSounds(5), actors = createSimulation(world).actors, probe = contextProbe();
-  const audio = createPlacedSounds(probe.ctx, () => assert.fail("play failed"), {} as AudioNode, probe.play);
+  const world = worldWithSounds(5), actors = createSimulation(world).actors, probe = scapeProbe();
+  const audio = createPlacedSounds(probe.scape, probe.play);
   audio.update(world, actors, player); await flush();
   assert.deepEqual(probe.state(), { plays: 3, active: 3 });
   audio.update(world, actors, { ...player, x: 0, z: 0 });
@@ -75,8 +105,8 @@ test("only three nearby voices play and stop on exit", async () => {
 });
 
 test("playing sounds get their distance and radius (tiles) each update", async () => {
-  const world = worldWithSounds(), actors = createSimulation(world).actors, probe = contextProbe();
-  const audio = createPlacedSounds(probe.ctx, () => assert.fail("play failed"), {} as AudioNode, probe.play);
+  const world = worldWithSounds(), actors = createSimulation(world).actors, probe = scapeProbe();
+  const audio = createPlacedSounds(probe.scape, probe.play);
   audio.update(world, actors, player); await flush();
   audio.update(world, actors, player);
   const [item] = audio.snapshot();
@@ -85,8 +115,8 @@ test("playing sounds get their distance and radius (tiles) each update", async (
 });
 
 test("a slot that opens late cannot play after stopping", async () => {
-  const world = worldWithSounds(), probe = contextProbe(true);
-  const audio = createPlacedSounds(probe.ctx, () => assert.fail("play failed"), {} as AudioNode, probe.play);
+  const world = worldWithSounds(), probe = scapeProbe(true);
+  const audio = createPlacedSounds(probe.scape, probe.play);
   audio.update(world, createSimulation(world).actors, player);
   audio.stop(); probe.finish(); await flush();
   assert.equal(probe.state().active, 0);
@@ -94,8 +124,8 @@ test("a slot that opens late cannot play after stopping", async () => {
 
 test("approach clips play once (until the patch says it ended) and rearm only after leaving the radius", async () => {
   const world = worldWithSounds(); world.assets.at(-1)!.sound!.mode = "approach";
-  const actors = createSimulation(world).actors, probe = contextProbe();
-  const audio = createPlacedSounds(probe.ctx, () => assert.fail("play failed"), {} as AudioNode, probe.play);
+  const actors = createSimulation(world).actors, probe = scapeProbe();
+  const audio = createPlacedSounds(probe.scape, probe.play);
   audio.update(world, actors, player); await flush();
   assert.equal(probe.state().active, 1);
   probe.end();
