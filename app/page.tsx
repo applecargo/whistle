@@ -24,6 +24,8 @@ import { useWorldPersistence } from "@/components/whistle/useWorldPersistence";
 import { browserWorldStore } from "@/lib/browser-world";
 import { useLiveWorldPublisher } from "@/components/whistle/useLiveWorldPublisher";
 import { KioskLog, KioskPanel, KioskPlayers, useKioskLink } from "@/components/whistle/Kiosk";
+import { EditorPreview } from "@/components/whistle/EditorPreview";
+import { usePublishEditorPreview } from "@/kiosk/useEditorPreview";
 import { EditorToolbar } from "@/components/whistle/EditorToolbar";
 import { EditorPalette } from "@/components/whistle/EditorPalette";
 import { EditorBoard } from "@/components/whistle/EditorBoard";
@@ -129,7 +131,10 @@ export default function Home({meeting,kiosk=false,exhibitionEditor=false}:{meeti
     ...(meeting.view.materials.map(a => a.id) ?? []),...world.assets.filter(a=>a.received).map(a=>a.id),
   ]), [meeting.view.materials,world.assets]);
   const ownActors = simulation.actors;
-  const visibleMeeting=useMemo(()=>({...meeting,view:withLocalMeetingFootings(meeting.view,world)}),[meeting,world]);
+  const editorView = useMemo(() => withLocalMeetingFootings(meeting.view, world), [meeting.view, world]);
+  const visibleMeeting = { ...meeting, view: editorView };
+  const previewMeeting = useMemo(() => meetingVisuals({ view: editorView, presence: meeting.presence, status: meeting.status }, true),
+    [editorView, meeting.presence, meeting.status]);
   const derivation = useMemo(
     () => deriveWorld(world, ownActors),
     [deriveWorld, world, ownActors],
@@ -194,6 +199,9 @@ export default function Home({meeting,kiosk=false,exhibitionEditor=false}:{meeti
     world, onLoad: handleLoad, onImport: handleImport, notify, libraryLimit: MAX_LIBRARY_SIZE,
     storage:browserStorage,fallbackWorld:initialWorld,
   });
+  const preview = useMemo(() => ({ world, simulation, derivation, feedback, meeting: previewMeeting }),
+    [world, simulation, derivation, feedback, previewMeeting]);
+  usePublishEditorPreview(exhibitionEditor && ready ? preview : null);
   const recordTrail = useLiveWorldPublisher(world, ready, simulation.actors, playKey);
   const link = useKioskLink(kiosk, world, ready);
   useEffect(()=>{
@@ -424,14 +432,7 @@ export default function Home({meeting,kiosk=false,exhibitionEditor=false}:{meeti
           />
           <aside className="preview-panel" aria-label={t("배치 결과")}>
             {!exhibitionEditor && <div className="live-preview">
-              {!playing && <Scene
-                world={world}
-                simulation={simulation}
-                derivation={derivation}
-                mode="overview"
-                feedback={feedback}
-                    meeting={meetingVisuals(visibleMeeting,true)}
-              />}
+              {!playing && <EditorPreview {...preview} />}
               {!kiosk && <button onClick={enter} aria-label={t("들어가기")}>
                 <span aria-hidden="true">↗</span>
               </button>}

@@ -4,6 +4,7 @@ import { startBridge } from "../../scripts/uwb/bridge";
 import { distanceTo } from "../../lib/uwb/solver";
 import { config, data, setup } from "./uwb-device-fixture";
 import { outputGain, probeOutputGain } from "./pd-probe";
+import { PREVIEW_CHANNEL } from "../../kiosk/useEditorPreview";
 import { LIVE_WORLD_CHANNEL } from "../../lib/live-world";
 import { createLabWorld } from "../../uwb-lab/world";
 
@@ -221,6 +222,16 @@ test("a separate M1 profile follows kiosk edits and UDP positions and restores t
     // M1 at (1, .8) metres is nearest to grid cell (2, 1).
     await page.locator('[data-cell="14"]').click();
     await expect(canvas).toHaveAttribute("data-subject", "water-14");
+    const calibrated = new URL("./monitor-proximity/", url);
+    calibrated.search = url.search;
+    for (const [key, value] of Object.entries({ framing: "default", mx: "4", mz: ".8", face: "0" }))
+      calibrated.searchParams.set(key, value);
+    await screen.goto(calibrated.href);
+    await expect(canvas).toHaveAttribute("data-subject", "water-14");
+    await expect.poll(async () => Math.abs(await yaw())).toBeLessThan(.45);
+    x = 4.6;
+    await expect.poll(yaw).toBeGreaterThan(2);
+    expect(await canvas.getAttribute("data-subject")).toBe("water-14");
     clearInterval(timer);
     await expect.poll(async () => Math.abs(await yaw()), { timeout: 15000 }).toBeLessThan(.45);
     await screen.close();
@@ -246,12 +257,6 @@ test("Windows kiosk channels show the editor and its live 3D overview separately
     }, bridge.wsPort);
     await page.setViewportSize({ width: 1280, height: 720 });
     const scene = await context.newPage();
-    const messages: string[] = [];
-    scene.on("websocket", socket => {
-      if (socket.url().endsWith("/world")) socket.on("framereceived", frame => {
-        messages.push(JSON.stringify(JSON.parse(String(frame.payload)).world.terrain.tiles));
-      });
-    });
     await scene.goto("./kiosk/?channel=scene");
     await expect(scene.getByRole("status")).toHaveText("키오스크 맵 수신 대기 중");
     await page.goto("./kiosk/?channel=editor");
@@ -260,11 +265,24 @@ test("Windows kiosk channels show the editor and its live 3D overview separately
     await expect(page.locator(".topbar, .live-preview, canvas")).toHaveCount(0);
     await expect(scene.locator("canvas")).toHaveAttribute("data-ready", "true");
     await expect(scene.getByRole("button")).toHaveCount(0);
-    const before = messages.at(-1);
+    await expect(scene.getByRole("main", { name: "편집기 미리보기" })).toBeVisible();
+    const reaction = scene.evaluate(name => new Promise<number[]>(resolve => {
+      const channel = new BroadcastChannel(name);
+      channel.onmessage = ({ data }) => {
+        if (data.type === "preview" && data.state?.feedback) {
+          channel.close();
+          resolve(data.state.feedback.cells.map((cell: { index: number }) => cell.index));
+        }
+      };
+    }), PREVIEW_CHANNEL);
     await page.getByRole("button", { name: "흐름", exact: true }).click();
     await page.locator('[data-cell="65"]').click();
-    await expect.poll(() => messages.at(-1)).not.toBe(before);
+    expect(await reaction).toContain(65);
     await scene.reload();
+    await expect(scene.getByRole("main", { name: "편집기 미리보기" })).toBeVisible();
+    await expect(scene.locator("canvas")).toHaveAttribute("data-ready", "true");
+    await page.close();
+    await expect(scene.getByRole("main", { name: "전시장 3D" })).toBeVisible();
     await expect(scene.locator("canvas")).toHaveAttribute("data-ready", "true");
   } finally { await bridge.close(); }
 });

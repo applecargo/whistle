@@ -21,7 +21,7 @@ export function MeetingOverlay({ meeting }: {meeting:MeetingSession}) {
     {own&&<span className="meeting-map-player" style={place(own)} role="img" aria-label="내 위치" />}
   </div>;
 }
-export function meetingVisuals(meeting:MeetingSession, local=false):MeetingVisuals {
+export function meetingVisuals(meeting:Pick<MeetingSession, "view" | "presence" | "status">, local=false):MeetingVisuals {
   const {view,presence}=meeting;
   const connections = view.connections.map(c => ({...c, online: c.online!==false && meeting.status === "online" && c.members.every(id => presence.peers.some(p => p.id === id && p.online))}));
   const approaches = view.approaches.map(c=>({...c,online:c.online!==false && meeting.status === "online" && c.members.every(id=>presence.peers.some(p=>p.id===id&&p.online))}));

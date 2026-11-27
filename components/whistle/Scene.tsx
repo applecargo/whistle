@@ -64,6 +64,7 @@ type Props = {
   sector?: Sector;
   visitor?: MutableRefObject<VisitorPose | null>;
   mount?: DisplayMount;
+  viewMount?: DisplayMount;
   trail?: MutableRefObject<TrailSegment[]>;
   onPlayer?: (p: Player) => void;
   onAudioFrame?: (frame: PlayerAudioFrame) => void;
@@ -150,7 +151,7 @@ export default function Scene({
   world,
   simulation,
   derivation,
-  mode, sector, trail, mount, visitor, mapping = defaultRoom,
+  mode, sector, trail, mount, viewMount = mount, visitor, mapping = defaultRoom,
   onPlayer,
   onAudioFrame,
   onControlsReset,
@@ -628,9 +629,9 @@ export default function Scene({
           currentOrbit.phi = restOrbit.phi - sectorTilt;
           camera.position.setFromSpherical(currentOrbit).add(fragment.center);
           camera.lookAt(fragment.center);
-        } else if (observation && camera instanceof THREE.PerspectiveCamera) {
+        } else if (observation && viewMount && camera instanceof THREE.PerspectiveCamera) {
           renderer.domElement.dataset.subject = observation.update(camera, worldRef.current, derivationRef.current,
-            actors.current, mount, mappingRef.current, sectorYaw, sectorTilt, elapsed);
+            actors.current, viewMount, mappingRef.current, sectorYaw, sectorTilt, elapsed);
         }
         renderer.domElement.dataset.sectorYaw = (sectorYaw * 180 / Math.PI).toFixed(2);
       }
@@ -1019,7 +1020,7 @@ export default function Scene({
       renderer.domElement.remove();
       models.current.clear();
     };
-  }, [world.size, world.sky, world.start.x, world.start.z, mode, sector, trail, mount, visitor]);
+  }, [world.size, world.sky, world.start.x, world.start.z, mode, sector, trail, mount, viewMount, visitor]);
   return (
     <div
       className={`scene ${className}`}

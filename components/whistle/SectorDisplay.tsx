@@ -13,7 +13,7 @@ import { exampleMount, readMount, type DisplayMount, type VisitorPose } from "@/
 
 const Scene = lazy(() => import("./Scene"));
 
-function NetworkMonitor({ id, bridge, mount }: { id: Monitor; bridge: string; mount: DisplayMount }) {
+function NetworkMonitor({ id, bridge, mount, viewMount }: { id: Monitor; bridge: string; mount: DisplayMount; viewMount: DisplayMount }) {
   const { language } = useLanguage();
   const [world, setWorld] = useState<World | null>(null);
   const address = useMemo(() => {
@@ -36,7 +36,7 @@ function NetworkMonitor({ id, bridge, mount }: { id: Monitor; bridge: string; mo
   }
   return <Suspense fallback={<SceneLoading />}>
     <Scene world={world} simulation={simulation} derivation={derivation} mode="observation"
-      mapping={link.mapping} visitor={visitor} mount={mount} />
+      mapping={link.mapping} visitor={visitor} mount={mount} viewMount={viewMount} />
   </Suspense>;
 }
 
@@ -47,6 +47,8 @@ function DisplayScreen({ id }: { id: Sector | Monitor }) {
   const [mapping, setMapping] = useState<RoomMapping>(defaultRoom);
   const visitor = useRef<VisitorPose | null>(null);
   const mount = useMemo(() => readMount(id, new URLSearchParams(location.search)), [id]);
+  const viewMount = useMemo(() => new URLSearchParams(location.search).get("framing") === "default"
+    ? exampleMount(id) : mount, [id, mount]);
   const bridge = new URLSearchParams(location.search).get("bridge");
   const networkOnly = !sector && bridge !== null;
   const [tryNetwork, setTryNetwork] = useState(false);
@@ -98,8 +100,8 @@ function DisplayScreen({ id }: { id: Sector | Monitor }) {
   const monitor = monitors.find(m => m === id);
   return <main className="sector-screen">
     {state && derivation ? <Suspense fallback={<SceneLoading />}>
-      <Scene world={state.world} simulation={state} derivation={derivation} mode={sector ? "sector" : "observation"} mapping={mapping} sector={sector} trail={trail} visitor={visitor} mount={mount} />
-    </Suspense> : monitor && (networkOnly || tryNetwork) ? <NetworkMonitor id={monitor} mount={mount}
+      <Scene world={state.world} simulation={state} derivation={derivation} mode={sector ? "sector" : "observation"} mapping={mapping} sector={sector} trail={trail} visitor={visitor} mount={mount} viewMount={viewMount} />
+    </Suspense> : monitor && (networkOnly || tryNetwork) ? <NetworkMonitor id={monitor} mount={mount} viewMount={viewMount}
       bridge={bridge ?? `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.hostname}:5194`} /> : <div role="status">{language === "ko"
       ? `${id} · 같은 브라우저에서 메인 화면을 열면 연결됩니다.`
       : `${id} · Open the main screen in the same browser to connect.`}</div>}

@@ -110,6 +110,7 @@ export default defineConfig({
     rolldownOptions: {
       input: {
         main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        monitorProximity: fileURLToPath(new URL("./monitor-proximity/index.html", import.meta.url)),
         audioLab: fileURLToPath(new URL("./audio-lab/index.html", import.meta.url)),
         soundscapeLab: fileURLToPath(new URL("./audio-lab/soundscape.html", import.meta.url)),
         uwbLab: fileURLToPath(new URL("./uwb-lab/index.html", import.meta.url)),
