@@ -14,18 +14,31 @@
 
 .studio[data-kiosk-editor] .workspace {
   display: grid;
-  grid-template-columns: clamp(88px, 9vw, 144px) minmax(0, 1fr) clamp(215px, 22vw, 340px);
+  --menu-width: clamp(88px, 9vw, 144px);
+  grid-template-columns: var(--menu-width) minmax(0, 1fr) var(--menu-width);
+  grid-template-rows: minmax(0, 1fr);
   height: 100dvh;
   max-width: none;
   padding: clamp(10px, 2vh, 24px);
   gap: clamp(8px, 1.6vw, 28px);
 }
-[data-kiosk-editor] .canvas-area { height: auto; min-height: 0; max-height: none; }
+[data-kiosk-editor] .canvas-panel {
+  grid-area: 1 / 2;
+  align-self: stretch;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+[data-kiosk-editor] .canvas-tools { grid-row: 3; align-self: start; margin-top: 4px; }
+[data-kiosk-editor] .canvas-area { grid-row: 2; height: auto; min-height: 0; max-height: none; }
 [data-kiosk-editor] .canvas-area .world-grid {
   width: min(calc(100% * 12 / 14), calc(100dvh - 100px));
   max-width: none;
 }
 .studio[data-kiosk-editor] .canvas-area:has(.meeting-map-layer) .world-grid { max-width: none; }
-[data-kiosk-editor] .palette, [data-kiosk-editor] .preview-panel { max-height: 100%; overflow: auto; }
-[data-kiosk-editor] .preview-panel { grid-column: 3; grid-row: 1; }
-[data-kiosk-editor] .kiosk-panel { margin-top: 0; }
+[data-kiosk-editor] .palette { grid-area: 1 / 1; max-height: 100%; overflow: auto; }
+[data-kiosk-editor] .preview-panel { display: none; }
+[data-kiosk-editor] .meeting-map-approach.disconnected,
+[data-kiosk-editor] .meeting-map-connection.disconnected {
+  background-color: #fff;
+  border-color: #fff;
+}

@@ -26,7 +26,7 @@ export function readMount(sector: Sector | Monitor, query: URLSearchParams): Dis
   return values.every(Number.isFinite) ? { x: values[0], z: values[1], facing: values[2] } : exampleMount(sector);
 }
 
-const reactionRadius = 1.8;
+const reactionRadius = 2;
 
 export function selectMonitorTag(mount: DisplayMount, poses: ReadonlyMap<string, VisitorPose>, current: string | undefined, now: number) {
   const angle = mount.facing * Math.PI / 180;
@@ -54,10 +54,10 @@ export function cameraOffset(mount: DisplayMount, visitor: VisitorPose | null, n
   const dx = visitor.room.x - mount.x, dz = visitor.room.z - mount.z;
   const forward = dx * Math.sin(angle) + dz * Math.cos(angle);
   const side = dx * Math.cos(angle) - dz * Math.sin(angle);
-  const near = smooth((reactionRadius - Math.hypot(dx, dz)) / 1.4) * smooth(forward / .25);
+  const near = smooth((reactionRadius - Math.hypot(dx, dz)) / (reactionRadius - .4)) * smooth(forward / .25);
   if (near === 0) return { yaw: 0, tilt: 0 };
   return {
-    yaw: near * Math.sign(side) * smooth((Math.abs(side) - .10) / .65) * 10 * Math.PI / 180,
+    yaw: near * Math.sign(side) * smooth((Math.abs(side) - .10) / .65) * 12 * Math.PI / 180,
     tilt: near * 3 * Math.PI / 180,
   };
 }

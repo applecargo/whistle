@@ -261,7 +261,22 @@ test("Windows kiosk channels show the editor and its live 3D overview separately
     await expect(scene.getByRole("status")).toHaveText("키오스크 맵 수신 대기 중");
     await page.goto("./kiosk/?channel=editor");
     await expect(page.locator(".world-grid [data-cell]")).toHaveCount(144);
-    await expect(page.locator('[data-kiosk-world="connected"]')).toBeVisible();
+    await expect(page.locator(".kiosk-panel")).toBeHidden();
+    await expect(page.locator("[data-kiosk-positions]")).toHaveAttribute("data-kiosk-positions", "connected");
+    const point = { x: 1, z: 2, boardHeight: 1.2 };
+    const udp = createSocket("udp4");
+    try {
+      const ranges = config.anchors.map(a => ({ anchorId: a.id, distance: distanceTo(point, a) }));
+      await new Promise<void>((resolve, reject) => udp.send(JSON.stringify({ type: "ranges", tagId: "0", seq: 1, ranges }),
+        bridge.udpPort, "127.0.0.1", err => err ? reject(err) : resolve()));
+      await expect(page.locator('[data-kiosk-player="0"]')).toBeVisible();
+    } finally { udp.close(); }
+    for (const viewport of [{ width: 2560, height: 1600 }, { width: 1280, height: 720 }]) {
+      await page.setViewportSize(viewport);
+      const grid = (await page.locator(".world-grid").boundingBox())!;
+      expect(Math.abs(grid.x + grid.width / 2 - viewport.width / 2)).toBeLessThan(1);
+      expect(Math.abs(grid.y + grid.height / 2 - viewport.height / 2)).toBeLessThan(1);
+    }
     await expect(page.locator(".topbar, .live-preview, canvas")).toHaveCount(0);
     await expect(scene.locator("canvas")).toHaveAttribute("data-ready", "true");
     await expect(scene.getByRole("button")).toHaveCount(0);

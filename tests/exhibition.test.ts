@@ -82,6 +82,9 @@ test("each monitor keeps a nearby front-facing tag until it expires or another i
   assert.equal(selectMonitorTag(mount, poses, "0", 1000), "0");
   poses.set("1", pose(.1, .1, 1900));
   assert.equal(selectMonitorTag(mount, poses, "0", 1950), "1");
+  poses.set("1", pose(.5, 1.8, 2100));
+  assert.equal(selectMonitorTag(mount, poses, undefined, 2100), "1");
+  assert.ok(cameraOffset(mount, poses.get("1")!, 2100).yaw > 0);
   poses.set("1", pose(0, 2, 2100));
   assert.equal(selectMonitorTag(mount, poses, "0", 2100), undefined);
 });
