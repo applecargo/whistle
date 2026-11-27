@@ -1,3 +1,4 @@
+import { SOCKET_RETRY_MS } from "../components/whistle/useSocket";
 import { createTrackingFilter, INVALID_HOLD_MS } from "./tracking-filter";
 import { useCallback, useEffect, useState } from "react";
 import { parseBridgeMessage, TRACKING_TIMEOUT_MS, type PositionMessage, type RangeMessage } from "../lib/uwb/protocol";
@@ -6,7 +7,7 @@ import { calibrateAtCentre, correctRanges, type RangeCorrection } from "../lib/u
 
 type CorrectionProfile = { calibration: BridgeConfig; tagId: string; corrections: RangeCorrection[] };
 
-export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | null = null) {
+export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | null = null, autoReconnect = false) {
   const [request, setRequest] = useState<{ url: string; tagId: string } | null>(null);
   const [profile, setProfile] = useState<CorrectionProfile | null>(null);
   const activeProfile = profile?.calibration === calibration && profile?.tagId === request?.tagId ? profile : null;
@@ -37,6 +38,7 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
       socket = new WebSocket(url);
     } catch { setStatus("수신기 주소가 올바르지 않습니다."); return; }
     let disposed = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let lastReceived = 0;
     let lastSequence = -1;
     let rangesOnly = false;
@@ -125,7 +127,16 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
       } catch { clear("수신 데이터가 올바르지 않습니다."); }
     };
     socket.onerror = () => { if (!disposed) { lastReceived = 0; clear("PC 수신기에 연결할 수 없습니다."); } };
-    socket.onclose = () => { if (!disposed) { lastReceived = 0; clear("PC 수신기 연결이 끊겼습니다."); } };
+    socket.onclose = () => {
+      if (disposed) return;
+      lastReceived = 0;
+      clear(autoReconnect ? "PC 수신기 연결 끊김 · 자동 재연결 중" : "PC 수신기 연결이 끊겼습니다.");
+      if (autoReconnect) {
+        retryTimer = setTimeout(() => {
+          setRequest(current => current === request ? { ...request } : current);
+        }, SOCKET_RETRY_MS);
+      }
+    };
     const timer = window.setInterval(() => {
       if (lastReceived && performance.now() - lastReceived > TRACKING_TIMEOUT_MS) {
         lastReceived = 0;
@@ -140,9 +151,10 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
       cancelHold();
       window.clearInterval(timer); window.clearTimeout(connectionTimeout);
       clearTimeout(captureTimer);
+      clearTimeout(retryTimer);
       socket.close();
     };
-  }, [enabled, request, calibration, activeProfile, capturing]);
+  }, [enabled, request, calibration, activeProfile, capturing, autoReconnect]);
 
   return { position: enabled && request && !capturing && position?.calibration === calibration && position.profile === activeProfile ? position.value : null,
     ranges: enabled && request ? ranges : null, calibrated: !!calibration,

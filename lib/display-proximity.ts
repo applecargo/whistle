@@ -7,7 +7,7 @@ export type DisplayMount = Position2D & { facing: number };
 export type VisitorPose = { room: Position2D; at: number };
 
 const monitorLocations: Record<Monitor, [number, number]> = {
-  M1: [1, .8], M2: [4.8, .8], M3: [3, 3],
+  M1: [1, .8], M2: [4.8, .8], M3: [3, 3], M4: [4.8, 4.8],
 };
 
 export function exampleMount(sector: Sector | Monitor): DisplayMount {

@@ -1,11 +1,16 @@
 // UWB 다중 플레이어: 수신기(가상 태그 4개) → 키오스크가 맵을 보내고 태그를 표시 → 플레이어 페이지가 맵을 받아 스스로 오디오를 켠다.
-import { test, expect, chromium } from "@playwright/test";
+import { test, expect, chromium, type Page } from "@playwright/test";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { WebSocket, WebSocketServer } from "ws";
+import { createLabWorld } from "../../uwb-lab/world";
+import { probeOutputGain, outputGain } from "./pd-probe";
 
 const WS_PORT = 5294, UDP_PORT = 5295;
 const bridgeUrl = `ws://127.0.0.1:${WS_PORT}`;
 
 test.setTimeout(180_000);
+test.use({ launchOptions: { args: ["--autoplay-policy=no-user-gesture-required", "--mute-audio"] } });
 test("kiosk sends its map through the bridge, shows four tags, and a player page starts audio on its own", async ({ baseURL }) => {
   const bridge = spawn(process.execPath, ["--experimental-strip-types", "scripts/uwb-bridge.ts", "--simulate",
     "--ws-port", String(WS_PORT), "--udp-port", String(UDP_PORT)], { stdio: "pipe" });
@@ -36,3 +41,84 @@ test("kiosk sends its map through the bridge, shows four tags, and a player page
     } finally { await browser.close(); }
   } finally { bridge.kill(); }
 });
+
+test("T0 and T1 independently resume audible output in the same tab after a dropped socket", async ({ context, baseURL }) => {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  const address = server.address();
+  if (typeof address !== "object" || !address) throw new Error("Missing test server address");
+  const bridge = `ws://127.0.0.1:${address.port}`;
+  const world = createLabWorld();
+  world.weather = "rain";
+  const map = JSON.stringify({ type: "world", world, mapping: { originX: 0, originZ: 0, width: 6, depth: 6, rotation: 0 } });
+  const positionClients = new Set<WebSocket>();
+  let accepting = true, rejected = 0, silentTag = -1;
+  const seq = [10000, 10000];
+  server.on("connection", (socket, req) => {
+    if (req.url === "/world") { socket.send(map); return; }
+    if (!accepting) { rejected++; socket.terminate(); return; }
+    positionClients.add(socket);
+    socket.on("close", () => positionClients.delete(socket));
+  });
+  const timer = setInterval(() => {
+    for (const tag of [0, 1]) {
+      if (tag === silentTag) continue;
+      const frame = JSON.stringify({ type: "position", tagId: String(tag), seq: ++seq[tag], receivedAt: Date.now(),
+        x: tag ? 5 : 1, z: 3, boardHeight: 1.2, residual: 0, anchors: 4, heightSource: "fixed" });
+      for (const ws of positionClients) if (ws.readyState === WebSocket.OPEN) ws.send(frame);
+    }
+  }, 100);
+  try {
+    const players = [];
+    for (const tag of [0, 1]) {
+      const previous = new Set(positionClients);
+      const page = await context.newPage();
+      await probeOutputGain(page);
+      await page.goto(`${baseURL}player/?tag=${tag}&bridge=${encodeURIComponent(bridge)}`);
+      await expect(page.locator("#player-device")).toContainText(`태그 ${tag} 수신 중`);
+      await expect(page.locator("#audio-status")).toHaveText("오디오 실행 중", { timeout: 60_000 });
+      await expect.poll(() => masterRms(page), { timeout: 15_000 }).toBeGreaterThan(0.00001);
+      const socket = [...positionClients].find(ws => !previous.has(ws));
+      if (!socket) throw new Error("Missing player position socket");
+      players.push({ page, socket, origin: await page.evaluate(() => performance.timeOrigin) });
+    }
+    for (const [tag, { page, socket, origin }] of players.entries()) {
+      const other = players[1 - tag].page;
+      accepting = false;
+      rejected = 0;
+      silentTag = tag;
+      socket.terminate();
+      await expect(page.locator("#player-device")).toContainText("자동 재연결");
+      await expect.poll(() => outputGain(page)).toBe(0);
+      await expect.poll(() => masterRms(page)).toBeLessThan(0.000001);
+      await expect.poll(() => rejected, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+      await expect.poll(() => masterRms(other)).toBeGreaterThan(0.00001);
+      accepting = true;
+      await expect(page.locator("#player-device")).toContainText(`태그 ${tag} 데이터 대기`);
+      expect(await outputGain(page)).toBe(0);
+      seq[tag] = 0;
+      silentTag = -1;
+      await expect(page.locator("#player-device")).toContainText(`태그 ${tag} 수신 중`);
+      await expect.poll(() => masterRms(page), { timeout: 15_000 }).toBeGreaterThan(0.00001);
+      expect(await page.evaluate(() => performance.timeOrigin)).toBe(origin);
+    }
+  } finally {
+    clearInterval(timer);
+    for (const ws of server.clients) ws.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+function masterRms(page: Page) {
+  return page.evaluate(() => {
+    const w = window as unknown as { outputProbe?: GainNode; masterAnalyser?: AnalyserNode };
+    if (!w.outputProbe) return 0;
+    if (!w.masterAnalyser) {
+      w.masterAnalyser = w.outputProbe.context.createAnalyser();
+      w.outputProbe.connect(w.masterAnalyser);
+    }
+    const wave = new Float32Array(w.masterAnalyser.fftSize);
+    w.masterAnalyser.getFloatTimeDomainData(wave);
+    return Math.sqrt(wave.reduce((sum, value) => sum + value * value, 0) / wave.length);
+  });
+}

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
-const RETRY_MS = 2000;
+export const SOCKET_RETRY_MS = 2000;
 export type Link = "off" | "connecting" | "connected" | "disconnected" | "invalid";
 
-/** 끊기면 RETRY_MS마다 다시 붙는 웹소켓. url: undefined = 끔, null = 주소 오류 */
+/** 끊기면 2초마다 다시 붙는 웹소켓. url: undefined = 끔, null = 주소 오류 */
 export function useSocket(url: URL | null | undefined, onOpen: (ws: WebSocket) => void, onMessage?: (data: unknown) => void) {
   const [state, setState] = useState<Link>("off");
   const handlers = useRef({ onOpen, onMessage });
@@ -25,7 +25,7 @@ export function useSocket(url: URL | null | undefined, onOpen: (ws: WebSocket) =
         if (stopped) return;
         socket.current = null;
         setState("disconnected");
-        retry = setTimeout(connect, RETRY_MS);
+        retry = setTimeout(connect, SOCKET_RETRY_MS);
       };
     };
     connect();

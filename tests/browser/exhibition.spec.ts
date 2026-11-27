@@ -17,9 +17,9 @@ test.use({
   ] },
 });
 
-test("the exhibition picker offers three views and matching UWB placements", async ({ page }) => {
+test("the exhibition picker offers four views and matching UWB placements", async ({ page }) => {
   await page.goto("./?display=monitors");
-  const views = ["M1", "M2", "M3"];
+  const views = ["M1", "M2", "M3", "M4"];
   await expect(page.getByRole("navigation").getByRole("link")).toHaveText(views);
   await page.locator("details summary").click();
   await expect(page.getByRole("combobox").locator("option")).toHaveText(views);
@@ -140,7 +140,7 @@ test("all nine fragments render and both sides of a crossed boundary show the vi
     expect(pixels.landscape, id).toBeGreaterThan(100);
     expect(pixels.trail, id).toBe(0);
   }
-  for (const id of ["M1", "M2", "M3"]) {
+  for (const id of ["M1", "M2", "M3", "M4"]) {
     await open(id);
     await expect(canvas).toHaveAttribute("data-subject", /.+/);
   }

@@ -37,7 +37,7 @@ export default function Lab({ exhibitionTag, player }: { exhibitionTag?: string;
   const deviceMode = inputMode === "device";
   const [anchorSetup, setAnchorSetup] = useState<RectangleSetup | null>(null);
   const calibration = useMemo(() => anchorSetup ? rectangleConfig(anchorSetup) : null, [anchorSetup]);
-  const device = useDevicePosition(deviceMode, calibration);
+  const device = useDevicePosition(deviceMode, calibration, !!player);
   const connectDevice = device.connect;
   useEffect(() => {
     if (!player) return;
