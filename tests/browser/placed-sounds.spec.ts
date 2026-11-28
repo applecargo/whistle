@@ -2,6 +2,7 @@ import { savedWorld } from "./world-storage";
 import { test, expect, type Page } from "@playwright/test";
 import { terrainFixtures } from "../terrain-fixtures";
 import { probePd, pdProbe, pdOutputRms, type PdProbe } from "./pd-probe";
+import { SOUND_RADIUS } from "../../lib/audio/recording";
 
 test.setTimeout(180_000);
 
@@ -143,7 +144,11 @@ test("sound editor fits mobile and updates the existing material", async ({ page
   await expect(page.getByLabel("사운드 이름", { exact: true })).toHaveAttribute("maxlength", "12");
   await page.getByLabel("사운드 이름", { exact: true }).fill("물소리");
   await expect(page.getByRole("dialog")).not.toContainText("10MB");
-  await expect(page.getByLabel("들리는 범위", { exact: false })).toHaveCount(0);
+  const range = page.getByRole("slider", { name: "들리는 거리", exact: true });
+  await expect(range).toHaveValue(String(SOUND_RADIUS.default));
+  await expect(range).toHaveAttribute("min", String(SOUND_RADIUS.min));
+  await expect(range).toHaveAttribute("max", String(SOUND_RADIUS.max));
+  await range.fill("3");
   await page.getByRole("slider", { name: "볼륨", exact: true }).fill("0.4");
   await page.getByRole("button", { name: "미리 듣기", exact: true }).click();
   await expect(page.locator("audio")).toHaveJSProperty("paused", false);
@@ -161,8 +166,8 @@ test("sound editor fits mobile and updates the existing material", async ({ page
   await page.screenshot({ path: "/tmp/whistle-sound-editor-mobile.png" });
   await page.getByRole("button", { name: "저장", exact: true }).click();
   await expect(page.getByRole("button", { name: "파일 저장", exact: true })).toHaveAttribute("aria-description", "이 브라우저에 저장됨");
-  const sounds = (await savedWorld(page)).assets.filter(a=>a.sound).map(a=>[a.name,null,a.sound!.mode,a.sound!.volume]);
-  expect(sounds).toEqual([["물소리", null, "approach", 0.4]]);
+  const sounds = (await savedWorld(page)).assets.filter(a=>a.sound).map(a=>[a.name,null,a.sound!.mode,a.sound!.volume,a.sound!.radius]);
+  expect(sounds).toEqual([["물소리", null, "approach", 0.4, 3]]);
 });
 
 test("uploaded stereo WAV is compressed, keeps stereo and can be previewed", async ({ page }) => {

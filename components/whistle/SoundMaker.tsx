@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Dialog, MakerActions } from "./Dialogs";
 import { useLanguage, userErrorMessage } from "./Language";
 import { uid, type Asset } from "@/lib/world";
-import { readRecording, type Recording } from "@/lib/audio/recording";
+import { readRecording, SOUND_RADIUS, type Recording } from "@/lib/audio/recording";
 
 const timeLabel = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 
@@ -15,6 +15,7 @@ export function SoundMaker({ asset, defaultName, onSave, onClose, onDelete, plac
   const [clip, setClip] = useState(asset?.sound);
   const [volume, setVolume] = useState(asset?.sound?.volume ?? 0.7);
   const [mode, setMode] = useState<Recording["mode"]>(asset?.sound?.mode ?? "loop");
+  const [radius, setRadius] = useState(asset?.sound?.radius ?? SOUND_RADIUS.default);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [listening, setListening] = useState(false), [position, setPosition] = useState(0);
   const request = useRef(0);
@@ -109,12 +110,18 @@ export function SoundMaker({ asset, defaultName, onSave, onClose, onDelete, plac
         <output>{Math.round(volume * 100)}%</output>
       </label>
     </div>
+    <div className="asset-options-row sound-options-row">
+      <label className="sound-volume">{t("들리는 거리")}
+        <input type="range" aria-label={t("들리는 거리")} min={SOUND_RADIUS.min} max={SOUND_RADIUS.max} step={1} value={radius} onChange={e => setRadius(Number(e.target.value))} />
+        <output>{radius}</output>
+      </label>
+    </div>
     <MakerActions onDelete={onDelete} deleteLabel={placement ? "배치 삭제" : "사운드 삭제"}
       disabled={!clip || busy} onSave={() => {
         if (!clip) return;
         try {
           onSave({ id: asset?.id ?? uid(), name: name.trim() || defaultName, shape: "sphere", color: "#111111", solid: false,
-            sound: { data: clip.data, duration: clip.duration, volume, mode } });
+            sound: { data: clip.data, duration: clip.duration, radius, volume, mode } });
         } catch (error) { showError(userErrorMessage(error, "저장할 수 없습니다.")); }
       }} />
   </Dialog>;

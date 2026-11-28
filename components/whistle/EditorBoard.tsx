@@ -13,7 +13,7 @@ import { EnvironmentEffects } from "./EnvironmentEffects";
 import { effectRegions } from "@/lib/effect-regions";
 import { useEffectFeedback } from "./useEffectFeedback";
 import { SoundGlyph } from "./SoundGlyph";
-import { soundRangeAt } from "@/lib/audio/sound-range";
+import { soundRadius } from "@/lib/audio/recording";
 import { SiteGlyph } from "./SiteGlyph";
 import { useLanguage } from "./Language";
 import type { WorldPortal } from "../../lib/portals.ts";
@@ -99,7 +99,7 @@ export function EditorBoard({
             )!;
             const c = environment.cells[i];
             const sound = world.assets.find(a => a.id === placingAsset)?.sound;
-            const inSoundRange = sound && world.objects.some(o => o.asset === placingAsset && Math.hypot(o.x - i % world.size, o.z - Math.floor(i / world.size)) < soundRangeAt(environment, o.x, o.z));
+            const inSoundRange = sound && world.objects.some(o => o.asset === placingAsset && Math.hypot(o.x - i % world.size, o.z - Math.floor(i / world.size)) < soundRadius(sound));
             return `${inSoundRange ? "sound-range" : ""} surface-${effectCells.has(i) || environmentTileKind(c) ? "plain" : tile.surface} level-${c.water === null ? tile.height : 0} ${isVoid(tile) ? "tile-empty" : isHole(tile) ? "tile-void" : "tile-ground"} ${effectCells.has(i) ? "has-effect" : ""} ${c.grass ? "has-grass" : ""} ${c.water !== null ? "has-water" : ""} ${c.tree ? "has-tree" : ""} ${c.fog > 0.05 ? "has-fog" : ""}`;
           }}
           label={(i) => {

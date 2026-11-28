@@ -43,6 +43,7 @@ const english: Record<string, string> = {
   "재생 위치": "Playback position",
   "사운드 미리 듣기": "Sound preview",
   볼륨: "Volume",
+  "들리는 거리": "Range",
   "재생 방식": "Playback",
   반복: "Loop",
   "한 번": "Once",

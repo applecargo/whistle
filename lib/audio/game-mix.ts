@@ -103,7 +103,7 @@ export async function createGameMix(onBlocked: () => void, receive?: Parameters<
       worldFrame(frame: PlayerAudioFrame, world: World, actors?: Actor[], derivation?: WorldDerivation) {
         game.frame(frame, { size: world.size, tiles: tilesOf(world),
           environment: derivation?.environment, structures: derivation?.structures });
-        if (actors) recordings.update(world, actors, frame, derivation?.environment);
+        if (actors) recordings.update(world, actors, frame);
         events.frame(frame);
       },
       stopWorld(resetRecordings = true) {

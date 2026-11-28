@@ -1,10 +1,9 @@
 import test from "node:test";
-import { deriveEnvironment } from "../lib/environment.ts";
 import assert from "node:assert/strict";
 import { starterWorld, createSimulation, validateWorld } from "../lib/world.ts";
 import { createPlacedSounds, nearbySounds } from "../lib/audio/placed-sounds.ts";
 import { wavFile, type PlaySound } from "../lib/audio/pd-sounds.ts";
-import { validRecording, type Recording } from "../lib/audio/recording.ts";
+import { SOUND_RADIUS, validRecording, type Recording } from "../lib/audio/recording.ts";
 import type { PlayerAudioFrame } from "../lib/audio/game-parameters.ts";
 import type { PatchHandle, SoundscapeSource } from "../lib/audio/soundscape.ts";
 import { toScene } from "../lib/audio/terrain-sources.ts";
@@ -160,25 +159,19 @@ test("20 stored sounds can exceed the old total byte cap, but a file cannot exce
   assert.equal(validRecording({ ...sound, data: "data:audio/wav;base64," + Buffer.alloc(10_000_001).toString("base64") }), false);
 });
 
-test("terrain rules replace stored radii and change which recordings are audible", () => {
+test("each sound's own radius decides how far it is heard (linear; default when unset)", () => {
   const world = worldWithSounds(), actors = createSimulation(world).actors;
-  world.assets.at(-1)!.sound!.radius = 8;
-  const environment = deriveEnvironment(world);
-  const source = world.objects[0], cell = environment.cells[source.z * world.size + source.x];
-  const distant = { ...player, x: source.x - 5, z: source.z };
-  assert.equal(nearbySounds(world, actors, distant, environment)[0].gain, 0);
-  cell.water = 0;
-  assert.ok(nearbySounds(world, actors, distant, environment)[0].gain > 0);
-  cell.water = null;
-  cell.grass = 1;
-  const nearby = { ...player, x: source.x - 2.5, z: source.z };
-  assert.ok(nearbySounds(world, actors, nearby, environment)[0].gain > 0);
-  cell.tree = true;
-  assert.equal(nearbySounds(world, actors, nearby, environment)[0].gain, 0);
-  cell.tree = false; cell.grass = 0; cell.light = 0.3;
-  assert.equal(nearbySounds(world, actors, nearby, environment)[0].gain, 0);
-  delete world.assets.at(-1)!.sound!.radius;
+  const recording = world.assets.at(-1)!.sound!, source = world.objects[0];
+  const at = (d: number) => nearbySounds(world, actors, { ...player, x: source.x - d, z: source.z })[0];
+  recording.radius = SOUND_RADIUS.max;
+  assert.equal(at(SOUND_RADIUS.max).gain, 0, "반경에서 0");
+  assert.equal(at(SOUND_RADIUS.max / 2).gain, at(0).gain / 2, "중간에서 절반(선형)");
+  assert.equal(at(SOUND_RADIUS.max / 2).radius, SOUND_RADIUS.max);
+  delete recording.radius;
+  assert.equal(at(0).radius, SOUND_RADIUS.default);
+  assert.equal(at(SOUND_RADIUS.default).gain, 0);
   assert.doesNotThrow(() => validateWorld(world));
+  for (const radius of [SOUND_RADIUS.min - 0.5, SOUND_RADIUS.max + 0.5]) assert.equal(validRecording({ ...sound, radius }), false);
 });
 
 for (const kind of ["image", "text", "sound"] as const) {

@@ -1,17 +1,15 @@
 import type { Actor, World } from "../world.ts";
 import type { PlayerAudioFrame } from "./game-parameters.ts";
-import { MAX_SOUND_VOICES, type Recording } from "./recording.ts";
+import { MAX_SOUND_VOICES, soundRadius, type Recording } from "./recording.ts";
 import { PLACED_PATCH, type PlaySound } from "./pd-sounds.ts";
 import type { Soundscape } from "./soundscape.ts";
-import type { Environment } from "../environment.ts";
-import { soundRangeAt } from "./sound-range.ts";
-import { ruleGain, ruleWidth, type SpatialRule } from "./spatial-rule.ts";
+import { LINEAR, ruleGain, ruleWidth, type SpatialRule } from "./spatial-rule.ts";
 import { toScene } from "./terrain-sources.ts";
 import { EAR_HEIGHT } from "./game-soundscape.ts";
 
 type Nearby = { id: string; recording: Recording; radius: number; distance: number; gain: number; width: number; x: number; z: number };
-/** 배치한 소리의 공간화 규칙(spatial-rule.ts): range는 놓인 칸의 환경(sound-range.ts), 음량 곡선 x², width는 0에서 닿으면 1 */
-export const PLACED_RULE: Omit<SpatialRule, "range"> = { width: 0, curve: { type: "pow", n: 2 } };
+/** 배치한 소리의 공간화 규칙(spatial-rule.ts): range는 소리마다 업로드 화면에서 정한 거리(recording.ts의 SOUND_RADIUS), 음량은 선형, width는 0에서 닿으면 1 */
+export const PLACED_RULE: Omit<SpatialRule, "range"> = { width: 0, curve: LINEAR };
 /** 녹음 볼륨에 곱하는 값(여러 소리가 겹쳐도 크지 않게) */
 const PLACED_LEVEL = 0.25;
 /** 사운드스케이프 소스 id(영역 id와 겹치지 않게) */
@@ -19,16 +17,14 @@ const sourceId = (actorId: string) => `placed:${actorId}`;
 /** 패치가 받는 버스(placed_sound.pd의 [r $1-whistle-sound]: distance <타일> <반경>) */
 export const PLACED_BUS = "whistle-sound";
 
-/** rule: 패치(placed_sound)가 알린 규칙. 주면 기본(PLACED_RULE, 환경의 range)을 덮는다 */
-export function nearbySounds(world: World, actors: Actor[], player: PlayerAudioFrame, environment?: Environment, override?: Partial<SpatialRule>): Nearby[] {
+/** override: 패치(placed_sound)가 알린 규칙. 주면 PLACED_RULE을 덮는다. range는 소리마다 정한 거리가 이긴다 */
+export function nearbySounds(world: World, actors: Actor[], player: PlayerAudioFrame, override?: Partial<SpatialRule>): Nearby[] {
   return actors.flatMap(actor => {
     const recording = world.assets.find(asset => asset.id === actor.asset)?.sound;
     if (actor.removed || !recording) return [];
     const distance = Math.hypot(actor.x - player.x, actor.z - player.z);
-    const radius = soundRangeAt(environment, actor.x, actor.z);
-    const rule = { ...PLACED_RULE, range: radius, ...override };
-    const range = rule.range;
-    return [{ id: actor.id, recording, radius: range, distance, x: actor.x, z: actor.z,
+    const rule = { ...PLACED_RULE, ...override, range: soundRadius(recording) };
+    return [{ id: actor.id, recording, radius: rule.range, distance, x: actor.x, z: actor.z,
       gain: recording.volume * PLACED_LEVEL * ruleGain(rule, distance), width: ruleWidth(rule, distance) }];
   }).sort((a, b) => a.distance - b.distance || a.id.localeCompare(b.id));
 }
@@ -66,10 +62,10 @@ export function createPlacedSounds(scape: Scape, play: PlaySound, rules?: Readon
     }
   };
   return {
-    update(world: World, actors: Actor[], player: PlayerAudioFrame, environment?: Environment) {
+    update(world: World, actors: Actor[], player: PlayerAudioFrame) {
       // 맵의 소리를 미리 Pd에 읽어 둔다(처음 한 번만 일이 있다). 다가갈 때 기다리지 않게.
       for (const asset of world.assets) if (asset.sound) play.prepare(asset.sound).catch(() => {});
-      const candidates = nearbySounds(world, actors, player, environment, rules?.get(PLACED_PATCH));
+      const candidates = nearbySounds(world, actors, player, rules?.get(PLACED_PATCH));
       for (const id of played) {
         const item = candidates.find(item => item.id === id);
         if (!item || item.distance > item.radius + 0.5) played.delete(id);

@@ -1,10 +1,14 @@
 export const MAX_RECORDING_BYTES = 10_000_000;
 export const MAX_RECORDING_SECONDS = 60;
 export const MAX_SOUND_VOICES = 3;
+/** 업로드 소리가 들리는 거리(타일). 업로드 화면에서 고른다. 정하지 않은 소리는 기본값 */
+export const SOUND_RADIUS = { min: 1, max: 6, default: 1 };
+export const soundRadius = (recording: Recording) => recording.radius ?? SOUND_RADIUS.default;
 
 export type Recording = {
   data: string;
   duration: number;
+  /** 들리는 거리(타일, SOUND_RADIUS) */
   radius?: number;
   volume: number;
   mode: "loop" | "approach";
@@ -23,7 +27,7 @@ export function validRecording(value: unknown): value is Recording {
   return typeof r.data === "string" && r.data.length <= Math.ceil(MAX_RECORDING_BYTES / 3) * 4 + 64 &&
     audioData.test(r.data) && r.data.slice(r.data.indexOf(",") + 1).length % 4 === 0 &&
     recordingBytes(r.data) <= MAX_RECORDING_BYTES && bounded(r.duration, 0.01, MAX_RECORDING_SECONDS) &&
-    (r.radius === undefined || bounded(r.radius, 1, 8)) && bounded(r.volume, 0, 1) && ["loop", "approach"].includes(r.mode);
+    (r.radius === undefined || bounded(r.radius, SOUND_RADIUS.min, SOUND_RADIUS.max)) && bounded(r.volume, 0, 1) && ["loop", "approach"].includes(r.mode);
 }
 
 export async function readRecording(file: File, signal?: AbortSignal): Promise<{ data: string; duration: number }> {
