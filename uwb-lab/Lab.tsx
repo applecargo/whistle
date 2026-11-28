@@ -55,7 +55,8 @@ export default function Lab({ exhibitionTag, player }: { exhibitionTag?: string;
   const listener = useRef<PlayerAudioFrame | null>(null);
   const rain = useRef<boolean | undefined>(undefined);
   const generation = useRef(0);
-  const live = useLiveWorld(setWorld, !!exhibitionTag || (!player && new URLSearchParams(location.search).has("exhibition")));
+  const exhibition = !!exhibitionTag || (!player && new URLSearchParams(location.search).has("exhibition"));
+  const live = useLiveWorld(setWorld, exhibition);
   const liveActive = useRef(live.active);
   liveActive.current = live.active;
   const derive = useMemo(createWorldDeriver, []);
@@ -203,6 +204,9 @@ export default function Lab({ exhibitionTag, player }: { exhibitionTag?: string;
     {player ? <section className="world-controls" aria-label="연결">
       <p id="player-world" role="status" data-world-link={link.state}>키오스크 맵: {link.error || (link.received ? "받음" : "기다리는 중")} · {player.bridge}</p>
       <p id="player-device" role="status">태그: {device.status}</p>
+      <details><summary>최근 연결 기록</summary>
+        <ol>{device.history.map((line, index) => <li key={index}>{line}</li>)}</ol>
+      </details>
     </section> : <section className="world-controls" aria-label="공간 선택">
       <nav className="world-menu" aria-label="테스트 공간">
         <button aria-pressed={!live.active} onClick={selectSample}>샘플</button>
@@ -218,6 +222,7 @@ export default function Lab({ exhibitionTag, player }: { exhibitionTag?: string;
           connected: "편집기에 연결되었습니다.", disconnected: "편집기 연결이 끊겼습니다.", unavailable: "작업을 불러올 수 없습니다." })[live.status]}</p> : null}
         <h2>{world.title}</h2>
         <Scene world={world} simulation={simulation} derivation={derivation} mode="overview"
+          exhibition={!!player || exhibition}
           trackedPosition={frame ? { x: frame.x, y: frame.y, z: frame.z } : null} />
         <button className="map" aria-label="관객 위치 평면도" disabled={!mappingValid || deviceMode}
           onPointerDown={(event) => {

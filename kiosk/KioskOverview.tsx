@@ -22,7 +22,7 @@ export default function KioskOverview() {
   }, []);
   const preview = editor ?? (world && simulation && derivation ? { world, simulation, derivation } : null);
   return <main className="sector-screen" aria-label={editor ? "편집기 미리보기" : "전시장 3D"}>
-    {preview ? <EditorPreview {...preview} />
+    {preview ? <EditorPreview {...preview} exhibition />
       : <div role="status">{link.error || "키오스크 맵 수신 대기 중"}</div>}
   </main>;
 }

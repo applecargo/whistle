@@ -47,6 +47,23 @@ const smooth = (fraction: number) => {
   return t * t * (3 - 2 * t);
 };
 
+export function nearestGrassVisitor(mount: DisplayMount, poses: Iterable<VisitorPose>, now: number) {
+  let nearest: VisitorPose | null = null;
+  let distance = reactionRadius;
+  for (const pose of poses) {
+    if (now - pose.at > TRACKING_TIMEOUT_MS) continue;
+    const d = Math.hypot(pose.room.x - mount.x, pose.room.z - mount.z);
+    if (d < distance) { nearest = pose; distance = d; }
+  }
+  return nearest;
+}
+
+export function grassSwaySpeed(mount: DisplayMount, visitor: VisitorPose | null, now: number) {
+  if (!visitor || now - visitor.at > TRACKING_TIMEOUT_MS) return 1;
+  const distance = Math.hypot(visitor.room.x - mount.x, visitor.room.z - mount.z);
+  return 1 + .35 * smooth((reactionRadius - distance) / (reactionRadius - .4));
+}
+
 // 0° faces room +Z, 90° faces +X. In front of a 0° screen the viewer's right is +X.
 export function cameraOffset(mount: DisplayMount, visitor: VisitorPose | null, now: number) {
   if (!visitor || now - visitor.at > 1500) return { yaw: 0, tilt: 0 };

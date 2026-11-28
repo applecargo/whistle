@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { createSocket } from "node:dgram";
 import { SerialPortMock } from "serialport";
 import { WebSocket } from "ws";
-import { parseRanges, parseBridgeMessage, type BridgeMessage, type Point, type RangePacket } from "../lib/uwb/protocol.ts";
+import { HEARTBEAT_FRAME, MAX_PACKET_BYTES, parseRanges, parseBridgeMessage, type BridgeMessage, type Point, type RangePacket } from "../lib/uwb/protocol.ts";
 import { parseConfig, solvePosition, distanceTo } from "../lib/uwb/solver.ts";
 import { createProcessor, startBridge } from "../scripts/uwb/bridge.ts";
 import { parseMakerfabs, attachLines } from "../scripts/uwb/input.ts";
@@ -325,4 +325,51 @@ test("bridge accepts pages served from the same host it is reached at, and refus
   assert.equal(await attempt("http://localhost:5173"), true);
   assert.equal(await attempt("http://127.0.0.1:5173"), true);
   assert.equal(await attempt("http://evil.example"), false);
+});
+
+test("a congested socket keeps only fresh latest frames per tag while another client receives every update", async t => {
+  const bridge = await startBridge(config, { wsPort: 0, udpPort: 0, log: () => {} });
+  t.after(() => bridge.close());
+  const url = `ws://127.0.0.1:${bridge.wsPort}`;
+  const slow = new WebSocket(url);
+  await once(slow, "open");
+  const fast = new WebSocket(url);
+  await once(fast, "open");
+  const slowFrames: number[] = [], fastFrames: number[] = [];
+  slow.on("message", data => slowFrames.push(parseBridgeMessage(data.toString()).seq));
+  fast.on("message", data => fastFrames.push(parseBridgeMessage(data.toString()).seq));
+  let blocked = true, slowPeer: WebSocket | undefined;
+  t.mock.getter(WebSocket.prototype, "bufferedAmount", function (this: WebSocket) {
+    slowPeer ??= this;
+    return blocked && this === slowPeer ? MAX_PACKET_BYTES * 5 : 0;
+  });
+  for (const [seq, tag] of [[1, "0"], [1, "1"], [2, "0"], [2, "1"]] as const) bridge.receive(packet(point, seq, tag));
+  const drained = once(slow, "message", { signal: AbortSignal.timeout(2000) });
+  blocked = false;
+  await drained;
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.deepEqual(fastFrames, [1, 2, 3, 4]);
+  assert.deepEqual(slowFrames, [3, 4]);
+  blocked = true;
+  bridge.receive(packet(point, 3, "0"));
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  blocked = false;
+  bridge.receive(packet(point, 3, "1"));
+  await once(slow, "message", { signal: AbortSignal.timeout(2000) });
+  assert.deepEqual(slowFrames, [3, 4, 6]);
+  assert.equal(slow.readyState, WebSocket.OPEN);
+});
+
+test("an idle subscribed player gets heartbeats without other tags or heartbeat traffic on legacy sockets", async t => {
+  const bridge = await startBridge(config, { wsPort: 0, udpPort: 0, log: () => {} });
+  t.after(() => bridge.close());
+  const url = `ws://127.0.0.1:${bridge.wsPort}`;
+  const player = new WebSocket(url + "/?heartbeat=1&player=1"), legacy = new WebSocket(url);
+  await Promise.all([once(player, "open"), once(legacy, "open")]);
+  const messages: string[] = [];
+  legacy.on("message", raw => messages.push(raw.toString()));
+  const beat = once(player, "message", { signal: AbortSignal.timeout(4000) });
+  bridge.receive(packet(point, 1, "0"));
+  assert.equal((await beat)[0].toString(), HEARTBEAT_FRAME);
+  assert.deepEqual(messages.map(text => parseBridgeMessage(text).tagId), ["0"]);
 });

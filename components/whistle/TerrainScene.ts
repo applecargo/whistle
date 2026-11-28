@@ -251,9 +251,9 @@ export function makeTerrain(world: World, structures: Structure[], derivedEnviro
       paperField.setSurfaceImages(rest, assets);
       return treeImages;
     },
-    update: (time: number, camera?: THREE.Camera, mistColor?: THREE.Color, reducedMotion = false, weather: Weather = "clear", daylight = 1) => {
+    update: (time: number, camera?: THREE.Camera, mistColor?: THREE.Color, reducedMotion = false, weather: Weather = "clear", daylight = 1, extraGrassTime = 0) => {
       wind.value = time / 1000;
-      paperField.wind.time.value = time / 1000;
+      paperField.wind.time.value = time / 1000 + extraGrassTime;
       paperField.wind.strength.value = reducedMotion ? 0 : 1;
       generated.update(time, camera, mistColor, reducedMotion, weather, daylight);
     },

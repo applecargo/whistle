@@ -3,6 +3,7 @@ import { test, expect, chromium, type Page } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { WebSocket, WebSocketServer } from "ws";
+import { HEARTBEAT_FRAME, LINK_TIMEOUT_MS } from "../../lib/uwb/protocol";
 import { createLabWorld } from "../../uwb-lab/world";
 import { probeOutputGain, outputGain } from "./pd-probe";
 
@@ -42,7 +43,7 @@ test("kiosk sends its map through the bridge, shows four tags, and a player page
   } finally { bridge.kill(); }
 });
 
-test("T0 and T1 independently resume audible output in the same tab after a dropped socket", async ({ context, baseURL }) => {
+test("T0 and T1 resume audio after socket closure or silent connection loss, but stay connected across tag silence", async ({ context, baseURL }) => {
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   await once(server, "listening");
   const address = server.address();
@@ -54,18 +55,27 @@ test("T0 and T1 independently resume audible output in the same tab after a drop
   const positionClients = new Set<WebSocket>();
   let accepting = true, rejected = 0, silentTag = -1;
   const seq = [10000, 10000];
+  let silentConnection: WebSocket | undefined;
+  const subscriptions = new Map<WebSocket, string>();
   server.on("connection", (socket, req) => {
     if (req.url === "/world") { socket.send(map); return; }
     if (!accepting) { rejected++; socket.terminate(); return; }
+    const query = new URL(req.url!, bridge).searchParams;
+    if (query.get("heartbeat") === "1") subscriptions.set(socket, query.get("player")!);
     positionClients.add(socket);
-    socket.on("close", () => positionClients.delete(socket));
+    socket.on("close", () => { positionClients.delete(socket); subscriptions.delete(socket); });
   });
   const timer = setInterval(() => {
     for (const tag of [0, 1]) {
       if (tag === silentTag) continue;
       const frame = JSON.stringify({ type: "position", tagId: String(tag), seq: ++seq[tag], receivedAt: Date.now(),
         x: tag ? 5 : 1, z: 3, boardHeight: 1.2, residual: 0, anchors: 4, heightSource: "fixed" });
-      for (const ws of positionClients) if (ws.readyState === WebSocket.OPEN) ws.send(frame);
+      for (const ws of positionClients) {
+        if (ws !== silentConnection && subscriptions.get(ws) === String(tag) && ws.readyState === WebSocket.OPEN) ws.send(frame);
+      }
+    }
+    for (const ws of subscriptions.keys()) {
+      if (ws !== silentConnection && ws.readyState === WebSocket.OPEN) ws.send(HEARTBEAT_FRAME);
     }
   }, 100);
   try {
@@ -87,8 +97,15 @@ test("T0 and T1 independently resume audible output in the same tab after a drop
       accepting = false;
       rejected = 0;
       silentTag = tag;
-      socket.terminate();
-      await expect(page.locator("#player-device")).toContainText("자동 재연결");
+      if (tag === 0) socket.terminate();
+      else {
+        await expect(page.locator("#player-device")).toContainText("1초 이상");
+        await new Promise(resolve => setTimeout(resolve, LINK_TIMEOUT_MS + 200));
+        expect(rejected).toBe(0);
+        expect(await outputGain(page)).toBe(0);
+        silentConnection = socket;
+      }
+      await expect(page.locator("#player-device")).toContainText("자동 재연결", { timeout: LINK_TIMEOUT_MS + 4000 });
       await expect.poll(() => outputGain(page)).toBe(0);
       await expect.poll(() => masterRms(page)).toBeLessThan(0.000001);
       await expect.poll(() => rejected, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
@@ -101,6 +118,13 @@ test("T0 and T1 independently resume audible output in the same tab after a drop
       await expect(page.locator("#player-device")).toContainText(`태그 ${tag} 수신 중`);
       await expect.poll(() => masterRms(page), { timeout: 15_000 }).toBeGreaterThan(0.00001);
       expect(await page.evaluate(() => performance.timeOrigin)).toBe(origin);
+      const reason = tag === 0 ? "PC 수신기 연결 끊김" : "PC 수신기 응답 없음";
+      await page.getByText("최근 연결 기록", { exact: true }).click();
+      await expect(page.locator("details").first()).toContainText(reason);
+      await expect(page.locator("details").first().locator("li").last()).toContainText("첫 좌표 수신");
+      await page.reload();
+      await expect(page.locator("#player-device")).toContainText(`태그 ${tag} 수신 중`);
+      await expect(page.locator("details").first()).toContainText(reason);
     }
   } finally {
     clearInterval(timer);

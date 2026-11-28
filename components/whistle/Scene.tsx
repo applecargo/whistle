@@ -49,7 +49,7 @@ import {
 import { createObservationCamera } from "./ObservationCamera";
 import type { RoomMapping } from "@/lib/uwb-position";
 import { defaultRoom } from "@/lib/uwb-position";
-import { cameraOffset, type DisplayMount, type VisitorPose } from "@/lib/display-proximity";
+import { cameraOffset, grassSwaySpeed, type DisplayMount, type VisitorPose } from "@/lib/display-proximity";
 import { createSectorSurface } from "./SectorSurface";
 import type { Sector, TrailSegment } from "@/lib/exhibition";
 
@@ -60,8 +60,10 @@ type Props = {
   simulation: Pick<Simulation, "actors">;
   derivation: WorldDerivation;
   mode: "overview" | "play" | "sector" | "observation";
+  exhibition?: boolean;
   mapping?: RoomMapping;
   sector?: Sector;
+  grassVisitor?: MutableRefObject<VisitorPose | null>;
   visitor?: MutableRefObject<VisitorPose | null>;
   mount?: DisplayMount;
   viewMount?: DisplayMount;
@@ -83,6 +85,7 @@ type Props = {
   meeting?: MeetingVisuals;
 };
 const NO_PORTALS: WorldPortal[] = [];
+const NO_ACTORS: Simulation["actors"] = [];
 const deviceTime = () => new Date();
 function material(color: string) {
   return new THREE.MeshStandardMaterial({
@@ -151,7 +154,9 @@ export default function Scene({
   world,
   simulation,
   derivation,
-  mode, sector, trail, mount, viewMount = mount, visitor, mapping = defaultRoom,
+  mode,
+  exhibition = mode === "sector" || mode === "observation",
+  sector, trail, mount, viewMount = mount, visitor, grassVisitor, mapping = defaultRoom,
   onPlayer,
   onAudioFrame,
   onControlsReset,
@@ -169,7 +174,7 @@ export default function Scene({
   meeting,
 }: Props) {
   const meetingRef = useRef(meeting);
-  meetingRef.current = meeting;
+  meetingRef.current = exhibition ? undefined : meeting;
   const { t } = useLanguage();
   const mappingRef = useRef(mapping);
   mappingRef.current = mapping;
@@ -196,7 +201,8 @@ export default function Scene({
     models = useRef(new Map<string, THREE.Group>()),
     worldRef = useRef(world),
     [failed, setFailed] = useState(false);
-  actors.current = simulation.actors;
+  // Only the display omits symbols. Terrain derivation and audio use the original placements.
+  actors.current = exhibition ? NO_ACTORS : simulation.actors;
   callback.current = onPlayer;
   worldRef.current = world;
   const derivationRef = useRef(derivation);
@@ -612,6 +618,7 @@ export default function Scene({
       renderer.domElement.addEventListener("pointerup", up);
       renderer.domElement.addEventListener("pointercancel", up);
     }
+    let grassSpeed = 1, extraGrassTime = 0;
     let rendered = false;
     const render = (time: number) => {
       const elapsed = Math.max(0, (time - last) / 1000);
@@ -630,8 +637,17 @@ export default function Scene({
           camera.position.setFromSpherical(currentOrbit).add(fragment.center);
           camera.lookAt(fragment.center);
         } else if (observation && viewMount && camera instanceof THREE.PerspectiveCamera) {
-          renderer.domElement.dataset.subject = observation.update(camera, worldRef.current, derivationRef.current,
+          const subject = observation.update(camera, worldRef.current, derivationRef.current,
             actors.current, viewMount, mappingRef.current, sectorYaw, sectorTilt, elapsed);
+          renderer.domElement.dataset.subject = subject;
+          if (grassVisitor) {
+            const targetSpeed = !reducedMotion && subject.startsWith("grass-")
+              ? grassSwaySpeed(mount, grassVisitor.current, Date.now()) : 1;
+            const step = Math.min(elapsed, .2);
+            grassSpeed += (targetSpeed - grassSpeed) * (1 - Math.exp(-step / (targetSpeed > grassSpeed ? .6 : 1.25)));
+            extraGrassTime += step * (grassSpeed - 1);
+            renderer.domElement.dataset.grassSpeed = grassSpeed.toFixed(3);
+          }
         }
         renderer.domElement.dataset.sectorYaw = (sectorYaw * 180 / Math.PI).toFixed(2);
       }
@@ -674,7 +690,7 @@ export default function Scene({
       updateTrackingMarker();
       portalScene.sync(portalRef.current.portals, player);
       previewOrbit?.update();
-      terrain.update(time, camera, mistColor, reducedMotion, weather, currentDay.daylight);
+      terrain.update(time, camera, mistColor, reducedMotion, weather, currentDay.daylight, extraGrassTime);
       if (mode === "overview") {
         const reaction = feedbackRef.current;
         if (reaction && reaction.id !== pulseId) {
@@ -1020,7 +1036,7 @@ export default function Scene({
       renderer.domElement.remove();
       models.current.clear();
     };
-  }, [world.size, world.sky, world.start.x, world.start.z, mode, sector, trail, mount, viewMount, visitor]);
+  }, [world.size, world.sky, world.start.x, world.start.z, mode, sector, trail, mount, viewMount, visitor, grassVisitor]);
   return (
     <div
       className={`scene ${className}`}

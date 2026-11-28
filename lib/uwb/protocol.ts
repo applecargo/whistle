@@ -9,6 +9,9 @@ export type PositionMessage = Point & {
 export type InvalidMessage = { type: "invalid"; tagId: string; seq: number; error: string };
 export type BridgeMessage = PositionMessage | InvalidMessage | RangeMessage;
 export const TRACKING_TIMEOUT_MS = 1000;
+export const HEARTBEAT_FRAME = '{"type":"heartbeat"}';
+export const HEARTBEAT_INTERVAL_MS = 2000;
+export const LINK_TIMEOUT_MS = 4 * HEARTBEAT_INTERVAL_MS;
 export const MAX_PACKET_BYTES = 4096;
 
 export function record(value: unknown): value is Record<string, unknown> {

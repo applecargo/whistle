@@ -191,6 +191,16 @@ test("a separate M1 profile follows kiosk edits and UDP positions and restores t
   const udp = createSocket("udp4");
   const display = await browser.newContext({ baseURL, locale: "ko-KR", viewport: { width: 480, height: 300 } });
   const world = createLabWorld();
+  world.assets.push(
+    { id: "caption", name: "Hidden caption", text: "caption", shape: "bar", color: "#333333", solid: false },
+    { id: "recording", name: "Hidden recording", shape: "sphere", color: "#333333", solid: false,
+      sound: { data: "data:audio/wav;base64,AAAA", duration: 1, radius: 4, volume: 1, mode: "loop" } },
+  );
+  world.objects = [
+    { id: "caption-1", asset: "caption", x: 2, z: 1, scale: 1, rotation: 0 },
+    { id: "sound-1", asset: "recording", x: 3, z: 1, scale: 1, rotation: 0 },
+  ];
+  world.connectionFootings = [{ id: "old-connection", side: 1, row: 4, built: true, created: 1 }];
   for (const tile of world.terrain!.tiles) tile.surface = "plain";
   world.terrain!.tiles[0].surface = "rough";
   let seq = 0, x = 1.6;
@@ -205,6 +215,17 @@ test("a separate M1 profile follows kiosk edits and UDP positions and restores t
       localStorage.setItem("whistle.kiosk.v1", JSON.stringify({ bridge: address, mapping: { originX: 0, originZ: 0, width: 6, depth: 6, rotation: 0 } }));
     }, { world, address });
     await page.goto("./kiosk/");
+    await expect(page.locator("[data-kiosk-world]")).toHaveAttribute("data-kiosk-world", "connected");
+    await expect(page.locator("[data-symbol-site], [data-connection], [data-approach]")).toHaveCount(0);
+    await expect(page.locator('[data-cell="14"]')).not.toHaveAccessibleName(/Hidden caption/);
+    await page.locator('[data-cell="15"]').click({ button: "right" });
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    const broadcast = await page.evaluate(address => new Promise<{ world: typeof world }>(resolve => {
+      const socket = new WebSocket(new URL("/world", address));
+      socket.onmessage = event => { socket.close(); resolve(JSON.parse(event.data)); };
+    }), address);
+    expect(broadcast.world.objects).toEqual(world.objects);
+    expect(broadcast.world.assets.find(asset => asset.id === "recording")?.sound).toEqual(world.assets.at(-1)!.sound);
     const menu = await page.getByRole("link", { name: "전시 화면" }).getAttribute("href");
     const screen = await display.newPage();
     await screen.goto(menu!);
@@ -300,4 +321,39 @@ test("Windows kiosk channels show the editor and its live 3D overview separately
     await expect(scene.getByRole("main", { name: "전시장 3D" })).toBeVisible();
     await expect(scene.locator("canvas")).toHaveAttribute("data-ready", "true");
   } finally { await bridge.close(); }
+});
+
+test("M2 grass speeds up near either side of the screen and settles after departure or signal loss", async ({ page }) => {
+  test.setTimeout(60000);
+  const world = createLabWorld();
+  const mapping = { originX: 0, originZ: 0, width: 6, depth: 6, rotation: 0 };
+  let x = 5, active = true, seq = 0;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  await page.routeWebSocket("ws://127.0.0.1:5299/**", socket => {
+    if (new URL(socket.url()).pathname === "/world") {
+      socket.send(JSON.stringify({ type: "world", world, mapping }));
+      return;
+    }
+    timer = setInterval(() => {
+      if (!active) return;
+      socket.send(JSON.stringify({ type: "position", tagId: "1", x, z: 2.9, boardHeight: 1.2,
+        anchors: 3, heightSource: "fixed", residual: 0, receivedAt: Date.now(), seq: ++seq }));
+    }, 80);
+  });
+  try {
+    for (const tile of world.terrain!.tiles) tile.surface = "soft";
+    await page.goto("./monitor-proximity/?display=M2&mx=2&mz=3&face=0&bridge=ws://127.0.0.1:5299");
+    const canvas = page.locator("canvas");
+    await expect(canvas).toHaveAttribute("data-subject", /^grass-/);
+    const speed = () => canvas.getAttribute("data-grass-speed").then(Number);
+    await expect.poll(speed).toBe(1);
+    x = 2.2;
+    await expect.poll(speed).toBeGreaterThan(1.28);
+    x = 5;
+    await expect.poll(speed, { timeout: 10000 }).toBeLessThan(1.02);
+    x = 2.2;
+    await expect.poll(speed).toBeGreaterThan(1.28);
+    active = false;
+    await expect.poll(speed, { timeout: 12000 }).toBeLessThan(1.02);
+  } finally { clearInterval(timer); }
 });

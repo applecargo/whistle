@@ -1,6 +1,6 @@
 import { createSocket } from "node:dgram";
 import { WebSocketServer, WebSocket } from "ws";
-import { MAX_PACKET_BYTES, TRACKING_TIMEOUT_MS, parseRanges, type BridgeMessage, type PositionMessage, type RangePacket } from "../../lib/uwb/protocol.ts";
+import { HEARTBEAT_FRAME, HEARTBEAT_INTERVAL_MS, MAX_PACKET_BYTES, TRACKING_TIMEOUT_MS, parseRanges, type BridgeMessage, type PositionMessage, type RangePacket } from "../../lib/uwb/protocol.ts";
 import { parseMakerfabs } from "./input.ts";
 import { solvePosition, type BridgeConfig } from "../../lib/uwb/solver.ts";
 import { MAX_WORLD_BYTES, WORLD_PATH, parseWorldLink } from "../../lib/uwb/world-link.ts";
@@ -55,12 +55,24 @@ export async function startBridge(config: BridgeConfig, options: {
   });
   // 맵 길(WORLD_PATH, lib/uwb/world-link.ts): 키오스크가 보낸 마지막 맵을 들고 있다가 다른 접속에 돌린다
   const worldClients = new Set<WebSocket>();
+  type Subscriber = {
+    pending: Map<string, { text: string; at: number }>;
+    tag: string | null;
+    peer: string;
+    peakBytes: number;
+    replaced: number;
+    nextHeartbeat: number;
+  };
+  const subscribers = new Map<WebSocket, Subscriber>();
+  const maxBuffered = MAX_PACKET_BYTES * 4;
+  let deliveryTimer: ReturnType<typeof setInterval> | undefined;
   let lastWorld: string | undefined;
   const udp = createSocket("udp4");
   let closed = false;
   const close = async () => {
     if (closed) return;
     closed = true;
+    clearInterval(deliveryTimer);
     for (const client of server.clients) client.terminate();
     await Promise.all([new Promise<void>((resolve) => server.close(() => resolve())),
       new Promise<void>((resolve) => { try { udp.close(() => resolve()); } catch { resolve(); } })]);
@@ -74,7 +86,19 @@ export async function startBridge(config: BridgeConfig, options: {
   } catch (error) { await close(); throw error; }
   server.on("connection", (client, req) => {
     client.on("error", () => client.terminate());
-    if (new URL(req.url ?? "/", "http://x").pathname !== WORLD_PATH) {
+    const url = new URL(req.url ?? "/", "http://x");
+    if (url.pathname !== WORLD_PATH) {
+      const id = url.searchParams.get("player");
+      const tag = id !== null && config.tags.includes(id) ? id : null;
+      const peer = req.socket.remoteAddress + ":" + req.socket.remotePort;
+      const sub: Subscriber = { tag, peer, pending: new Map(), peakBytes: 0, replaced: 0,
+        nextHeartbeat: url.searchParams.get("heartbeat") === "1" ? Date.now() + HEARTBEAT_INTERVAL_MS : Infinity };
+      subscribers.set(client, sub);
+      log(`${new Date().toISOString()} 위치 연결 ${peer} T${tag ?? "*"}`);
+      client.once("close", (code) => {
+        subscribers.delete(client);
+        log(`${new Date().toISOString()} 위치 종료 ${peer} T${tag ?? "*"} code=${code} peakBufferedBytes=${sub.peakBytes} replaced=${sub.replaced}`);
+      });
       // 위치 길: 받는 것만 한다(작은 패킷만)
       client.on("message", () => client.terminate());
       return;
@@ -94,12 +118,38 @@ export async function startBridge(config: BridgeConfig, options: {
   });
   server.on("error", (error) => log(`WebSocket 오류: ${error.message}`));
   udp.on("error", (error) => log(`UDP 오류: ${error.message}`));
+  function flush(client: WebSocket, sub: Subscriber, now: number) {
+    for (const [tag, frame] of sub.pending) {
+      if (client.readyState !== WebSocket.OPEN || client.bufferedAmount >= maxBuffered) break;
+      sub.pending.delete(tag);
+      if (now - frame.at < TRACKING_TIMEOUT_MS) client.send(frame.text);
+    }
+  }
+  deliveryTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [client, sub] of subscribers) {
+      if (client.readyState !== WebSocket.OPEN) continue;
+      if (sub.pending.size) flush(client, sub, now);
+      if (now >= sub.nextHeartbeat && client.bufferedAmount < maxBuffered) {
+        client.send(HEARTBEAT_FRAME);
+        sub.nextHeartbeat = now + HEARTBEAT_INTERVAL_MS;
+      }
+    }
+  }, 100);
   const receive = createProcessor(config, (message) => {
-    const json = JSON.stringify(message);
-    for (const client of server.clients) {
-      if (worldClients.has(client)) continue;
-      if (client.bufferedAmount > MAX_PACKET_BYTES * 4) { client.terminate(); continue; }
-      if (client.readyState === WebSocket.OPEN) client.send(json);
+    const text = JSON.stringify(message);
+    const now = Date.now();
+    for (const [client, sub] of subscribers) {
+      if (client.readyState !== WebSocket.OPEN || (sub.tag !== null && sub.tag !== message.tagId)) continue;
+      const bytes = client.bufferedAmount;
+      sub.peakBytes = Math.max(sub.peakBytes, bytes);
+      if (bytes < maxBuffered && !sub.pending.size) {
+        client.send(text);
+      } else {
+        if (sub.pending.has(message.tagId)) sub.replaced++;
+        sub.pending.set(message.tagId, { text, at: now });
+        if (bytes < maxBuffered) flush(client, sub, now);
+      }
     }
   }, options.rangesOnly);
   const lastRaw = new Map<string, { seq: number; time: number }>();

@@ -133,8 +133,8 @@ export default function Home({meeting,kiosk=false,exhibitionEditor=false}:{meeti
   const ownActors = simulation.actors;
   const editorView = useMemo(() => withLocalMeetingFootings(meeting.view, world), [meeting.view, world]);
   const visibleMeeting = { ...meeting, view: editorView };
-  const previewMeeting = useMemo(() => meetingVisuals({ view: editorView, presence: meeting.presence, status: meeting.status }, true),
-    [editorView, meeting.presence, meeting.status]);
+  const previewMeeting = useMemo(() => kiosk ? undefined : meetingVisuals({ view: editorView, presence: meeting.presence, status: meeting.status }, true),
+    [kiosk, editorView, meeting.presence, meeting.status]);
   const derivation = useMemo(
     () => deriveWorld(world, ownActors),
     [deriveWorld, world, ownActors],
@@ -416,6 +416,7 @@ export default function Home({meeting,kiosk=false,exhibitionEditor=false}:{meeti
           <EditorBoard
             world={world}
             actors={ownActors}
+            showSymbols={!kiosk}
             derivation={derivation}
             feedback={feedback}
             placingAsset={activeAsset}
@@ -428,11 +429,11 @@ export default function Home({meeting,kiosk=false,exhibitionEditor=false}:{meeti
             onEnd={endStroke}
             onUndo={undo}
             onRedo={redo}
-            overlay={<><MeetingOverlay meeting={visibleMeeting} />{kiosk && <KioskPlayers players={link.players} size={world.size} />}</>}
+            overlay={kiosk ? <KioskPlayers players={link.players} size={world.size} /> : <MeetingOverlay meeting={visibleMeeting} />}
           />
           <aside className="preview-panel" aria-label={t("배치 결과")}>
             {!exhibitionEditor && <div className="live-preview">
-              {!playing && <EditorPreview {...preview} />}
+              {!playing && <EditorPreview {...preview} exhibition={kiosk} />}
               {!kiosk && <button onClick={enter} aria-label={t("들어가기")}>
                 <span aria-hidden="true">↗</span>
               </button>}

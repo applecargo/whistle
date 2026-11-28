@@ -24,7 +24,7 @@ function NetworkMonitor({ id, bridge, mount, viewMount }: { id: Monitor; bridge:
     return null;
   }, [bridge]);
   const link = useWorldLink(address?.href, setWorld);
-  const visitor = useMonitorVisitor(address, mount);
+  const { visitor, grassVisitor } = useMonitorVisitor(address, mount, id === "M2");
   const derive = useMemo(createWorldDeriver, []);
   const simulation = useMemo(() => world && createSimulation(world), [world]);
   const derivation = useMemo(() => world && simulation && derive(world, simulation.actors), [derive, world, simulation]);
@@ -36,7 +36,7 @@ function NetworkMonitor({ id, bridge, mount, viewMount }: { id: Monitor; bridge:
   }
   return <Suspense fallback={<SceneLoading />}>
     <Scene world={world} simulation={simulation} derivation={derivation} mode="observation"
-      mapping={link.mapping} visitor={visitor} mount={mount} viewMount={viewMount} />
+      mapping={link.mapping} grassVisitor={id === "M2" ? grassVisitor : undefined} visitor={visitor} mount={mount} viewMount={viewMount} />
   </Suspense>;
 }
 
@@ -100,7 +100,7 @@ function DisplayScreen({ id }: { id: Sector | Monitor }) {
   const monitor = monitors.find(m => m === id);
   return <main className="sector-screen">
     {state && derivation ? <Suspense fallback={<SceneLoading />}>
-      <Scene world={state.world} simulation={state} derivation={derivation} mode={sector ? "sector" : "observation"} mapping={mapping} sector={sector} trail={trail} visitor={visitor} mount={mount} viewMount={viewMount} />
+      <Scene world={state.world} simulation={state} derivation={derivation} mode={sector ? "sector" : "observation"} mapping={mapping} sector={sector} trail={trail} grassVisitor={id === "M2" ? visitor : undefined} visitor={visitor} mount={mount} viewMount={viewMount} />
     </Suspense> : monitor && (networkOnly || tryNetwork) ? <NetworkMonitor id={monitor} mount={mount} viewMount={viewMount}
       bridge={bridge ?? `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.hostname}:5194`} /> : <div role="status">{language === "ko"
       ? `${id} · 같은 브라우저에서 메인 화면을 열면 연결됩니다.`

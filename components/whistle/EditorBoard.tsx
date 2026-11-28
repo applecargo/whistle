@@ -21,6 +21,7 @@ import type { WorldPortal } from "../../lib/portals.ts";
 type Props = {
   world: World;
   actors: Actor[];
+  showSymbols?: boolean;
   derivation: WorldDerivation;
   feedback: PlacementFeedback | null;
   canHold: boolean;
@@ -38,13 +39,14 @@ type Props = {
 };
 
 export function EditorBoard({
-  world, actors, derivation, feedback, canHold, canUndo, canRedo,
+  world, actors, showSymbols = true, derivation, feedback, canHold, canUndo, canRedo,
   onPaint, onEnd, placingAsset, placingStart, onOpenSymbol, onUndo, onRedo,
   portals = [],
   overlay,
 }: Props) {
   const { t } = useLanguage();
   const { structures, environment } = derivation;
+  const symbolObjects = showSymbols ? world.objects : [];
   const regions = useMemo(() => effectRegions(environment), [environment]);
   const effectFeedback = useEffectFeedback(regions, world.size, feedback?.id ?? null);
   const effectCells = new Set(effectFeedback.markers.map(region => region.anchor));
@@ -79,7 +81,7 @@ export function EditorBoard({
             </span>)}</div>
           </>}
           occupied={(i) =>
-            world.objects.some(
+            symbolObjects.some(
               (o) =>
                 o.x === i % world.size &&
                 o.z === Math.floor(i / world.size) && (!placingAsset || o.asset === placingAsset),
@@ -104,7 +106,7 @@ export function EditorBoard({
             const x = i % world.size,
               z = Math.floor(i / world.size),
               tile = tileAt(world, x, z)!;
-            const objects = world.objects.filter(
+            const objects = symbolObjects.filter(
               (o) => o.x === x && o.z === z,
             );
             const water = environment.cells[i].water;
@@ -115,9 +117,9 @@ export function EditorBoard({
             const x = i % world.size,
               z = Math.floor(i / world.size),
               tile = tileAt(world, x, z)!;
-            const cellActors = actors.filter(
+            const cellActors = showSymbols ? actors.filter(
               (a) => a.x === x && a.z === z && !a.removed && world.assets.some(asset => asset.id === a.asset && (asset.image || asset.text?.trim() || asset.sound)),
-            );
+            ) : [];
             const actor = cellActors[0];
             const generated = structures.filter(
               (t) => t.x === x && t.z === z,

@@ -1,7 +1,7 @@
 import { SOCKET_RETRY_MS } from "../components/whistle/useSocket";
 import { createTrackingFilter, INVALID_HOLD_MS } from "./tracking-filter";
 import { useCallback, useEffect, useState } from "react";
-import { parseBridgeMessage, TRACKING_TIMEOUT_MS, type PositionMessage, type RangeMessage } from "../lib/uwb/protocol";
+import { HEARTBEAT_FRAME, LINK_TIMEOUT_MS, parseBridgeMessage, TRACKING_TIMEOUT_MS, type PositionMessage, type RangeMessage } from "../lib/uwb/protocol";
 import { solvePosition, type BridgeConfig } from "../lib/uwb/solver";
 import { calibrateAtCentre, correctRanges, type RangeCorrection } from "../lib/uwb/range-calibration";
 
@@ -16,6 +16,7 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
   const [correctionError, setCorrectionError] = useState("");
   const [position, setPosition] = useState<{ value: PositionMessage; calibration: BridgeConfig | null; profile: CorrectionProfile | null } | null>(null);
   const [ranges, setRanges] = useState<RangeMessage | null>(null);
+  const [history, setHistory] = useState<string[]>([]);
   const [status, setStatus] = useState("PC 수신기에 연결되지 않았습니다.");
   const connect = useCallback((url: string, tagId: string) => {
     setPosition(null);
@@ -35,11 +36,31 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
     try {
       const url = new URL(request.url);
       if (!["ws:", "wss:"].includes(url.protocol)) throw new Error();
+      if (autoReconnect) {
+        url.searchParams.set("heartbeat", "1");
+        url.searchParams.set("player", request.tagId);
+      }
       socket = new WebSocket(url);
     } catch { setStatus("수신기 주소가 올바르지 않습니다."); return; }
     let disposed = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let lastReceived = 0;
+    let lastTraffic = performance.now();
+    let lastPositionAt = 0;
+    const historyKey = `whistle.uwb.link:${request.url}:${request.tagId}`;
+    let entries: string[] = [];
+    if (autoReconnect) {
+      try { entries = (sessionStorage.getItem(historyKey) ?? "").split("\n").filter(Boolean).slice(-20); } catch {}
+      setHistory(entries);
+    }
+    const recordLink = (event: string) => {
+      const line = `${new Date().toLocaleTimeString("ko-KR")} · ${event}`;
+      entries = [...entries, line].slice(-20);
+      setHistory(entries);
+      try { sessionStorage.setItem(historyKey, entries.join("\n")); } catch {}
+      console.info("[Whistle:UWB]", request.tagId, line);
+    };
+    let firstPosition = true;
     let lastSequence = -1;
     let rangesOnly = false;
     let previous: PositionMessage | null = null;
@@ -54,6 +75,8 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
     const clear = (message: string) => { cancelHold(); tracking.reset(); lastValid = -Infinity; previous = null; setPosition(null); setRanges(null); setStatus(message); };
     socket.onopen = () => {
       if (disposed) return;
+      lastTraffic = performance.now();
+      if (autoReconnect) recordLink("수신기 연결됨");
       setStatus(`태그 ${request.tagId} 데이터 대기`);
       if (capturing && calibration) captureTimer = setTimeout(() => {
         if (disposed) return;
@@ -66,10 +89,12 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
       }, 5000);
     };
     socket.onmessage = (event) => {
-      if (disposed) return;
+      if (disposed || retryTimer !== undefined) return;
       try {
+        if (event.data === HEARTBEAT_FRAME) { lastTraffic = performance.now(); return; }
         if (typeof event.data !== "string") throw new Error();
         const message = parseBridgeMessage(event.data);
+        lastTraffic = performance.now();
         if (message.tagId !== request.tagId || message.seq <= lastSequence) return;
         lastSequence = message.seq;
         lastReceived = performance.now();
@@ -120,6 +145,11 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
           return;
         }
         cancelHold();
+        lastPositionAt = Date.now();
+        if (autoReconnect && firstPosition) {
+          recordLink("첫 좌표 수신");
+          firstPosition = false;
+        }
         lastValid = performance.now();
         const filtered = tracking.update(message, lastValid);
         if (filtered) setPosition({ value: filtered, calibration, profile: activeProfile });
@@ -127,24 +157,37 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
       } catch { clear("수신 데이터가 올바르지 않습니다."); }
     };
     socket.onerror = () => { if (!disposed) { lastReceived = 0; clear("PC 수신기에 연결할 수 없습니다."); } };
-    socket.onclose = () => {
-      if (disposed) return;
+    const reconnect = (reason: string, code?: number) => {
+      if (disposed || retryTimer !== undefined) return;
       lastReceived = 0;
-      clear(autoReconnect ? "PC 수신기 연결 끊김 · 자동 재연결 중" : "PC 수신기 연결이 끊겼습니다.");
-      if (autoReconnect) {
-        retryTimer = setTimeout(() => {
-          setRequest(current => current === request ? { ...request } : current);
-        }, SOCKET_RETRY_MS);
-      }
+      clear(`${reason} · 자동 재연결 중`);
+      const last = lastPositionAt ? new Date(lastPositionAt).toLocaleTimeString("ko-KR") : "없음";
+      recordLink(`${reason} · ${code === undefined ? "브라우저 감지" : `종료 코드 ${code}`} · 마지막 좌표 ${last}`);
+      retryTimer = setTimeout(() => {
+        setRequest(current => current === request ? { ...request } : current);
+      }, SOCKET_RETRY_MS);
+    };
+    socket.onclose = (event) => {
+      if (disposed) return;
+      if (autoReconnect) reconnect("PC 수신기 연결 끊김", event.code);
+      else { lastReceived = 0; clear("PC 수신기 연결이 끊겼습니다."); }
     };
     const timer = window.setInterval(() => {
+      if (autoReconnect && socket.readyState === WebSocket.OPEN && performance.now() - lastTraffic >= LINK_TIMEOUT_MS) {
+        reconnect("PC 수신기 응답 없음");
+        socket.close(4000, "Heartbeat timeout");
+        return;
+      }
       if (lastReceived && performance.now() - lastReceived > TRACKING_TIMEOUT_MS) {
         lastReceived = 0;
         clear(rangesOnly ? "1초 동안 거리 수신 없음" : "위치를 1초 이상 수신하지 못했습니다.");
       }
     }, 100);
     const connectionTimeout = window.setTimeout(() => {
-      if (socket.readyState === WebSocket.CONNECTING) socket.close();
+      if (socket.readyState === WebSocket.CONNECTING) {
+        if (autoReconnect) reconnect("PC 수신기 연결 시간 초과");
+        socket.close();
+      }
     }, 5000);
     return () => {
       disposed = true;
@@ -161,5 +204,5 @@ export function useDevicePosition(enabled: boolean, calibration: BridgeConfig | 
     corrections: activeProfile?.corrections ?? null, capturing, correctionError,
     calibrate: () => { if (calibration && request) { setCorrectionError(""); setCapture({ calibration, request }); } },
     clearCorrection: () => { setProfile(null); setCapture(null); setCorrectionError(""); },
-    status, connect, disconnect, connected: !!request };
+    status, history, connect, disconnect, connected: !!request };
 }
